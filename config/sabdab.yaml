@@ -1,0 +1,79 @@
+---
+seed: 2025
+load_val_test: True  # True only during training, and False during data pre-processing
+scheme: chothia       # Scheme to use for sequence alignment. Default: chothia
+num_val_cluster: 10
+
+paths:
+    data: /home/jovyan/flow-matching-datavol/data/
+    model: /home/jovyan/flow-matching-datavol/model/
+
+project_name: flow_matching
+model_name: codesign_6CDR_200e
+
+batch_size: 1 # batch size per GPU
+
+trainer:
+    devices: 8
+    max_epochs: 200
+    val_check_interval: 0.5
+    gradient_clip_val: 0.0
+
+design_mode: ["sequence", "backbone"] # ["sequence", "backbone"]
+
+redesign:
+    FRAMEWORK: False
+    HCDR1: True
+    HCDR2: True
+    HCDR3: True
+    LCDR1: True
+    LCDR2: True
+    LCDR3: True
+
+crop: True
+crop_args:
+    max_crop_size: 234 # ideally 192
+    antigen_crop_size: 78 # ideally 64
+
+model:
+    loss_weighting:
+        trans_vf_loss: 1.0
+        rots_vf_loss: 10.0
+        seq_vf_loss: 100.0
+        plddt_loss: 0.01
+        distogram_loss: 0.01
+    learning_rate: 0.0001
+    seed: 42
+
+network:
+    c_s: 96 # default: 384
+    c_z: 32 # default: 128
+    n_condition_module_blocks: 8 # default: 48
+    n_denoising_module_blocks: 4 # default: 24
+    n_confidence_head_blocks: 1 # default: 4
+    n_cycle: 4
+    mini_rollout_steps: 20
+    num_time_steps: 500
+    self_condition_rate: 0.0
+    self_condition_steps: 0
+    label_smoothing: 0.0
+    network_params: # hidden dim is c_hidden * N_head. The principle is to keep hidden dim same as feature dim c_s or c_z
+        Pairformer:
+            TriangleMultiplicationOutgoing:
+                c_hidden: 32 # 128
+            TriangleMultiplicationIncoming:
+                c_hidden: 32 # 128
+            TriangleAttentionStartingNode:
+                c_hidden: 8 # 32
+                N_head: 4
+            TriangleAttentionEndingNode:
+                c_hidden: 8 # 32
+                N_head: 4
+            AttentionPairBias:
+                c_hidden: 16 # 24
+                N_head: 6 # 16
+        InvariantPointAttention:
+            c_hidden: 16
+            N_head: 6 # 12
+            N_query_points: 4
+            N_point_values: 8
