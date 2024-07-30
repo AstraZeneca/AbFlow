@@ -9,9 +9,9 @@ paths:
     model: /home/jovyan/flow-matching-datavol/model/
 
 project_name: flow_matching
-model_name: codesign_6CDR_200e
+model_name: predict_backbone_HCDR3_200e
 
-batch_size: 1 # batch size per GPU
+batch_size: 2 # batch size per GPU
 
 trainer:
     devices: 8
@@ -19,21 +19,21 @@ trainer:
     val_check_interval: 0.5
     gradient_clip_val: 0.0
 
-design_mode: ["sequence", "backbone"] # ["sequence", "backbone"]
+design_mode: ["backbone"] # ["sequence", "backbone"]
 
 redesign:
     FRAMEWORK: False
-    HCDR1: True
-    HCDR2: True
+    HCDR1: False
+    HCDR2: False
     HCDR3: True
-    LCDR1: True
-    LCDR2: True
-    LCDR3: True
+    LCDR1: False
+    LCDR2: False
+    LCDR3: False
 
 crop: True
 crop_args:
-    max_crop_size: 234 # ideally 192
-    antigen_crop_size: 78 # ideally 64
+    max_crop_size: 180 # ideally 192
+    antigen_crop_size: 60 # ideally 64
 
 model:
     loss_weighting:

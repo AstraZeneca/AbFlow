@@ -100,7 +100,7 @@ def get_lddt(
             d_cutoff (float, optional): Distance cutoff for local region.
 
     Returns:
-            torch.Tensor: One hot lDDT scores for each atom, shape (N_batch, N_res, ).
+            torch.Tensor: lDDT scores for each atom, shape (N_batch, N_res, ).
     """
     mask = combine_masks(masks, d_pred)
 
@@ -121,7 +121,7 @@ def get_lddt(
             # Select atoms j in R_i if
             # 1) the distance between atom i and j is less than the cutoff
             # 2) the masked position is 1
-            mask_i = mask[batch, i]
+            mask_i = mask[batch]
 
             R_i = (
                 ((d_dist_gt[batch, i] < d_cutoff) & (mask_i.bool()))

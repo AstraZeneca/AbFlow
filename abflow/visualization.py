@@ -11,8 +11,37 @@ LIGHT_RED = "#ff9896"
 
 plt.rcParams["font.family"] = "DejaVu Sans"
 
+def plot_scatter(pred: torch.Tensor, true: torch.Tensor, x_label = "Pred", y_label = "True", save_path: str = None):
+    """
+    Plot true data against pred data on the resolved region.
 
-def plot_plddt(lddt: torch.Tensor, plddt: torch.Tensor, save_path: str = None):
+    Args:
+        true (torch.Tensor): True data of shape (N_batch,).
+        plddt (torch.Tensor): Pred data of shape (N_batch,).
+        save_path (str, optional): Path to save the figure. Defaults to None.
+    """
+
+    true = np.array(true)
+    pred = np.array(pred)
+
+    plt.figure(figsize=(8, 6))
+    plt.scatter(pred, true, s=50, alpha=0.6, color=DARK_BLUE, edgecolor="black")
+
+    plt.xlabel(x_label, fontsize=25)
+    plt.ylabel(y_label, fontsize=25)
+
+    plt.xticks(fontsize=20)
+    plt.yticks(fontsize=20)
+
+    plt.grid(True)
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path)
+    else:
+        plt.show()
+
+def plot_plddt(plddt: torch.Tensor, lddt: torch.Tensor, save_path: str = None):
     """
     Plot IDDT-Cα against Average pLDDT on the resolved region.
 
@@ -44,7 +73,6 @@ def plot_plddt(lddt: torch.Tensor, plddt: torch.Tensor, save_path: str = None):
         plt.savefig(save_path)
     else:
         plt.show()
-
 
 def plot_aa_distribution(
     pred_seq: torch.Tensor, true_seq: torch.Tensor, save_path: str = None

@@ -227,13 +227,15 @@ def extract_pdb_structure(filepath: str, scheme: str = "chothia"):
     structure = parser.get_structure(None, filepath)
 
     N_coords, CA_coords, C_coords, CB_coords, res_type = [], [], [], [], []
-    cdr_masks = {
+    masks = {
         "HCDR1": [],
         "HCDR2": [],
         "HCDR3": [],
         "LCDR1": [],
         "LCDR2": [],
         "LCDR3": [],
+        "antibody": [],
+        "antigen": [],
     }
 
     for model in structure:
@@ -254,43 +256,51 @@ def extract_pdb_structure(filepath: str, scheme: str = "chothia"):
                     chain_seq += protein_letters_3to1.get(resname, "X")
 
             chain_length = len(chain_seq)
+            antibody_chain_ids = ["H", "L", "K"]
+            is_antibody_chain = chain_id in antibody_chain_ids
+
             HCDR1 = torch.zeros(chain_length, dtype=torch.long)
             HCDR2 = torch.zeros(chain_length, dtype=torch.long)
             HCDR3 = torch.zeros(chain_length, dtype=torch.long)
             LCDR1 = torch.zeros(chain_length, dtype=torch.long)
             LCDR2 = torch.zeros(chain_length, dtype=torch.long)
             LCDR3 = torch.zeros(chain_length, dtype=torch.long)
+            antibody_mask = torch.zeros(chain_length, dtype=torch.long)
+            antigen_mask = torch.ones(chain_length, dtype=torch.long)
 
             try:
                 abchain = abnumber.Chain(chain_seq, scheme=scheme)
+                chain_type = abchain.chain_type
+                antibody_mask = torch.ones(chain_length, dtype=torch.long)
+                antigen_mask = torch.zeros(chain_length, dtype=torch.long)
 
                 for pos in abchain.cdr1_dict.keys():
-                    if abchain.chain_type == "H":
+                    if chain_type == "H":
                         HCDR1[pos.number - 1] = 1  # Adjust index to be 0-based
                     else:
                         LCDR1[pos.number - 1] = 1
                 for pos in abchain.cdr2_dict.keys():
-                    if abchain.chain_type == "H":
+                    if chain_type == "H":
                         HCDR2[pos.number - 1] = 1
                     else:
                         LCDR2[pos.number - 1] = 1
                 for pos in abchain.cdr3_dict.keys():
-                    if abchain.chain_type == "H":
+                    if chain_type == "H":
                         HCDR3[pos.number - 1] = 1
                     else:
                         LCDR3[pos.number - 1] = 1
 
             except abnumber.ChainParseError:
-                print(
-                    f"[INFO] Chain {chain_id} does not contain valid Fv region for scheme {scheme}."
-                )
+                pass
 
-            cdr_masks["HCDR1"].append(HCDR1)
-            cdr_masks["HCDR2"].append(HCDR2)
-            cdr_masks["HCDR3"].append(HCDR3)
-            cdr_masks["LCDR1"].append(LCDR1)
-            cdr_masks["LCDR2"].append(LCDR2)
-            cdr_masks["LCDR3"].append(LCDR3)
+            masks["HCDR1"].append(HCDR1)
+            masks["HCDR2"].append(HCDR2)
+            masks["HCDR3"].append(HCDR3)
+            masks["LCDR1"].append(LCDR1)
+            masks["LCDR2"].append(LCDR2)
+            masks["LCDR3"].append(LCDR3)
+            masks["antibody"].append(antibody_mask)
+            masks["antigen"].append(antigen_mask)
 
     N_coords = np.array(N_coords, dtype=np.float32)
     CA_coords = np.array(CA_coords, dtype=np.float32)
@@ -298,7 +308,7 @@ def extract_pdb_structure(filepath: str, scheme: str = "chothia"):
     CB_coords = np.array(CB_coords, dtype=np.float32)
     res_type = np.array(res_type, dtype=np.int64)
 
-    cdr_masks = {key: torch.cat(value) for key, value in cdr_masks.items()}
+    masks = {key: torch.cat(value) for key, value in masks.items()}
 
     return (
         torch.tensor(N_coords),
@@ -306,5 +316,5 @@ def extract_pdb_structure(filepath: str, scheme: str = "chothia"):
         torch.tensor(C_coords),
         torch.tensor(CB_coords),
         torch.tensor(res_type),
-        cdr_masks,
+        masks,
     )

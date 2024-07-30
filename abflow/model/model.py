@@ -130,9 +130,13 @@ class AbFlow(LightningModule):
             if "sequence" in design_mode
             else torch.tensor(0.0)
         )
-        plddt_loss = get_ce_loss(
+        plddt_loss = (
+            get_ce_loss(
             p_plddt_i, p_lddt_i, [redesign_mask, valid_mask]
-        ).mean()
+        ).mean() 
+        if "backbone" in design_mode
+        else torch.tensor(0.0)
+        ) 
         distogram_loss = get_distogram_loss(
             p_pred_distogram_ij, p_true_distogram_ij, [valid_mask], [valid_mask]
         ).mean()
