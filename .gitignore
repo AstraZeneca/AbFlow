@@ -35,3 +35,4 @@ benchmarks/
 8gpu_cluster.yaml
 nohup.out
 wandb/
+Abflow_evaluate.ipynb
