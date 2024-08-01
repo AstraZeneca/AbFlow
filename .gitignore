@@ -31,8 +31,9 @@ build/
 __pycache__/
 
 # cloned packages
-benchmarks/
+benchmarks/diffab/
 8gpu_cluster.yaml
 nohup.out
 wandb/
 Abflow_evaluate.ipynb
+data/rabd/pdb/

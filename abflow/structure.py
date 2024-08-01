@@ -14,7 +14,7 @@ from Bio.PDB.Residue import Residue
 from Bio.PDB.Structure import Structure as BioPDBStructure
 from Bio.PDB.Polypeptide import protein_letters_3to1
 from pathlib import Path
-from typing import Sequence, Union, Optional
+from typing import Sequence, Union, Optional, Tuple, List
 from e3nn.o3 import axis_angle_to_matrix
 
 from .constants import aa3_index_to_name, aa3_name_to_index, BondAngles, BondLengths
@@ -222,7 +222,7 @@ def write_to_pdb(
     io.save(filepath)
 
 
-def extract_pdb_structure(filepath: str, scheme: str = "chothia"):
+def extract_pdb(filepath: str, scheme: str = "chothia") -> Tuple[torch.Tensor, ...]:
     parser = PDBParser(QUIET=True)
     structure = parser.get_structure(None, filepath)
 
@@ -242,65 +242,95 @@ def extract_pdb_structure(filepath: str, scheme: str = "chothia"):
         for chain in model:
             chain_id = chain.id
             chain_seq = ""
+            (
+                chain_N_coords,
+                chain_CA_coords,
+                chain_C_coords,
+                chain_CB_coords,
+                chain_res_type,
+            ) = ([], [], [], [], [])
+            (
+                chain_HCDR1,
+                chain_HCDR2,
+                chain_HCDR3,
+                chain_LCDR1,
+                chain_LCDR2,
+                chain_LCDR3,
+            ) = ([], [], [], [], [], [])
+            chain_antibody_mask, chain_antigen_mask = [], []
+
             for residue in chain:
                 if "N" in residue and "CA" in residue and "C" in residue:
-                    N_coords.append(residue["N"].get_coord())
-                    CA_coords.append(residue["CA"].get_coord())
-                    C_coords.append(residue["C"].get_coord())
+                    chain_N_coords.append(residue["N"].get_coord())
+                    chain_CA_coords.append(residue["CA"].get_coord())
+                    chain_C_coords.append(residue["C"].get_coord())
                     if residue.get_resname() == "GLY" or "CB" not in residue:
-                        CB_coords.append(residue["CA"].get_coord())  # Glycine case
+                        chain_CB_coords.append(
+                            residue["CA"].get_coord()
+                        )  # Glycine case
                     else:
-                        CB_coords.append(residue["CB"].get_coord())
+                        chain_CB_coords.append(residue["CB"].get_coord())
                     resname = residue.get_resname()
-                    res_type.append(aa3_name_to_index.get(resname, 20))
+                    chain_res_type.append(aa3_name_to_index.get(resname, 20))
                     chain_seq += protein_letters_3to1.get(resname, "X")
 
             chain_length = len(chain_seq)
-            antibody_chain_ids = ["H", "L", "K"]
-            is_antibody_chain = chain_id in antibody_chain_ids
-
-            HCDR1 = torch.zeros(chain_length, dtype=torch.long)
-            HCDR2 = torch.zeros(chain_length, dtype=torch.long)
-            HCDR3 = torch.zeros(chain_length, dtype=torch.long)
-            LCDR1 = torch.zeros(chain_length, dtype=torch.long)
-            LCDR2 = torch.zeros(chain_length, dtype=torch.long)
-            LCDR3 = torch.zeros(chain_length, dtype=torch.long)
-            antibody_mask = torch.zeros(chain_length, dtype=torch.long)
-            antigen_mask = torch.ones(chain_length, dtype=torch.long)
 
             try:
                 abchain = abnumber.Chain(chain_seq, scheme=scheme)
                 chain_type = abchain.chain_type
-                antibody_mask = torch.ones(chain_length, dtype=torch.long)
-                antigen_mask = torch.zeros(chain_length, dtype=torch.long)
+                chain_antibody_mask = [1] * chain_length
+                chain_antigen_mask = [0] * chain_length
 
-                for pos in abchain.cdr1_dict.keys():
-                    if chain_type == "H":
-                        HCDR1[pos.number - 1] = 1  # Adjust index to be 0-based
-                    else:
-                        LCDR1[pos.number - 1] = 1
-                for pos in abchain.cdr2_dict.keys():
-                    if chain_type == "H":
-                        HCDR2[pos.number - 1] = 1
-                    else:
-                        LCDR2[pos.number - 1] = 1
-                for pos in abchain.cdr3_dict.keys():
-                    if chain_type == "H":
-                        HCDR3[pos.number - 1] = 1
-                    else:
-                        LCDR3[pos.number - 1] = 1
+                for residue in chain:
+                    if "N" in residue and "CA" in residue and "C" in residue:
+                        res_seq = residue.id[1]
+
+                        cdr1_residues = {pos.number for pos in abchain.cdr1_dict.keys()}
+                        cdr2_residues = {pos.number for pos in abchain.cdr2_dict.keys()}
+                        cdr3_residues = {pos.number for pos in abchain.cdr3_dict.keys()}
+
+                        if chain_type == "H":
+                            chain_HCDR1.append(1 if res_seq in cdr1_residues else 0)
+                            chain_HCDR2.append(1 if res_seq in cdr2_residues else 0)
+                            chain_HCDR3.append(1 if res_seq in cdr3_residues else 0)
+                            chain_LCDR1.append(0)
+                            chain_LCDR2.append(0)
+                            chain_LCDR3.append(0)
+                        else:
+                            chain_LCDR1.append(1 if res_seq in cdr1_residues else 0)
+                            chain_LCDR2.append(1 if res_seq in cdr2_residues else 0)
+                            chain_LCDR3.append(1 if res_seq in cdr3_residues else 0)
+                            chain_HCDR1.append(0)
+                            chain_HCDR2.append(0)
+                            chain_HCDR3.append(0)
 
             except abnumber.ChainParseError:
-                pass
+                chain_type = None
+                chain_HCDR1 = [0] * chain_length
+                chain_HCDR2 = [0] * chain_length
+                chain_HCDR3 = [0] * chain_length
+                chain_LCDR1 = [0] * chain_length
+                chain_LCDR2 = [0] * chain_length
+                chain_LCDR3 = [0] * chain_length
+                chain_antibody_mask = [0] * chain_length
+                chain_antigen_mask = [1] * chain_length
 
-            masks["HCDR1"].append(HCDR1)
-            masks["HCDR2"].append(HCDR2)
-            masks["HCDR3"].append(HCDR3)
-            masks["LCDR1"].append(LCDR1)
-            masks["LCDR2"].append(LCDR2)
-            masks["LCDR3"].append(LCDR3)
-            masks["antibody"].append(antibody_mask)
-            masks["antigen"].append(antigen_mask)
+            N_coords.extend(chain_N_coords)
+            CA_coords.extend(chain_CA_coords)
+            C_coords.extend(chain_C_coords)
+            CB_coords.extend(chain_CB_coords)
+            res_type.extend(chain_res_type)
+            masks["HCDR1"].append(torch.tensor(chain_HCDR1, dtype=torch.long))
+            masks["HCDR2"].append(torch.tensor(chain_HCDR2, dtype=torch.long))
+            masks["HCDR3"].append(torch.tensor(chain_HCDR3, dtype=torch.long))
+            masks["LCDR1"].append(torch.tensor(chain_LCDR1, dtype=torch.long))
+            masks["LCDR2"].append(torch.tensor(chain_LCDR2, dtype=torch.long))
+            masks["LCDR3"].append(torch.tensor(chain_LCDR3, dtype=torch.long))
+            masks["antibody"].append(
+                torch.tensor(chain_antibody_mask, dtype=torch.long)
+            )
+            masks["antigen"].append(torch.tensor(chain_antigen_mask, dtype=torch.long))
 
     N_coords = np.array(N_coords, dtype=np.float32)
     CA_coords = np.array(CA_coords, dtype=np.float32)

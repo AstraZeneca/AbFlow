@@ -14,50 +14,64 @@ from ..constants import (
     BondLengthStdDevs,
     BondAngles,
     BondAngleStdDevs,
+    Liability,
 )
 
-def kabsch_alignment(P: torch.Tensor, Q: torch.Tensor, masks: list[torch.Tensor] = None):
+
+def kabsch_alignment(
+    P: torch.Tensor, Q: torch.Tensor, masks: list[torch.Tensor] = None
+):
     """
-    Computes the coords of P aligned with Q by optimal rotation and translation for 
-    two sets of points (P -> Q), in a batched manner. Optionally align only for 
-    selected coordinates.  
+    Computes the coords of P aligned with Q by optimal rotation and translation for
+    two sets of points (P -> Q), in a batched manner. Optionally align only for
+    selected coordinates.
 
-    Algorithm adapted from: https://hunterheidenreich.com/posts/kabsch_algorithm/. 
+    Algorithm adapted from: https://hunterheidenreich.com/posts/kabsch_algorithm/.
 
-    :param P: A BxNx3 matrix of points
-    :param Q: A BxNx3 matrix of points
-    :param masks: list of A BxN matrix of 1s and 0s indicating the selected coordinates. 
-    :return: Aligned P points, Q points. Both are centred at the aligned region, 
+    Args:
+        P (torch.Tensor): A BxNx3 matrix of points.
+        Q (torch.Tensor): A BxNx3 matrix of points.
+        masks (list[torch.Tensor], optional): List of masks to apply to first dimension, each shape (B, N).
+
+    Returns:
+        torch.Tensor: Aligned P points, shape (B, N, 3).
+        torch.Tensor: Aligned Q points, shape (B, N, 3).
     """
     assert P.shape == Q.shape, "Matrix dimensions must match"
     mask = combine_masks(masks, P)
-    assert mask.shape == P.shape[:2], "Mask dimensions must match point matrices dimensions BxN"
+    assert (
+        mask.shape == P.shape[:2]
+    ), "Mask dimensions must match point matrices dimensions BxN"
 
     P_selected = P * mask.unsqueeze(-1)
     Q_selected = Q * mask.unsqueeze(-1)
 
     # Compute centroids
-    centroid_P = torch.sum(P_selected, dim=1, keepdim=True) / torch.sum(mask, dim=1, keepdim=True).unsqueeze(-1)  # Bx1x3
-    centroid_Q = torch.sum(Q_selected, dim=1, keepdim=True) / torch.sum(mask, dim=1, keepdim=True).unsqueeze(-1)
+    centroid_P = torch.sum(P_selected, dim=1, keepdim=True) / torch.sum(
+        mask, dim=1, keepdim=True
+    ).unsqueeze(-1)
+    centroid_Q = torch.sum(Q_selected, dim=1, keepdim=True) / torch.sum(
+        mask, dim=1, keepdim=True
+    ).unsqueeze(-1)
 
     # Optimal translation
-    t = centroid_Q - centroid_P  # Bx1x3
-    t = t.squeeze(1)  # Bx3
+    t = centroid_Q - centroid_P
+    t = t.squeeze(1)
 
     # Center the points
-    p = P - centroid_P  # BxNx3
-    q = Q - centroid_Q  # BxNx3
+    p = P - centroid_P
+    q = Q - centroid_Q
 
     # Compute the covariance matrix
     p_masked = p * mask.unsqueeze(-1)
     q_masked = q * mask.unsqueeze(-1)
-    H = torch.matmul(p_masked.transpose(1, 2), q_masked)  # Bx3x3
+    H = torch.matmul(p_masked.transpose(1, 2), q_masked)
 
     # SVD
-    U, S, Vt = torch.linalg.svd(H)  # Bx3x3
+    U, S, Vt = torch.linalg.svd(H)
 
     # Validate right-handed coordinate system
-    d = torch.det(torch.matmul(Vt.transpose(1, 2), U.transpose(1, 2)))  # B
+    d = torch.det(torch.matmul(Vt.transpose(1, 2), U.transpose(1, 2)))
     flip = d < 0.0
     if flip.any().item():
         Vt[flip, -1] *= -1.0
@@ -66,9 +80,10 @@ def kabsch_alignment(P: torch.Tensor, Q: torch.Tensor, masks: list[torch.Tensor]
     R = torch.matmul(Vt.transpose(1, 2), U.transpose(1, 2))
 
     # apply rotation
-    P_rotated = torch.einsum('bij, bnj -> bni', R, p)
+    P_rotated = torch.einsum("bij, bnj -> bni", R, p)
 
     return P_rotated, q
+
 
 def get_aar(
     pred_seq: torch.Tensor,
@@ -92,11 +107,56 @@ def get_aar(
     return aar
 
 
+def get_liability_issues(
+    pred_seq: torch.Tensor,
+    masks: list[torch.Tensor] = None,
+) -> torch.Tensor:
+    """
+    Calculate the liability issues within the CDR regions of the predicted sequence.
+    Flag 1 for each liability issue, 0 otherwise.
+
+    Liability flags are taken from:
+    Satława, Tadeusz, et al.
+    "LAP: Liability Antibody Profiler by sequence & structural mapping of natural and therapeutic antibodies"
+
+    Args:
+        pred_seq (torch.Tensor): Predicted sequence, shape (N_batch, N_res).
+        masks (list[torch.Tensor], optional): List of masks to apply to first dimension, each shape (N_batch, N_res).
+
+    Returns:
+            torch.Tensor: Percentage of residue with liability issues for each complex, shape (N_batch,).
+    """
+    liability_issues = torch.zeros_like(pred_seq, dtype=torch.long)
+
+    for liability in Liability:
+        aa_indices = liability.value
+
+        if len(aa_indices) == 1:
+            aa_index = aa_indices[0]
+            motif_mask = pred_seq == aa_index
+            liability_issues = torch.logical_or(liability_issues, motif_mask).long()
+
+        else:
+            aa_index_1, aa_index_2 = aa_indices
+            motif_mask = (pred_seq[:, :-1] == aa_index_1) & (
+                pred_seq[:, 1:] == aa_index_2
+            )
+            motif_mask = torch.cat(
+                [motif_mask, torch.zeros_like(motif_mask[:, -1:], dtype=torch.bool)],
+                dim=1,
+            )
+            liability_issues = torch.logical_or(liability_issues, motif_mask).long()
+
+    liability_flags = average_data_2d(liability_issues, masks_dim_1=masks)
+
+    return liability_flags
+
+
 def get_rmsd(
     pred_coords: list[torch.Tensor],
     true_coords: list[torch.Tensor],
     masks: list[torch.Tensor] = None,
-    alignment_masks: list[torch.Tensor] = None, 
+    alignment_masks: list[torch.Tensor] = None,
 ) -> torch.Tensor:
     """
     Calculate the root mean squared error (RMSD) between predicted and true coordinates.
@@ -123,14 +183,18 @@ def get_rmsd(
         else None
     )
     alignment_masks = (
-        [torch.repeat_interleave(mask, len(pred_coords), dim=-1) for mask in alignment_masks]
+        [
+            torch.repeat_interleave(mask, len(pred_coords), dim=-1)
+            for mask in alignment_masks
+        ]
         if alignment_masks is not None
         else None
     )
 
-    # optionally apply alignment
     if alignment_masks is not None:
-        pred_coord, true_coord = kabsch_alignment(pred_coord, true_coord, alignment_masks)
+        pred_coord, true_coord = kabsch_alignment(
+            pred_coord, true_coord, alignment_masks
+        )
 
     sq_distance = torch.sum((pred_coord - true_coord) ** 2, dim=-1)
     mean_sq_distance = average_data_2d(sq_distance, masks_dim_1=masks_dim_1)
@@ -168,7 +232,9 @@ def get_tm_score(
         torch.Tensor: TM-score, shape (N_batch,).
     """
     if alignment_masks is not None:
-        pred_coord, true_coord = kabsch_alignment(pred_coord, true_coord, alignment_masks)
+        pred_coord, true_coord = kabsch_alignment(
+            pred_coord, true_coord, alignment_masks
+        )
 
     combined_mask = combine_masks(masks, pred_coord)
 

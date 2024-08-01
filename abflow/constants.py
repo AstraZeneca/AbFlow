@@ -156,3 +156,37 @@ class GlyBBCoords(Enum):
     CA = tuple([0.0, 0.0, 0.0])
     C = tuple([1.517, 0.0, 0.0])
     CB = tuple([0.0, 0.0, 0.0])
+
+
+class Liability(Enum):
+    """
+    Enumeration for antibody liabilities within the CDR regions, with motifs and amino acid indices.
+
+    Liability flags are taken from:
+    Satława, Tadeusz, et al.
+    "LAP: Liability Antibody Profiler by sequence & structural mapping of natural and therapeutic antibodies"
+
+    Examples:
+        DeAmdH_NG: Deamidation (with high severity). Motif pattern: Asparagine followed by Glycine.
+        FragH_DP: Fragmentation (with high severity). Motif pattern: Aspartate followed by Proline
+    """
+
+    DeAmdH_NG = (11, 5)
+    DeAmdH_NS = (11, 15)
+    FragH_DP = (2, 12)
+    Isom_DD = (2, 2)
+    Isom_DG = (2, 5)
+    Isom_DH = (2, 6)
+    Isom_DS = (2, 15)
+    Isom_DT = (2, 16)
+    DeAmdM_NA = (11, 0)
+    DeAmdM_NH = (11, 6)
+    DeAmdM_NN = (11, 11)
+    DeAmdM_NT = (11, 16)
+    Hydro_NP = (11, 12)
+    FragM_TS = (16, 15)
+    TrpOx_W = (18,)
+    MetOx_M = (10,)
+    DeAmdL_SN = (15, 11)
+    DeAmdL_TN = (16, 11)
+    DeAmdL_KN = (8, 11)

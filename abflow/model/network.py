@@ -4,8 +4,8 @@ Contains the Transformer-based architecture (Pairformer + IPA) that predicts SE(
 
 import torch.nn as nn
 import torch
-from typing import Tuple
 
+from typing import Tuple
 from .metrics import get_res_lddt
 from .loss import get_lddt, get_CB_distogram, get_lddt_onehot
 
