@@ -8,6 +8,12 @@ config_files = [
     "configs/test/fixbb.yml",
     "configs/test/strpred.yml",
 ]
+results_dirs = [
+    "results/codesign_single/",
+    "results/fixbb/",
+    "results/strpred/",
+]
+
 
 original_pdb_files = {f for f in os.listdir(pdb_dir) if f.endswith(".pdb")}
 original_working_dir = os.getcwd()
@@ -18,7 +24,21 @@ try:
     for pdb_file in original_pdb_files:
         pdb_file_path = os.path.join(original_working_dir, pdb_dir, pdb_file)
 
-        for config_file in config_files:
+        for config_file, results_dir in zip(config_files, results_dirs):
+
+            # check if the results directory exists
+            if not os.path.exists(results_dir):
+                os.makedirs(results_dir)
+
+            result_file_names = {f.split(".")[0] for f in os.listdir(results_dir)}
+            pdb_file_name = pdb_file.split(".")[0]
+
+            if pdb_file_name in result_file_names:
+                print(
+                    f"Skipping {pdb_file}.pdb as it is already processed in {results_dir}"
+                )
+                continue
+
             command = [
                 "python",
                 "design_pdb.py",

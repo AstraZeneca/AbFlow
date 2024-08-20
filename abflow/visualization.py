@@ -11,7 +11,14 @@ LIGHT_RED = "#ff9896"
 
 plt.rcParams["font.family"] = "DejaVu Sans"
 
-def plot_scatter(pred: torch.Tensor, true: torch.Tensor, x_label = "Pred", y_label = "True", save_path: str = None):
+
+def plot_scatter(
+    pred: torch.Tensor,
+    true: torch.Tensor,
+    x_label="Pred",
+    y_label="True",
+    save_path: str = None,
+):
     """
     Plot true data against pred data on the resolved region.
 
@@ -41,9 +48,10 @@ def plot_scatter(pred: torch.Tensor, true: torch.Tensor, x_label = "Pred", y_lab
     else:
         plt.show()
 
+
 def plot_plddt(plddt: torch.Tensor, lddt: torch.Tensor, save_path: str = None):
     """
-    Plot IDDT-Cα against Average pLDDT on the resolved region.
+    Plot LDDT against Average pLDDT on the resolved region.
 
     Args:
         lddt (torch.Tensor): LDDT scores of shape (N_batch,).
@@ -59,7 +67,7 @@ def plot_plddt(plddt: torch.Tensor, lddt: torch.Tensor, save_path: str = None):
 
     plt.plot([0, 100], [0, 100], linestyle="-", color="gray")
     plt.xlabel("pLDDT", fontsize=25)
-    plt.ylabel("IDDT-Cα", fontsize=25)
+    plt.ylabel("LDDT", fontsize=25)
     plt.xlim(0, 100)
     plt.ylim(0, 100)
 
@@ -73,6 +81,7 @@ def plot_plddt(plddt: torch.Tensor, lddt: torch.Tensor, save_path: str = None):
         plt.savefig(save_path)
     else:
         plt.show()
+
 
 def plot_aa_distribution(
     pred_seq: torch.Tensor, true_seq: torch.Tensor, save_path: str = None
@@ -97,21 +106,21 @@ def plot_aa_distribution(
     axs[0].hist(
         pred_seq, bins=bins, alpha=0.7, color=DARK_BLUE, edgecolor="black", density=True
     )
-    axs[0].set_xlabel("Amino Acids", fontsize=15)
-    axs[0].set_ylabel("Density", fontsize=15)
-    axs[0].set_title("Predicted Amino Acid Distribution", fontsize=18)
+    axs[0].set_xlabel("Amino Acids", fontsize=25)
+    axs[0].set_ylabel("Density", fontsize=25)
+    axs[0].set_title("Designed Sequence Distribution", fontsize=25)
     axs[0].set_xticks(np.arange(20))
-    axs[0].set_xticklabels([aa for aa in AminoAcid1.__members__.keys()], fontsize=12)
+    axs[0].set_xticklabels([aa for aa in AminoAcid1.__members__.keys()], fontsize=14)
     axs[0].grid(True)
 
     # Plot for ground truth sequence
     axs[1].hist(
         true_seq, bins=bins, alpha=0.7, color=DARK_RED, edgecolor="black", density=True
     )
-    axs[1].set_xlabel("Amino Acids", fontsize=15)
-    axs[1].set_title("Ground Truth Amino Acid Distribution", fontsize=18)
+    axs[1].set_xlabel("Amino Acids", fontsize=25)
+    axs[1].set_title("True Sequence Distribution", fontsize=25)
     axs[1].set_xticks(np.arange(20))
-    axs[1].set_xticklabels([aa for aa in AminoAcid1.__members__.keys()], fontsize=12)
+    axs[1].set_xticklabels([aa for aa in AminoAcid1.__members__.keys()], fontsize=14)
     axs[1].grid(True)
 
     plt.tight_layout()

@@ -5,8 +5,7 @@ Contains functions used in validation/testing evaluation metrics calculations.
 import torch
 import torch.nn.functional as F
 
-from .utils import average_data_2d, average_data_3d, combine_masks
-
+from .utils import average_data_2d, combine_masks
 from ..data_utils import combine_coords, mask_data, safe_div
 from ..constants import (
     AtomVanDerWaalRadii,
@@ -108,8 +107,7 @@ def get_aar(
 
 
 def get_liability_issues(
-    pred_seq: torch.Tensor,
-    masks: list[torch.Tensor] = None,
+    pred_seq: torch.Tensor, masks: list[torch.Tensor] = None
 ) -> torch.Tensor:
     """
     Calculate the liability issues within the CDR regions of the predicted sequence.
@@ -124,28 +122,40 @@ def get_liability_issues(
         masks (list[torch.Tensor], optional): List of masks to apply to first dimension, each shape (N_batch, N_res).
 
     Returns:
-            torch.Tensor: Percentage of residue with liability issues for each complex, shape (N_batch,).
+        torch.Tensor: Percentage of residue with liability issues for each complex, shape (N_batch,).
     """
     liability_issues = torch.zeros_like(pred_seq, dtype=torch.long)
 
     for liability in Liability:
         aa_indices = liability.value
+        motif_length = len(aa_indices)
 
-        if len(aa_indices) == 1:
-            aa_index = aa_indices[0]
-            motif_mask = pred_seq == aa_index
-            liability_issues = torch.logical_or(liability_issues, motif_mask).long()
-
-        else:
-            aa_index_1, aa_index_2 = aa_indices
-            motif_mask = (pred_seq[:, :-1] == aa_index_1) & (
-                pred_seq[:, 1:] == aa_index_2
+        motif_mask = torch.ones(
+            pred_seq.shape[0],
+            pred_seq.shape[1] - motif_length + 1,
+            dtype=torch.bool,
+            device=pred_seq.device,
+        )
+        for i, aa_index in enumerate(aa_indices):
+            motif_mask &= (
+                pred_seq[:, i : i + pred_seq.shape[1] - motif_length + 1] == aa_index
             )
+
+        if motif_length > 1:
             motif_mask = torch.cat(
-                [motif_mask, torch.zeros_like(motif_mask[:, -1:], dtype=torch.bool)],
+                [
+                    motif_mask,
+                    torch.zeros(
+                        pred_seq.shape[0],
+                        motif_length - 1,
+                        dtype=torch.bool,
+                        device=pred_seq.device,
+                    ),
+                ],
                 dim=1,
             )
-            liability_issues = torch.logical_or(liability_issues, motif_mask).long()
+
+        liability_issues = torch.logical_or(liability_issues, motif_mask).long()
 
     liability_flags = average_data_2d(liability_issues, masks_dim_1=masks)
 

@@ -100,7 +100,7 @@ def get_lddt(
             d_cutoff (float, optional): Distance cutoff for local region.
 
     Returns:
-            torch.Tensor: lDDT scores for each atom, shape (N_batch, N_res, ).
+            torch.Tensor: lDDT scores for each atom, shape (N_batch, N_res,).
     """
     mask = combine_masks(masks, d_pred)
 

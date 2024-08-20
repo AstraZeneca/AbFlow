@@ -5,8 +5,8 @@ scheme: chothia       # Scheme to use for sequence alignment. Default: chothia
 num_val_cluster: 10
 
 paths:
-    data: /home/jovyan/flow-matching-datavol/data/
-    model: /home/jovyan/flow-matching-datavol/model/
+    data: /scratch/hz362/datavol/data/
+    model: /scratch/hz362/datavol/model/
 
 project_name: flow_matching
 model_name: predict_backbone_HCDR3_200e
