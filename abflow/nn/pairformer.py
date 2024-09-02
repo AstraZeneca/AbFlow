@@ -1,6 +1,6 @@
 """Implementation of Pairformer from AlphaFold 3.
 
-paper: Accurate structure prediction of biomolecular interactions with AlphaFold 3
+paper: Accurate structure prediction of biomolecular interactions with AlphaFold 3
 link: https://www.nature.com/articles/s41586-024-07487-w
 """
 
@@ -8,10 +8,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from einops import rearrange
+
 
 class DropoutRowwise(nn.Module):
     """
-    Apply rowwise dropout where the mask is shared across rows.
+    Rowwise dropout on pair representation.
     """
 
     def __init__(self, p: float):
@@ -20,21 +22,22 @@ class DropoutRowwise(nn.Module):
 
         self.p = p
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, z_ij: torch.Tensor) -> torch.Tensor:
 
         if not self.training or self.p == 0.0:
-            return x
+            return z_ij
 
-        mask = torch.ones((1, x.size(-2), x.size(-1)), device=x.device).bernoulli_(
+        N_batch, N_res, N_res, c_z = z_ij.size()
+        mask = torch.ones((N_batch, 1, N_res, c_z), device=z_ij.device).bernoulli_(
             1 - self.p
         ) / (1 - self.p)
 
-        return x * mask
+        return z_ij * mask
 
 
 class DropoutColumnwise(nn.Module):
     """
-    Apply columnwise dropout where the mask is shared across columns.
+    Columnwise dropout on pair representation.
     """
 
     def __init__(self, p: float):
@@ -43,16 +46,17 @@ class DropoutColumnwise(nn.Module):
 
         self.p = p
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, z_ij: torch.Tensor) -> torch.Tensor:
 
         if not self.training or self.p == 0.0:
-            return x
+            return z_ij
 
-        mask = torch.ones((x.size(-2), 1, x.size(-1)), device=x.device).bernoulli_(
+        N_batch, N_res, N_res, c_z = z_ij.size()
+        mask = torch.ones((N_batch, N_res, 1, c_z), device=z_ij.device).bernoulli_(
             1 - self.p
         ) / (1 - self.p)
 
-        return x * mask
+        return z_ij * mask
 
 
 class Transition(nn.Module):
@@ -87,7 +91,7 @@ class TriangleMultiplicationOutgoing(nn.Module):
     Algorithm 12: Triangular Multiplicative Update using "Outgoing" edges
     """
 
-    def __init__(self, c_z: int, c_hidden: int = 128):
+    def __init__(self, c_z: int, c_hidden: int):
 
         super().__init__()
 
@@ -123,7 +127,7 @@ class TriangleMultiplicationIncoming(nn.Module):
     Algorithm 13: Triangular Multiplicative Update using "Incoming" edges
     """
 
-    def __init__(self, c_z: int, c_hidden: int = 128):
+    def __init__(self, c_z: int, c_hidden: int):
 
         super().__init__()
 
@@ -159,7 +163,7 @@ class TriangleAttentionStartingNode(nn.Module):
     Algorithm 14: Triangular Gated Self-Attention Around Starting Node
     """
 
-    def __init__(self, c_z: int, c_hidden: int = 32, N_head: int = 4):
+    def __init__(self, c_z: int, c_hidden: int, N_head: int):
 
         super().__init__()
 
@@ -184,23 +188,22 @@ class TriangleAttentionStartingNode(nn.Module):
         # Input projections
         z_ij = self.layer_norm(z_ij)
 
-        q_ij = self.linear_q(z_ij).reshape(*z_ij.shape[:-1], self.N_head, self.c_hidden)
-        k_ij = self.linear_k(z_ij).reshape(*z_ij.shape[:-1], self.N_head, self.c_hidden)
-        v_ij = self.linear_v(z_ij).reshape(*z_ij.shape[:-1], self.N_head, self.c_hidden)
+        q_ij = rearrange(self.linear_q(z_ij), "b i j (h d) -> b i j h d", h=self.N_head)
+        k_ij = rearrange(self.linear_k(z_ij), "b i j (h d) -> b i j h d", h=self.N_head)
+        v_ij = rearrange(self.linear_v(z_ij), "b i j (h d) -> b i j h d", h=self.N_head)
 
         b_ij = self.linear_b(z_ij)
-        g_ij = self.sigmoid(self.linear_g(z_ij)).reshape(
-            *z_ij.shape[:-1], self.N_head, self.c_hidden
+        g_ij = rearrange(
+            self.sigmoid(self.linear_g(z_ij)), "b i j (h d) -> b i j h d", h=self.N_head
         )
 
         # Attention
-        scores = (
-            torch.einsum("bijhd,bikhd->bijkh", q_ij, k_ij) / self.c_hidden**0.5
-            + b_ij[:, None, :, :, :]
-        )
+        scores = torch.einsum("bijhd,bikhd->bijkh", q_ij, k_ij) / self.c_hidden**0.5
+        scores = scores + rearrange(b_ij, "b i j h -> b () i j h")
+
         a_ijk = F.softmax(scores, dim=-2)
         o_ij = torch.einsum("bijkh,bikhd->bijhd", a_ijk, v_ij)
-        o_ij = (g_ij * o_ij).reshape(*z_ij.shape[:-1], self.N_head * self.c_hidden)
+        o_ij = rearrange((g_ij * o_ij), "b i j h d -> b i j (h d)")
 
         # Output projection
         z_ij_updated = self.linear_out(o_ij)
@@ -213,7 +216,7 @@ class TriangleAttentionEndingNode(nn.Module):
     Algorithm 15 Triangular gated self-attention around ending node
     """
 
-    def __init__(self, c_z: int, c_hidden: int = 32, N_head: int = 4):
+    def __init__(self, c_z: int, c_hidden: int, N_head: int):
 
         super().__init__()
 
@@ -238,23 +241,22 @@ class TriangleAttentionEndingNode(nn.Module):
         # Input projections
         z_ij = self.layer_norm(z_ij)
 
-        q_ij = self.linear_q(z_ij).reshape(*z_ij.shape[:-1], self.N_head, self.c_hidden)
-        k_ij = self.linear_k(z_ij).reshape(*z_ij.shape[:-1], self.N_head, self.c_hidden)
-        v_ij = self.linear_v(z_ij).reshape(*z_ij.shape[:-1], self.N_head, self.c_hidden)
+        q_ij = rearrange(self.linear_q(z_ij), "b i j (h d) -> b i j h d", h=self.N_head)
+        k_ij = rearrange(self.linear_k(z_ij), "b i j (h d) -> b i j h d", h=self.N_head)
+        v_ij = rearrange(self.linear_v(z_ij), "b i j (h d) -> b i j h d", h=self.N_head)
 
         b_ij = self.linear_b(z_ij)
-        g_ij = self.sigmoid(self.linear_g(z_ij)).reshape(
-            *z_ij.shape[:-1], self.N_head, self.c_hidden
+        g_ij = rearrange(
+            self.sigmoid(self.linear_g(z_ij)), "b i j (h d) -> b i j h d", h=self.N_head
         )
 
         # Attention
-        scores = (
-            torch.einsum("bijhd,bkjhd->bijkh", q_ij, k_ij) / self.c_hidden**0.5
-            + torch.einsum("bkih->bikh", b_ij)[:, :, None, :, :]
-        )
+        scores = torch.einsum("bijhd,bkjhd->bijkh", q_ij, k_ij) / self.c_hidden**0.5
+        scores = scores + rearrange(b_ij, "b k i h -> b i () k h")
+
         a_ijk = F.softmax(scores, dim=-2)
         o_ij = torch.einsum("bijkh,bkjhd->bijhd", a_ijk, v_ij)
-        o_ij = (g_ij * o_ij).reshape(*z_ij.shape[:-1], self.N_head * self.c_hidden)
+        o_ij = rearrange((g_ij * o_ij), "b i j h d -> b i j (h d)")
 
         # Output projection
         z_ij_updated = self.linear_out(o_ij)
@@ -272,14 +274,6 @@ class PairformerStack(nn.Module):
         c_s: int,
         c_z: int,
         n_block: int,
-        tmo_c_hidden: int = 128,
-        tmi_c_hidden: int = 128,
-        tasn_c_hidden: int = 32,
-        tasn_N_head: int = 4,
-        taen_c_hidden: int = 32,
-        taen_N_head: int = 4,
-        apb_c_hidden: int = 24,
-        apb_N_head: int = 16,
     ):
 
         super().__init__()
@@ -292,24 +286,20 @@ class PairformerStack(nn.Module):
         for b in range(n_block):
 
             self.trunk[f"triangle_multiplication_outgoing_{b}"] = (
-                TriangleMultiplicationOutgoing(c_z, c_hidden=tmo_c_hidden)
+                TriangleMultiplicationOutgoing(c_z, c_hidden=c_z)
             )
             self.trunk[f"triangle_multiplication_incoming_{b}"] = (
-                TriangleMultiplicationIncoming(c_z, c_hidden=tmi_c_hidden)
+                TriangleMultiplicationIncoming(c_z, c_hidden=c_z)
             )
             self.trunk[f"triangle_attention_starting_node_{b}"] = (
-                TriangleAttentionStartingNode(
-                    c_z, c_hidden=tasn_c_hidden, N_head=tasn_N_head
-                )
+                TriangleAttentionStartingNode(c_z, c_hidden=max(c_z // 4, 1), N_head=4)
             )
             self.trunk[f"triangle_attention_ending_node_{b}"] = (
-                TriangleAttentionEndingNode(
-                    c_z, c_hidden=taen_c_hidden, N_head=taen_N_head
-                )
+                TriangleAttentionEndingNode(c_z, c_hidden=max(c_z // 4, 1), N_head=4)
             )
             self.trunk[f"transition_z_{b}"] = Transition(c_z)
             self.trunk[f"attention_pair_bias_{b}"] = AttentionPairBias(
-                c_a=c_s, c_s=c_s, c_z=c_z, c_hidden=apb_c_hidden, N_head=apb_N_head
+                c_a=c_s, c_s=c_s, c_z=c_z, c_hidden=max(c_s // 16, 1), N_head=16
             )
             self.trunk[f"transition_s_{b}"] = Transition(c_s)
 
@@ -343,9 +333,7 @@ class AttentionPairBias(nn.Module):
     Algorithm 24: DiffusionAttention with pair bias and mask
     """
 
-    def __init__(
-        self, c_a: int, c_s: int, c_z: int, c_hidden: int = 24, N_head: int = 16
-    ):
+    def __init__(self, c_a: int, c_s: int, c_z: int, c_hidden: int, N_head: int):
 
         super().__init__()
 
@@ -384,19 +372,21 @@ class AttentionPairBias(nn.Module):
         else:
             a_i = self.layer_norm_a(a_i)
 
-        q_i = self.linear_q(a_i).reshape(*a_i.shape[:-1], self.N_head, self.c_hidden)
-        k_i = self.linear_k(a_i).reshape(*a_i.shape[:-1], self.N_head, self.c_hidden)
-        v_i = self.linear_v(a_i).reshape(*a_i.shape[:-1], self.N_head, self.c_hidden)
+        q_i = rearrange(self.linear_q(a_i), "b i (h d) -> b i h d", h=self.N_head)
+        k_i = rearrange(self.linear_k(a_i), "b i (h d) -> b i h d", h=self.N_head)
+        v_i = rearrange(self.linear_v(a_i), "b i (h d) -> b i h d", h=self.N_head)
         b_ij = self.linear_no_bias_b(self.layer_norm_b(z_ij)) + beta_ij
-        g_i = self.sigmoid(self.linear_no_bias_g(a_i)).reshape(
-            *a_i.shape[:-1], self.N_head, self.c_hidden
+        g_i = rearrange(
+            self.sigmoid(self.linear_no_bias_g(a_i)),
+            "b i (h d) -> b i h d",
+            h=self.N_head,
         )
 
         # Attention
         scores = torch.einsum("bihd,bjhd->bijh", q_i, k_i) / self.c_hidden**0.5 + b_ij
         A_ij = F.softmax(scores, dim=-2)
-        attn_output = (torch.einsum("bijh,bjhd->bihd", A_ij, v_i) * g_i).reshape(
-            *a_i.shape[:-1], self.N_head * self.c_hidden
+        attn_output = rearrange(
+            torch.einsum("bijh,bjhd->bihd", A_ij, v_i) * g_i, "b i h d -> b i (h d)"
         )
         a_i = self.linear_no_bias_attn(attn_output)
 

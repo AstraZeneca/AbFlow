@@ -7,6 +7,7 @@ link: https://www.nature.com/articles/s41586-021-03819-2
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from einops import rearrange
 
 from .rigid_utils import Rigid
 
@@ -48,7 +49,7 @@ class InvariantPointAttention(nn.Module):
 
         self.gamma_h = nn.Parameter(torch.randn(1, 1, 1, N_head))
 
-        self.linear_final = nn.Linear(
+        self.linear_output = nn.Linear(
             N_head * c_z + hc + N_head * N_point_values * 3 + N_head * N_point_values,
             c_s,
         )
@@ -63,52 +64,53 @@ class InvariantPointAttention(nn.Module):
         s_i: (N_batch, N_res, c_s)
         z_ij: (N_batch, N_res, N_res, c_z)
 
-        rigid_i: Rigid object with rotation and translation tensors
-        rot: (N_batch, N_res, 3, 3)
+        rigid_i: Rigid object with rotation and translation tensors:
+        rots: (N_batch, N_res, 3, 3)
         trans: (N_batch, N_res, 3)
 
-        Translation unit is nanometers.
+        Translation vectors are in nanometers as the weighting factors w_L and w_C are
+        computed such that all three terms contribute equally and that the resulting variance is 1.
         """
 
-        N_batch, N_res, _ = s_i.shape
+        q_h_i = rearrange(self.linear_q_h(s_i), "b i (h d) -> b i h d", h=self.N_head)
+        k_h_i = rearrange(self.linear_k_h(s_i), "b i (h d) -> b i h d", h=self.N_head)
+        v_h_i = rearrange(self.linear_v_h(s_i), "b i (h d) -> b i h d", h=self.N_head)
 
-        q_h_i = self.linear_q_h(s_i).reshape(N_batch, N_res, self.N_head, self.c_hidden)
-        k_h_i = self.linear_k_h(s_i).reshape(N_batch, N_res, self.N_head, self.c_hidden)
-        v_h_i = self.linear_v_h(s_i).reshape(N_batch, N_res, self.N_head, self.c_hidden)
+        q_hp_i = rearrange(
+            self.linear_q_hp(s_i),
+            "b i (h p d) -> b i h p d",
+            h=self.N_head,
+            p=self.N_query_points,
+        )
+        k_hp_i = rearrange(
+            self.linear_k_hp(s_i),
+            "b i (h p d) -> b i h p d",
+            h=self.N_head,
+            p=self.N_query_points,
+        )
+        v_hp_i = rearrange(
+            self.linear_v_hp(s_i),
+            "b i (h p d) -> b i h p d",
+            h=self.N_head,
+            p=self.N_point_values,
+        )
 
-        q_hp_i = self.linear_q_hp(s_i).reshape(
-            N_batch, N_res, self.N_head, self.N_query_points, 3
-        )
-        k_hp_i = self.linear_k_hp(s_i).reshape(
-            N_batch, N_res, self.N_head, self.N_query_points, 3
-        )
-        v_hp_i = self.linear_v_hp(s_i).reshape(
-            N_batch, N_res, self.N_head, self.N_point_values, 3
-        )
-
-        b_h_ij = self.linear_no_bias_b(z_ij).reshape(*z_ij.shape[:-1], self.N_head)
+        b_h_ij = self.linear_no_bias_b(z_ij)
 
         rigid_hp_i = rigid_i.unsqueeze(-1).unsqueeze(-1)
-        a_h_ij = F.softmax(
-            self.w_L
-            * (
-                1 / self.c_hidden**0.5 * torch.einsum("bihd,bjhd->bijh", q_h_i, k_h_i)
-                + b_h_ij
-                - self.w_C
-                * self.gamma_h
-                / 2
-                * torch.sum(
-                    torch.norm(
-                        rigid_hp_i.apply(q_hp_i)[:, :, None, :, :, :]
-                        - rigid_hp_i.apply(k_hp_i)[:, None, :, :, :, :],
-                        dim=-1,
-                    )
-                    ** 2,
-                    dim=-1,
-                )
-            ),
-            dim=-2,
+        a_s_h_ij = (
+            1 / self.c_hidden**0.5 * torch.einsum("bihd,bjhd->bijh", q_h_i, k_h_i)
         )
+        a_rigid_h_ij = (self.w_C * self.gamma_h / 2) * torch.sum(
+            torch.norm(
+                rigid_hp_i.apply(q_hp_i)[:, :, None, :, :, :]
+                - rigid_hp_i.apply(k_hp_i)[:, None, :, :, :, :],
+                dim=-1,
+            )
+            ** 2,
+            dim=-1,
+        )
+        a_h_ij = F.softmax(self.w_L * (a_s_h_ij + b_h_ij - a_rigid_h_ij), dim=-2)
 
         o_hat_h_i = torch.einsum("bijh,bijd->bihd", a_h_ij, z_ij)
         o_h_i = torch.einsum("bijh, bjhd -> bihd", a_h_ij, v_h_i)
@@ -117,13 +119,13 @@ class InvariantPointAttention(nn.Module):
         )
         o_hp_i_norm = torch.norm(o_hp_i, dim=-1)
 
-        s_hat_i = self.linear_final(
+        s_hat_i = self.linear_output(
             torch.cat(
                 [
-                    o_hat_h_i.reshape(N_batch, N_res, -1),
-                    o_h_i.reshape(N_batch, N_res, -1),
-                    o_hp_i.reshape(N_batch, N_res, -1),
-                    o_hp_i_norm.reshape(N_batch, N_res, -1),
+                    rearrange(o_hat_h_i, "b i h d -> b i (h d)"),
+                    rearrange(o_h_i, "b i h d -> b i (h d)"),
+                    rearrange(o_hp_i, "b i h p d -> b i (h p d)"),
+                    rearrange(o_hp_i_norm, "b i h p -> b i (h p)"),
                 ],
                 dim=-1,
             )
