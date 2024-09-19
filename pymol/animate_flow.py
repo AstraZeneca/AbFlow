@@ -99,7 +99,7 @@ def load_structures(folder_path, time_steps):
 
 
 # \Users\10331\OneDrive\Documents\Cam_MPhil\data\DesAb
-folder_path = "/Users/10331/OneDrive/Documents/Cam_MPhil/data/desabs"
+folder_path = "/Users/10331/OneDrive/Documents/AZ_abflow/desabs"
 time_steps = 500
 
 load_structures(folder_path, time_steps)

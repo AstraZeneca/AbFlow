@@ -98,7 +98,6 @@ class FlowPrediction(nn.Module):
             c_s=c_s,
             c_z=c_z,
             n_block=n_condition_module_blocks,
-            params=network_params,
         )
 
         self.structure_embedder = StructureEmbedder(
@@ -119,7 +118,6 @@ class FlowPrediction(nn.Module):
             c_s=c_s,
             c_z=c_z,
             n_block=n_confidence_head_blocks,
-            params=network_params,
         )
         self.distogram_head = DistogramHead(c_z=c_z)
 

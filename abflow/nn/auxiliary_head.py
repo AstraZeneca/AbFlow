@@ -20,7 +20,6 @@ class ConfidenceHead(nn.Module):
         c_s: int,
         c_z: int,
         n_block: int,
-        params: dict,
     ):
 
         super().__init__()
@@ -30,28 +29,10 @@ class ConfidenceHead(nn.Module):
         self.linear_no_bias_z = nn.Linear(c_z, c_z, bias=False)
         self.linear_no_bias_d = nn.Linear(11, c_z, bias=False)
 
-        pf_params = params["Pairformer"]
-        tmo_c_hidden = pf_params["TriangleMultiplicationOutgoing"]["c_hidden"]
-        tmi_c_hidden = pf_params["TriangleMultiplicationIncoming"]["c_hidden"]
-        tasn_c_hidden = pf_params["TriangleAttentionStartingNode"]["c_hidden"]
-        tasn_N_head = pf_params["TriangleAttentionStartingNode"]["N_head"]
-        taen_c_hidden = pf_params["TriangleAttentionEndingNode"]["c_hidden"]
-        taen_N_head = pf_params["TriangleAttentionEndingNode"]["N_head"]
-        apb_c_hidden = pf_params["AttentionPairBias"]["c_hidden"]
-        apb_N_head = pf_params["AttentionPairBias"]["N_head"]
-
         self.pairformer_stack = PairformerStack(
             c_s,
             c_z,
             n_block=n_block,
-            tmo_c_hidden=tmo_c_hidden,
-            tmi_c_hidden=tmi_c_hidden,
-            tasn_c_hidden=tasn_c_hidden,
-            tasn_N_head=tasn_N_head,
-            taen_c_hidden=taen_c_hidden,
-            taen_N_head=taen_N_head,
-            apb_c_hidden=apb_c_hidden,
-            apb_N_head=apb_N_head,
         )
 
         self.linear_no_bias_plddt = nn.Linear(c_s, 50, bias=False)
