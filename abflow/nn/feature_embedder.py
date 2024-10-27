@@ -6,8 +6,12 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from .flow import CoordinateFlow, SO3Flow, SimplexFlow
-from .so3_utils import rotvec_to_rotmat
+from ..flow.manifold_flow import (
+    OptimalTransportEuclideanFlow,
+    LinearSimplexFlow,
+    LinearSO3Flow,
+    LinearToricFlow,
+)
 
 from ..structure import bb_coords_to_frames
 from ..constants import (
@@ -23,7 +27,6 @@ from ..utils import (
     create_rigid,
     apply_mask,
     mask_data,
-    inv_mask,
 )
 
 
@@ -175,7 +178,7 @@ class InputFeatureEmbedder(nn.Module):
             if "sequence" in design_mode
             else res_type
         )
-        res_type = mask_data(res_type, PAD_TOKEN, inv_mask(valid_mask))
+        res_type = mask_data(res_type, PAD_TOKEN, ~valid_mask)
 
         # mask structure with glycine
         gly_N_coords = torch.tensor(
@@ -211,10 +214,10 @@ class InputFeatureEmbedder(nn.Module):
             if "backbone" in design_mode
             else CB_coords
         )
-        N_coords = apply_mask(N_coords, gly_N_coords, inv_mask(valid_mask))
-        CA_coords = apply_mask(CA_coords, gly_CA_coords, inv_mask(valid_mask))
-        C_coords = apply_mask(C_coords, gly_C_coords, inv_mask(valid_mask))
-        CB_coords = apply_mask(CB_coords, gly_CB_coords, inv_mask(valid_mask))
+        N_coords = apply_mask(N_coords, gly_N_coords, ~valid_mask)
+        CA_coords = apply_mask(CA_coords, gly_CA_coords, ~valid_mask)
+        C_coords = apply_mask(C_coords, gly_C_coords, ~valid_mask)
+        CB_coords = apply_mask(CB_coords, gly_CB_coords, ~valid_mask)
 
         frame_orients, frame_trans = bb_coords_to_frames(N_coords, CA_coords, C_coords)
 
@@ -296,9 +299,9 @@ class StructureEmbedder(nn.Module):
 
         self.linear_no_bias_s = nn.Linear(20 + 1, c_s, bias=False)
 
-        self._translation_flow = CoordinateFlow()
-        self._rotation_flow = SO3Flow()
-        self._sequence_flow = SimplexFlow()
+        self._translation_flow = OptimalTransportEuclideanFlow()
+        self._rotation_flow = LinearSO3Flow()
+        self._sequence_flow = LinearSimplexFlow()
 
     def forward(self, f_star: dict[str, torch.Tensor]):
 

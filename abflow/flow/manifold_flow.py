@@ -37,7 +37,7 @@ from .distributions import (
     UniformSO3,
     UniformToric,
 )
-from ..structure.rotation import rotvecs_mul, rotvec_inv
+from .rotation import rotvecs_mul, rotvec_inv
 
 
 class ManifoldFlow(ABC):
