@@ -16,7 +16,7 @@ from .metrics import (
     get_bb_bond_angle_violation,
     get_bb_bond_length_violation,
 )
-from .loss import get_mse_loss, get_ce_loss, get_distogram_loss
+from .loss import get_mse_loss, get_ce_loss
 from .utils import concat_dicts
 
 from ..constants import CDRName
@@ -135,8 +135,10 @@ class AbFlow(LightningModule):
             if "backbone" in design_mode
             else torch.tensor(0.0)
         )
-        distogram_loss = get_distogram_loss(
-            p_pred_distogram_ij, p_true_distogram_ij, [valid_mask], [valid_mask]
+        distogram_loss = get_ce_loss(
+            p_pred_distogram_ij,
+            p_true_distogram_ij,
+            [valid_mask[:, None, :], valid_mask[:, :, None]],
         ).mean()
 
         trans_vf_loss = trans_vf_loss * self._loss_weighting["trans_vf_loss"]

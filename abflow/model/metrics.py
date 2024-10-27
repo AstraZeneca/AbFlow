@@ -54,7 +54,7 @@ def get_liability_issues(
 
     Args:
         pred_seq (torch.Tensor): Predicted sequence, shape (N_batch, N_res).
-        masks (list[torch.Tensor], optional): List of masks to apply to first dimension, each shape (N_batch, N_res).
+        masks (List[torch.Tensor], optional): List of masks to apply to first dimension, each shape (N_batch, N_res).
 
     Returns:
         torch.Tensor: Percentage of residue with liability issues for each complex, shape (N_batch,).
@@ -267,8 +267,8 @@ def get_bb_clash_violation(
     N_coords: torch.Tensor,
     CA_coords: torch.Tensor,
     C_coords: torch.Tensor,
-    masks_dim_1: list[torch.Tensor] = None,
-    masks_dim_2: list[torch.Tensor] = None,
+    masks_dim_1: List[torch.Tensor] = None,
+    masks_dim_2: List[torch.Tensor] = None,
     tolerance: float = 1.5,
 ) -> torch.Tensor:
     """
@@ -285,8 +285,8 @@ def get_bb_clash_violation(
         CA_coords (torch.Tensor): Predicted CA coordinates, shape (N_batch, N_res, 3).
         C_coords (torch.Tensor): Predicted C coordinates, shape (N_batch, N_res, 3).
         tolerance (float, optional): Tolerance for clash detection. Defaults to 1.5.
-        masks_dim_1 (list[torch.Tensor]): List of masks to apply to the first residue dimension, each shape (N_batch, N_res).
-        masks_dim_2 (list[torch.Tensor]): List of masks to apply to the second residue dimension, each shape (N_batch, N_res).
+        masks_dim_1 (List[torch.Tensor]): List of masks to apply to the first residue dimension, each shape (N_batch, N_res).
+        masks_dim_2 (List[torch.Tensor]): List of masks to apply to the second residue dimension, each shape (N_batch, N_res).
 
     Returns:
         torch.Tensor: Backbone clash loss for each complex, shape (N_batch,).
@@ -345,7 +345,7 @@ def get_bb_bond_angle_violation(
     N_coords: torch.Tensor,
     CA_coords: torch.Tensor,
     C_coords: torch.Tensor,
-    masks: list[torch.Tensor] = None,
+    masks: List[torch.Tensor] = None,
     num_stds: float = 12,
 ) -> torch.Tensor:
     """
@@ -410,7 +410,7 @@ def get_bb_bond_length_violation(
     N_coords: torch.Tensor,
     CA_coords: torch.Tensor,
     C_coords: torch.Tensor,
-    masks: list[torch.Tensor] = None,
+    masks: List[torch.Tensor] = None,
     num_stds: float = 12,
 ) -> torch.Tensor:
     """
@@ -462,8 +462,8 @@ def get_total_violation(
     N_coords: torch.Tensor,
     CA_coords: torch.Tensor,
     C_coords: torch.Tensor,
-    masks_dim_1: list[torch.Tensor] = None,
-    masks_dim_2: list[torch.Tensor] = None,
+    masks_dim_1: List[torch.Tensor] = None,
+    masks_dim_2: List[torch.Tensor] = None,
 ) -> torch.Tensor:
     """
     Identifies whether each structure in the batch has any structural violation,
@@ -535,7 +535,7 @@ def get_res_lddt(p_i: torch.Tensor) -> torch.Tensor:
     - \( p_{i}^{b} \) is the probability for bin \( b \) for atom \( i \).
 
     Args:
-        p_i (torch.Tensor): One hot / predicted probabilities for each bin, shape (N_batch, N_res, 50).
+        p_i: One hot / predicted probabilities for each bin, shape (N_batch, N_res, 50).
 
     Returns:
         torch.Tensor: LDDT / pLDDT scores for each atom, shape (N_batch, N_res).
@@ -548,14 +548,14 @@ def get_res_lddt(p_i: torch.Tensor) -> torch.Tensor:
 
 
 def get_batch_lddt(
-    lddt: torch.Tensor, masks: list[torch.Tensor] = None
+    lddt: torch.Tensor, masks: List[torch.Tensor] = None
 ) -> torch.Tensor:
     """
     Compute the mean lddt/pLDDT score per protein complex.
 
     Args:
-        lddt (torch.Tensor): pLDDT scores per residue, shape (N_batch, N_res).
-        masks (list[torch.Tensor], optional): List of masks to apply, each shape (N_batch, N_res).
+        lddt: pLDDT scores per residue, shape (N_batch, N_res).
+        masks: List of masks to apply, each shape (N_batch, N_res).
 
     Returns:
         torch.Tensor: Mean pLDDT scores for each complex, shape (N_batch,).
