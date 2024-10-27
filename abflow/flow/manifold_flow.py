@@ -160,10 +160,16 @@ class EuclideanFlow(ManifoldFlow, ABC):
 
 class OptimalTransportEuclideanFlow(EuclideanFlow):
     """
-    Optimal transport flow path
+    Optimal transport flow path in R^n. The Linear schedule here is flow matching in Lipman et al paper
+    and 1-st rectified flow in Liu et al paper if reflow is not used. Note improving inference speed is
+    not the focus and generation quality were found to degrade for k-th rectified flow with
+    k > 1 (Table 1 in Liu et al paper).
 
     paper: Flow Matching for Generative Modelling, ICLR, Lipman et al.
     link: https://arxiv.org/abs/2210.02747
+    paper: Flow Straight and Fast: Learning to Generate and Transfer Data with Rectified
+            Flow, ICLR, Liu et al.
+    link: https://arxiv.org/abs/2209.03003
     """
 
     def __init__(
