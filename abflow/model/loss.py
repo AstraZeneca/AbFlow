@@ -4,41 +4,39 @@ Contains functions used in AbFlow loss calculations.
 
 import torch
 import torch.nn as nn
+from typing import List
 
-from ..utils import average_data_2d
-
-from ..utils import combine_masks
-
-from ..utils import average_data_3d
+from ..utils import combine_masks, average_data
 from ..nn.feature_embedder import one_hot
 
 
 def get_mse_loss(
-    pred: torch.Tensor, true: torch.Tensor, masks: list[torch.Tensor] = None
+    pred: torch.Tensor,
+    true: torch.Tensor,
+    masks: List[torch.Tensor] = None,
 ) -> torch.Tensor:
     """
     Compute mean squared error loss between predicted and true values.
 
     Args:
-        pred (torch.Tensor): Predicted values, shape (N_batch, N_res, c)
-        true (torch.Tensor): True values, same shape as pred.
-        masks (torch.Tensor, optional): List of masks with 1 to include and 0 to exclude positions in the loss
-                            calculation, each of shape (N_batch, N_res).
+        pred: Predicted values, shape (N_batch, ...).
+        true: True values, same shape as pred.
+        masks: A list of boolean masks.
 
     Returns:
         torch.Tensor: Mean squared error loss, shape (N_batch,).
     """
     mse_loss_fn = nn.MSELoss(reduction="none")
-    mse_loss = mse_loss_fn(pred, true).mean(dim=-1)
-    mse_loss = average_data_2d(mse_loss, masks_dim_1=masks)
+    mse_loss = mse_loss_fn(pred, true)
+    mse_loss = average_data(mse_loss, masks=masks)
 
     return mse_loss
 
 
 def get_ce_loss(
-    pred_probs: torch.Tensor,
-    true_one_hot: torch.Tensor,
-    masks: list[torch.Tensor] = None,
+    pred: torch.Tensor,
+    true: torch.Tensor,
+    masks: List[torch.Tensor] = None,
 ) -> torch.Tensor:
     """
     Compute cross-entropy loss between predicted probabilities and true one-hot values, using the formula:
@@ -48,33 +46,18 @@ def get_ce_loss(
     \]
 
     Args:
-        pred_probs (torch.Tensor): Predicted softmaxed probabilities, shape (N_batch, N_res, c).
-        true_one_hot (torch.Tensor): True values, one-hot encoded, shape (N_batch, N_res, c).
-        masks (torch.Tensor, optional): List of masks with 1 to include and 0 to exclude positions in the loss
-                            calculation, each of shape (N_batch, N_res).
+        pred: Predicted softmaxed probabilities, shape (N_batch, ..., c).
+        true: True values, one-hot encoded, shape (N_batch, ..., c).
+        batch: Batch tensor, shape (N_batch,).
+        masks: A list of boolean masks.
 
     Returns:
-        torch.Tensor: Cross-entropy loss, shape (N_batch,).
+        ce_loss: Cross-entropy loss, shape (N_batch,).
     """
-    neg_log_probs = -torch.sum(true_one_hot * torch.log(pred_probs + 1e-8), dim=-1)
-    ce_loss = average_data_2d(neg_log_probs, masks_dim_1=masks)
+    neg_log_probs = -torch.sum(true * torch.log(pred + 1e-8), dim=-1)
+    ce_loss = average_data(neg_log_probs, masks=masks)
 
     return ce_loss
-
-
-def get_distogram_loss(
-    pred_probs: torch.Tensor,
-    true_one_hot: torch.Tensor,
-    masks_dim_1: list[torch.Tensor] = None,
-    masks_dim_2: list[torch.Tensor] = None,
-) -> torch.Tensor:
-
-    neg_log_probs = -torch.sum(true_one_hot * torch.log(pred_probs + 1e-8), dim=-1)
-    distogram_loss = average_data_3d(
-        neg_log_probs, masks_dim_1=masks_dim_1, masks_dim_2=masks_dim_2
-    )
-
-    return distogram_loss
 
 
 def get_lddt(
