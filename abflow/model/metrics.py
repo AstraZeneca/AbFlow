@@ -263,49 +263,6 @@ def get_tm_score(
     return tm_score
 
 
-def get_res_lddt(p_i: torch.Tensor) -> torch.Tensor:
-    """
-    Compute the LDDT/pLDDT score during inference as the weighted average of the bin centers (1, 3, etc).
-
-    \[
-    \text{plddt}_{i} = \sum_{b=1}^{50} c_b p_{i}^{b}
-    \]
-
-    where:
-    - \( c_b \) are the center values of the bins.
-    - \( p_{i}^{b} \) is the probability for bin \( b \) for atom \( i \).
-
-    Args:
-        p_i (torch.Tensor): One hot / predicted probabilities for each bin, shape (N_batch, N_res, 50).
-
-    Returns:
-        torch.Tensor: LDDT / pLDDT scores for each atom, shape (N_batch, N_res).
-    """
-    bins = torch.linspace(0, 100, steps=51, device=p_i.device)
-    bin_centers = (bins[1:] + bins[:-1]) / 2
-    lddt_scores = torch.sum(p_i * bin_centers[None, None, :], dim=-1)
-
-    return lddt_scores
-
-
-def get_batch_lddt(
-    lddt: torch.Tensor, masks: list[torch.Tensor] = None
-) -> torch.Tensor:
-    """
-    Compute the mean lddt/pLDDT score per protein complex.
-
-    Args:
-        lddt (torch.Tensor): pLDDT scores per residue, shape (N_batch, N_res).
-        masks (list[torch.Tensor], optional): List of masks to apply, each shape (N_batch, N_res).
-
-    Returns:
-        torch.Tensor: Mean pLDDT scores for each complex, shape (N_batch,).
-    """
-    mean_lddt_scores = average_data(lddt, masks=masks)
-
-    return mean_lddt_scores
-
-
 def get_bb_clash_violation(
     N_coords: torch.Tensor,
     CA_coords: torch.Tensor,
@@ -535,3 +492,74 @@ def get_total_violation(
     ).float()
 
     return violation
+
+
+def get_sidechain_mae(
+    pred_dihedral_angles: torch.Tensor,
+    true_dihedral_angles: torch.Tensor,
+    masks: List[torch.Tensor] = None,
+) -> torch.Tensor:
+    """
+    Calculate the mean absolute error (MAE) between predicted and true dihedral angles.
+    These predictions are assumed for the same amino acid sequences.
+    Sidechain MAE is calculated as:
+
+    \[
+    \text{MAE} = \frac{1}{N} \sum_{i=1}^{N} \left| \text{pred\_angle}_i - \text{true\_angle}_i \right|
+    \]
+
+    Args:
+        pred_dihedral_angles: Predicted dihedral angles, shape (N_batch, N_res, 4).
+        true_dihedral_angles: True dihedral angles, shape (N_batch, N_res, 4).
+        masks: List of masks to apply, each shape (N_batch, N_res) or (N_batch, N_res, 4) for sidechain masks.
+
+    Returns:
+        torch.Tensor: Sidechain MAE score, shape (N_batch,).
+    """
+    diff = torch.abs(pred_dihedral_angles - true_dihedral_angles)
+    sidechain_mae = average_data(diff, masks=masks)
+
+    return sidechain_mae
+
+
+def get_res_lddt(p_i: torch.Tensor) -> torch.Tensor:
+    """
+    Compute the LDDT/pLDDT score during inference as the weighted average of the bin centers (1, 3, etc).
+
+    \[
+    \text{plddt}_{i} = \sum_{b=1}^{50} c_b p_{i}^{b}
+    \]
+
+    where:
+    - \( c_b \) are the center values of the bins.
+    - \( p_{i}^{b} \) is the probability for bin \( b \) for atom \( i \).
+
+    Args:
+        p_i (torch.Tensor): One hot / predicted probabilities for each bin, shape (N_batch, N_res, 50).
+
+    Returns:
+        torch.Tensor: LDDT / pLDDT scores for each atom, shape (N_batch, N_res).
+    """
+    bins = torch.linspace(0, 100, steps=51, device=p_i.device)
+    bin_centers = (bins[1:] + bins[:-1]) / 2
+    lddt_scores = torch.sum(p_i * bin_centers[None, None, :], dim=-1)
+
+    return lddt_scores
+
+
+def get_batch_lddt(
+    lddt: torch.Tensor, masks: list[torch.Tensor] = None
+) -> torch.Tensor:
+    """
+    Compute the mean lddt/pLDDT score per protein complex.
+
+    Args:
+        lddt (torch.Tensor): pLDDT scores per residue, shape (N_batch, N_res).
+        masks (list[torch.Tensor], optional): List of masks to apply, each shape (N_batch, N_res).
+
+    Returns:
+        torch.Tensor: Mean pLDDT scores for each complex, shape (N_batch,).
+    """
+    mean_lddt_scores = average_data(lddt, masks=masks)
+
+    return mean_lddt_scores
