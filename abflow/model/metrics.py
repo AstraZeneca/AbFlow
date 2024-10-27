@@ -4,9 +4,9 @@ Contains functions used in validation/testing evaluation metrics calculations.
 
 import torch
 import torch.nn.functional as F
+from typing import List
 
-from ..utils import average_data_2d
-from ..utils import combine_coords, combine_masks, mask_data, safe_div
+from ..utils import combine_coords, combine_masks, mask_data, average_data
 from ..constants import (
     AtomVanDerWaalRadii,
     BondLengths,
@@ -18,7 +18,7 @@ from ..constants import (
 
 
 def kabsch_alignment(
-    P: torch.Tensor, Q: torch.Tensor, masks: list[torch.Tensor] = None
+    P: torch.Tensor, Q: torch.Tensor, masks: List[torch.Tensor] = None
 ):
     """
     Computes the coords of P aligned with Q by optimal rotation and translation for
@@ -28,30 +28,28 @@ def kabsch_alignment(
     Algorithm adapted from: https://hunterheidenreich.com/posts/kabsch_algorithm/.
 
     Args:
-        P (torch.Tensor): A BxNx3 matrix of points.
-        Q (torch.Tensor): A BxNx3 matrix of points.
-        masks (list[torch.Tensor], optional): List of masks to apply to first dimension, each shape (B, N).
+        P: A BxNx3 matrix of points.
+        Q: A BxNx3 matrix of points.
+        masks: List of masks to apply to first dimension, each shape (B, N).
 
     Returns:
-        torch.Tensor: Aligned P points, shape (B, N, 3).
-        torch.Tensor: Aligned Q points, shape (B, N, 3).
+            torch.Tensor: Aligned P points, shape (B, N, 3).
+            torch.Tensor: Aligned Q points, shape (B, N, 3).
     """
     assert P.shape == Q.shape, "Matrix dimensions must match"
     mask = combine_masks(masks, P)
-    assert (
-        mask.shape == P.shape[:2]
-    ), "Mask dimensions must match point matrices dimensions BxN"
+    assert mask.shape == P.shape, "Mask dimensions must match point matrices (B, N, 3)"
 
-    P_selected = P * mask.unsqueeze(-1)
-    Q_selected = Q * mask.unsqueeze(-1)
+    P_selected = P * mask
+    Q_selected = Q * mask
 
     # Compute centroids
     centroid_P = torch.sum(P_selected, dim=1, keepdim=True) / torch.sum(
         mask, dim=1, keepdim=True
-    ).unsqueeze(-1)
+    )
     centroid_Q = torch.sum(Q_selected, dim=1, keepdim=True) / torch.sum(
         mask, dim=1, keepdim=True
-    ).unsqueeze(-1)
+    )
 
     # Optimal translation
     t = centroid_Q - centroid_P
@@ -62,8 +60,8 @@ def kabsch_alignment(
     q = Q - centroid_Q
 
     # Compute the covariance matrix
-    p_masked = p * mask.unsqueeze(-1)
-    q_masked = q * mask.unsqueeze(-1)
+    p_masked = p * mask
+    q_masked = q * mask
     H = torch.matmul(p_masked.transpose(1, 2), q_masked)
 
     # SVD
