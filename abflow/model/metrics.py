@@ -14,7 +14,89 @@ from ..constants import (
     BondAngles,
     BondAngleStdDevs,
     Liability,
+    AminoAcid1,
 )
+
+
+def get_aar(
+    pred_seq: torch.Tensor,
+    true_seq: torch.Tensor,
+    masks: List[torch.Tensor] = None,
+) -> torch.Tensor:
+    """
+    Calculate the AAR between predicted and true sequences.
+
+    Args:
+        pred_seq: Predicted sequence, shape (N_batch, N_res).
+        true_seq: True sequence, shape (N_batch, N_res).
+        batch: Batch tensor, shape (N_batch,).
+        masks: List of masks to apply to first dimension, each shape less than or equal to (N_batch, N_res).
+
+    Returns:
+        torch.Tensor: AAR score, shape (N_batch,).
+    """
+    pred_equal = (pred_seq == true_seq).float()
+    aar = average_data(pred_equal, masks=masks)
+
+    return aar
+
+
+def get_liability_issues(
+    pred_seq: torch.Tensor, masks: List[torch.Tensor] = None
+) -> torch.Tensor:
+    """
+    Calculate the liability issues within the CDR regions of the predicted sequence.
+    Flag 1 for each liability issue, 0 otherwise.
+
+    Liability flags are taken from:
+    Satława, Tadeusz, et al.
+    "LAP: Liability Antibody Profiler by sequence & structural mapping of natural and therapeutic antibodies"
+
+    Args:
+        pred_seq (torch.Tensor): Predicted sequence, shape (N_batch, N_res).
+        masks (list[torch.Tensor], optional): List of masks to apply to first dimension, each shape (N_batch, N_res).
+
+    Returns:
+        torch.Tensor: Percentage of residue with liability issues for each complex, shape (N_batch,).
+    """
+    N_batch, N_res = pred_seq.shape
+    liability_issues = torch.zeros_like(pred_seq, dtype=torch.long)
+
+    for liability in Liability:
+
+        aa_indices = [AminoAcid1[aa].value for aa in liability.value]
+        motif_length = len(aa_indices)
+
+        motif_mask = torch.ones(
+            N_batch,
+            N_res - motif_length + 1,
+            dtype=torch.bool,
+            device=pred_seq.device,
+        )
+        for i, aa_index in enumerate(aa_indices):
+            motif_mask &= (
+                pred_seq[:, i : i + pred_seq.shape[1] - motif_length + 1] == aa_index
+            )
+
+        if motif_length > 1:
+            motif_mask = torch.cat(
+                [
+                    motif_mask,
+                    torch.zeros(
+                        N_batch,
+                        motif_length - 1,
+                        dtype=torch.bool,
+                        device=pred_seq.device,
+                    ),
+                ],
+                dim=1,
+            )
+
+        liability_issues = torch.logical_or(liability_issues, motif_mask).long()
+
+    liability_flags = average_data(liability_issues, masks=masks)
+
+    return liability_flags
 
 
 def kabsch_alignment(
@@ -82,89 +164,11 @@ def kabsch_alignment(
     return P_rotated, q
 
 
-def get_aar(
-    pred_seq: torch.Tensor,
-    true_seq: torch.Tensor,
-    masks: list[torch.Tensor] = None,
-) -> torch.Tensor:
-    """
-    Calculate the AAR between predicted and true sequences.
-
-    Args:
-        pred_seq (torch.Tensor): Predicted sequence, shape (N_batch, N_res).
-        true_seq (torch.Tensor): True sequence, shape (N_batch, N_res).
-        masks (list[torch.Tensor], optional): List of masks to apply to first dimension, each shape (N_batch, N_res).
-
-    Returns:
-        torch.Tensor: AAR score, shape (N_batch,).
-    """
-    pred_equal = (pred_seq == true_seq).float()
-    aar = average_data_2d(pred_equal, masks_dim_1=masks)
-
-    return aar
-
-
-def get_liability_issues(
-    pred_seq: torch.Tensor, masks: list[torch.Tensor] = None
-) -> torch.Tensor:
-    """
-    Calculate the liability issues within the CDR regions of the predicted sequence.
-    Flag 1 for each liability issue, 0 otherwise.
-
-    Liability flags are taken from:
-    Satława, Tadeusz, et al.
-    "LAP: Liability Antibody Profiler by sequence & structural mapping of natural and therapeutic antibodies"
-
-    Args:
-        pred_seq (torch.Tensor): Predicted sequence, shape (N_batch, N_res).
-        masks (list[torch.Tensor], optional): List of masks to apply to first dimension, each shape (N_batch, N_res).
-
-    Returns:
-        torch.Tensor: Percentage of residue with liability issues for each complex, shape (N_batch,).
-    """
-    liability_issues = torch.zeros_like(pred_seq, dtype=torch.long)
-
-    for liability in Liability:
-        aa_indices = liability.value
-        motif_length = len(aa_indices)
-
-        motif_mask = torch.ones(
-            pred_seq.shape[0],
-            pred_seq.shape[1] - motif_length + 1,
-            dtype=torch.bool,
-            device=pred_seq.device,
-        )
-        for i, aa_index in enumerate(aa_indices):
-            motif_mask &= (
-                pred_seq[:, i : i + pred_seq.shape[1] - motif_length + 1] == aa_index
-            )
-
-        if motif_length > 1:
-            motif_mask = torch.cat(
-                [
-                    motif_mask,
-                    torch.zeros(
-                        pred_seq.shape[0],
-                        motif_length - 1,
-                        dtype=torch.bool,
-                        device=pred_seq.device,
-                    ),
-                ],
-                dim=1,
-            )
-
-        liability_issues = torch.logical_or(liability_issues, motif_mask).long()
-
-    liability_flags = average_data_2d(liability_issues, masks_dim_1=masks)
-
-    return liability_flags
-
-
 def get_rmsd(
-    pred_coords: list[torch.Tensor],
-    true_coords: list[torch.Tensor],
-    masks: list[torch.Tensor] = None,
-    alignment_masks: list[torch.Tensor] = None,
+    pred_coords: List[torch.Tensor],
+    true_coords: List[torch.Tensor],
+    masks: List[torch.Tensor] = None,
+    alignment_masks: List[torch.Tensor] = None,
 ) -> torch.Tensor:
     """
     Calculate the root mean squared error (RMSD) between predicted and true coordinates.
@@ -176,16 +180,18 @@ def get_rmsd(
     \]
 
     Args:
-        pred_coords (list[torch.Tensor]): List of predicted coordinates, each shape (N_batch, N_res, 3).
-        true_coords (list[torch.Tensor]): List of true coordinates, each shape (N_batch, N_res, 3).
-        masks (list[torch.Tensor], optional): List of masks to apply, each shape (N_batch, N_res).
+        pred_coords: List of predicted coordinates, each shape (N_batch, N_res, 3).
+        true_coords: List of true coordinates, each shape (N_batch, N_res, 3).
+        masks: List of masks to apply, each shape (N_batch, N_res).
+        alignment_masks: List of masks to apply for alignment, each shape (N_batch, N_res).
 
     Returns:
         torch.Tensor: RMSD score, shape (N_batch,).
     """
+
     pred_coord = combine_coords(*pred_coords)
     true_coord = combine_coords(*true_coords)
-    masks_dim_1 = (
+    masks = (
         [torch.repeat_interleave(mask, len(pred_coords), dim=-1) for mask in masks]
         if masks is not None
         else None
@@ -205,17 +211,17 @@ def get_rmsd(
         )
 
     sq_distance = torch.sum((pred_coord - true_coord) ** 2, dim=-1)
-    mean_sq_distance = average_data_2d(sq_distance, masks_dim_1=masks_dim_1)
+    mean_sq_distance = average_data(sq_distance, masks=masks)
     rmsd = torch.sqrt(mean_sq_distance)
 
     return rmsd
 
 
 def get_tm_score(
-    pred_coord: list[torch.Tensor],
-    true_coord: list[torch.Tensor],
-    masks: list[torch.Tensor] = None,
-    alignment_masks: list[torch.Tensor] = None,
+    pred_coord: List[torch.Tensor],
+    true_coord: List[torch.Tensor],
+    masks: List[torch.Tensor] = None,
+    alignment_masks: List[torch.Tensor] = None,
 ) -> torch.Tensor:
     """
     Calculate the TM-score between predicted and true coordinates. Typically CA atoms are used.
@@ -232,9 +238,9 @@ def get_tm_score(
     the target protein to 19 to avoid negative or undefined values for very short proteins.
 
     Args:
-        pred_coords (torch.Tensor): Predicted coordinates, shape (N_batch, N_res, 3).
-        true_coords (torch.Tensor): True coordinates, shape (N_batch, N_res, 3).
-        masks (list[torch.Tensor], optional): List of masks to apply, each shape (N_batch, N_res).
+        pred_coords: Predicted coordinates, shape (N_batch, N_res, 3).
+        true_coords: True coordinates, shape (N_batch, N_res, 3).
+        masks: List of masks to apply, each shape (N_batch, N_res).
 
     Returns:
         torch.Tensor: TM-score, shape (N_batch,).
@@ -252,7 +258,7 @@ def get_tm_score(
     dist = torch.sqrt(torch.sum((pred_coord - true_coord) ** 2, dim=-1))
     tm_score_res = 1 / (1 + (dist / d0.unsqueeze(-1)) ** 2)
 
-    tm_score = average_data_2d(tm_score_res, masks_dim_1=masks)
+    tm_score = average_data(tm_score_res, masks=masks)
 
     return tm_score
 
@@ -295,7 +301,7 @@ def get_batch_lddt(
     Returns:
         torch.Tensor: Mean pLDDT scores for each complex, shape (N_batch,).
     """
-    mean_lddt_scores = average_data_2d(lddt, masks_dim_1=masks)
+    mean_lddt_scores = average_data(lddt, masks=masks)
 
     return mean_lddt_scores
 
@@ -367,12 +373,13 @@ def get_bb_clash_violation(
         + N_C_clash_loss
         + CA_C_clash_loss
     )
-    masks_dim_2 = combine_masks(masks_dim_2, total_clash_loss)[:, None, :]
-    total_clash_loss = safe_div(total_clash_loss.sum(dim=-1), masks_dim_2.sum(dim=-1))
+    masks_dim_2 = [mask[:, None, :] for mask in masks_dim_2]
+    mask_dim_2 = combine_masks(masks_dim_2, total_clash_loss)
+    total_clash_loss = total_clash_loss.sum(dim=-1) / (mask_dim_2.sum(dim=-1) + 1e-9)
     total_clash_violation = (total_clash_loss > 0.0).float()
 
-    clash_loss = average_data_2d(total_clash_loss, masks_dim_1=masks_dim_1)
-    clash_violation = average_data_2d(total_clash_violation, masks_dim_1=masks_dim_1)
+    clash_loss = average_data(total_clash_loss, masks=masks_dim_1)
+    clash_violation = average_data(total_clash_violation, masks=masks_dim_1)
 
     return clash_loss, clash_violation
 
@@ -436,8 +443,8 @@ def get_bb_bond_angle_violation(
     total_angle_loss = N_CA_C_angle_loss + CA_C_N_angle_loss + C_N_CA_angle_loss
     total_angle_violation = (total_angle_loss > 0.0).float()
 
-    bond_angle_loss = average_data_2d(total_angle_loss, masks_dim_1=masks)
-    bond_angle_violation = average_data_2d(total_angle_violation, masks_dim_1=masks)
+    bond_angle_loss = average_data(total_angle_loss, masks=masks)
+    bond_angle_violation = average_data(total_angle_violation, masks=masks)
 
     return bond_angle_loss, bond_angle_violation
 
@@ -488,8 +495,8 @@ def get_bb_bond_length_violation(
     total_length_loss = N_CA_length_loss + CA_C_length_loss + C_N_length_loss
     total_length_violation = (total_length_loss > 0.0).float()
 
-    bond_length_loss = average_data_2d(total_length_loss, masks_dim_1=masks)
-    bond_length_violation = average_data_2d(total_length_violation, masks_dim_1=masks)
+    bond_length_loss = average_data(total_length_loss, masks=masks)
+    bond_length_violation = average_data(total_length_violation, masks=masks)
 
     return bond_length_loss, bond_length_violation
 
