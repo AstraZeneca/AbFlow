@@ -5,8 +5,8 @@ Contains functions used in validation/testing evaluation metrics calculations.
 import torch
 import torch.nn.functional as F
 
-from .utils import average_data_2d, combine_masks
-from ..data_utils import combine_coords, mask_data, safe_div
+from ..utils import average_data_2d
+from ..utils import combine_coords, combine_masks, mask_data, safe_div
 from ..constants import (
     AtomVanDerWaalRadii,
     BondLengths,

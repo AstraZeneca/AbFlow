@@ -5,7 +5,11 @@ Contains functions used in AbFlow loss calculations.
 import torch
 import torch.nn as nn
 
-from .utils import average_data_2d, average_data_3d, combine_masks
+from ..utils import average_data_2d
+
+from ..utils import combine_masks
+
+from ..utils import average_data_3d
 from ..nn.feature_embedder import one_hot
 
 

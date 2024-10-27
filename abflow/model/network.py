@@ -20,7 +20,7 @@ from ..nn.auxiliary_head import ConfidenceHead, DistogramHead
 
 from ..structure import impute_CB_coords, bb_frames_to_coords
 from ..constants import aa3_name_to_index
-from ..data_utils import mask_data
+from ..utils import mask_data
 
 
 class FlowPrediction(nn.Module):
