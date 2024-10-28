@@ -412,17 +412,14 @@ class AttentionPairBias(nn.Module):
 
 
 class AdaLN(nn.Module):
-    """Algorithm 26: Adaptive LayerNorm
-
-    In LayerNorm, original pseudocode set scale and offset separately, here we only use elementwise_affine.
-    """
+    """Algorithm 26: Adaptive LayerNorm"""
 
     def __init__(self, c_s: int):
 
         super().__init__()
 
         self.layer_norm_a = nn.LayerNorm(c_s, elementwise_affine=False)
-        self.layer_norm_s = nn.LayerNorm(c_s, elementwise_affine=True)
+        self.layer_norm_s = nn.LayerNorm(c_s, bias=False)
 
         self.linear_s = nn.Linear(c_s, c_s)
         self.linear_no_bias_s = nn.Linear(c_s, c_s, bias=False)
