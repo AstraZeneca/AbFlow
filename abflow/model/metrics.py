@@ -281,12 +281,12 @@ def get_bb_clash_violation(
     This implementation is adapted from loopgen (https://arxiv.org/abs/2310.07051).
 
     Args:
-        N_coords (torch.Tensor): Predicted N coordinates, shape (N_batch, N_res, 3).
-        CA_coords (torch.Tensor): Predicted CA coordinates, shape (N_batch, N_res, 3).
-        C_coords (torch.Tensor): Predicted C coordinates, shape (N_batch, N_res, 3).
-        tolerance (float, optional): Tolerance for clash detection. Defaults to 1.5.
-        masks_dim_1 (List[torch.Tensor]): List of masks to apply to the first residue dimension, each shape (N_batch, N_res).
-        masks_dim_2 (List[torch.Tensor]): List of masks to apply to the second residue dimension, each shape (N_batch, N_res).
+        N_coords: Predicted N coordinates, shape (N_batch, N_res, 3).
+        CA_coords: Predicted CA coordinates, shape (N_batch, N_res, 3).
+        C_coords: Predicted C coordinates, shape (N_batch, N_res, 3).
+        tolerance: Tolerance for clash detection. Defaults to 1.5.
+        masks_dim_1: List of masks to apply to the first residue dimension, each shape (N_batch, N_res).
+        masks_dim_2: List of masks to apply to the second residue dimension, each shape (N_batch, N_res).
 
     Returns:
         torch.Tensor: Backbone clash loss for each complex, shape (N_batch,).

@@ -81,10 +81,10 @@ def get_lddt(
     - \( \mathbb{I} \) is the indicator function that is 1 if the condition inside is true and 0 otherwise.
 
     Args:
-            d_pred (torch.Tensor): Predicted atom coords, shape (N_batch, N_res, 3).
-            d_gt (torch.Tensor): Ground truth atom coords, shape (N_batch, N_res, 3).
-            mask (torch.Tensor, optional): Mask with 1 to include and 0 to exclude positions in lddt calculation.
-            d_cutoff (float, optional): Distance cutoff for local region.
+        d_pred: Predicted atom coords, shape (N_batch, N_res, 3).
+        d_gt: Ground truth atom coords, shape (N_batch, N_res, 3).
+        mask: Mask with 1 to include and 0 to exclude positions in lddt calculation.
+        d_cutoff: Distance cutoff for local region.
 
     Returns:
             torch.Tensor: lDDT scores for each atom, shape (N_batch, N_res,).
@@ -137,7 +137,7 @@ def get_lddt_onehot(lddt_scores: torch.Tensor) -> torch.Tensor:
     The scores are equally binned into 50 bins from 0 to 100.
 
     Args:
-        lddt_scores (torch.Tensor): lDDT scores, shape (N_batch, N_res).
+        lddt_scores: lDDT scores, shape (N_batch, N_res).
 
     Returns:
         torch.Tensor: One-hot encoding of lDDT scores, shape (N_batch, N_res, 50).
@@ -154,7 +154,7 @@ def get_CB_distogram(CB_coords: torch.Tensor) -> torch.Tensor:
     and two bins for any larger and smaller distances. Ground truth CB distogram is used in auxilary loss.
 
     Args:
-        CB_coords (torch.Tensor): CB atom coordinates, shape (N_batch, N_res, 3).
+        CB_coords: CB atom coordinates, shape (N_batch, N_res, 3).
 
     Returns:
         torch.Tensor: Pairwise distance feature, shape (N_batch, N_res, N_res, 66).
