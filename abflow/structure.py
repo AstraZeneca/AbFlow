@@ -17,8 +17,7 @@ from pathlib import Path
 from typing import Sequence, Union, Optional, Tuple, List
 from e3nn.o3 import axis_angle_to_matrix
 
-from .utils import get_dihedrals
-
+from .geometry import create_rotation_matrix, get_dihedrals
 from .constants import (
     aa3_index_to_name,
     aa3_name_to_index,
@@ -36,14 +35,8 @@ def bb_coords_to_frames(
 ) -> torch.tensor:
     """
     Get rotations and translations from three sets of 3-D points via Gram-Schmidt process.
-
-    Get rotations and translations from three two 3-D vectors via Gram-Schmidt process.
-    Vectors in `v1` are taken as the first component of the orthogonal basis, then the component of `v2`
-    orthogonal to `v1`, and finally the cross product of `v1` and the orthogonalised `v2`. In
-    this case the translations must be provided as well.
-
-    In proteins, these two vectors are typically N-CA, and C-CA bond vectors,
-    and the translations are the CA coordinates.
+    Rotations are calculated from the Two vectors are calculated from the three points and in protein structures these are typically
+    N-CA, and C-CA bond vectors, and the translations are the CA coordinates.
 
     :param x1: Tensor of shape (..., 3)
     :param x2: Tensor of shape (..., 3)
@@ -53,14 +46,7 @@ def bb_coords_to_frames(
     v1 = x3 - x2
     v2 = x1 - x2
 
-    e1 = v1 / torch.linalg.norm(v1, dim=-1).unsqueeze(-1)
-    u2 = v2 - e1 * (torch.sum(e1 * v2, dim=-1).unsqueeze(-1))
-    e2 = u2 / torch.linalg.norm(u2, dim=-1).unsqueeze(-1)
-    e3 = torch.cross(e1, e2, dim=-1)
-
-    rotations = torch.stack([e1, e2, e3], dim=-2).transpose(-2, -1)
-    rotations = torch.nan_to_num(rotations)
-
+    rotations = create_rotation_matrix(v1, v2)
     translations = x2
 
     return rotations, translations
