@@ -2,7 +2,7 @@
 Contains constants used in protein structure analysis.
 """
 
-from enum import Enum
+from enum import Enum, IntEnum
 from Bio.PDB.Polypeptide import protein_letters_3to1
 
 # Conversion scales between nanometers and angstroms

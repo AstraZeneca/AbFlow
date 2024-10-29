@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import Sequence, Union, Optional, Tuple, List
 from e3nn.o3 import axis_angle_to_matrix
 
+from .utils import get_dihedrals
+
 from .constants import (
     aa3_index_to_name,
     aa3_name_to_index,
@@ -115,36 +117,6 @@ def impute_CB_coords(
     CB_coords = CA + CB_bonds
 
     return CB_coords
-
-
-def get_dihedrals(coords: torch.Tensor) -> torch.Tensor:
-    """
-    Args:
-            coords: (..., N_res, 4, 3).
-    Returns:
-            Dihedral angles in radians from -pi to pi, (..., N_res).
-    """
-
-    # Get the vectors between the atoms
-    v0 = coords[..., 1, :] - coords[..., 0, :]
-    v1 = coords[..., 2, :] - coords[..., 1, :]
-    v2 = coords[..., 3, :] - coords[..., 2, :]
-
-    # Get the normal vectors
-    u1 = torch.cross(v0, v1, dim=-1)
-    n1 = u1 / torch.linalg.norm(u1, dim=-1, keepdim=True)
-    u2 = torch.cross(v1, v2, dim=-1)
-    n2 = u2 / torch.linalg.norm(u2, dim=-1, keepdim=True)
-
-    # Get the sign of the dihedral angle
-    dihedral_sign = torch.sign((torch.cross(v1, v2, dim=-1) * v0).sum(-1))
-
-    # Get the dihedral angle
-    dihedral_angles = dihedral_sign * torch.acos(
-        (n1 * n2).sum(-1).clamp(min=-0.999999, max=0.999999)
-    )
-
-    return dihedral_angles
 
 
 def sidechain_coords_to_dihedrals(
