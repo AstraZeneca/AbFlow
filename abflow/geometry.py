@@ -1,4 +1,6 @@
 import torch
+from .nn.rigid_utils import Rigid
+from typing import List
 
 
 def create_rotation_matrix(v1: torch.Tensor, v2: torch.Tensor) -> torch.Tensor:
@@ -52,3 +54,26 @@ def get_dihedrals(coords: torch.Tensor) -> torch.Tensor:
     )
 
     return dihedral_angles
+
+
+def compose_rotation_and_translation(R1, t1, R2, t2):
+    """
+    Args:
+        R1,t1:  Frame basis and coordinate, (N, L, 3, 3), (N, L, 3).
+        R2,t2:  Rotation and translation to be applied to (R1, t1), (N, L, 3, 3), (N, L, 3).
+    Returns
+        R_new <- R1R2
+        t_new <- R1t2 + t1
+    """
+    R_new = torch.matmul(R1, R2)  # (N, L, 3, 3)
+    t_new = torch.matmul(R1, t2.unsqueeze(-1)).squeeze(-1) + t1
+    return R_new, t_new
+
+
+def compose_chain(Ts):
+    while len(Ts) >= 2:
+        R1, t1 = Ts[-2]
+        R2, t2 = Ts[-1]
+        T_next = compose_rotation_and_translation(R1, t1, R2, t2)
+        Ts = Ts[:-2] + [T_next]
+    return Ts[0]

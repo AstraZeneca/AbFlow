@@ -2,8 +2,10 @@
 Contains constants used in protein structure analysis.
 """
 
+import torch
 from enum import Enum, IntEnum
 from Bio.PDB.Polypeptide import protein_letters_3to1
+from .geometry import compose_chain, create_rotation_matrix
 
 # Conversion scales between nanometers and angstroms
 NM_TO_ANG_SCALE = 10.0
@@ -377,6 +379,250 @@ class Torsion(IntEnum):
     CHI2 = 5
     CHI3 = 6
     CHI4 = 7
+
+
+# The following tensors are initialized by `_make_rigid_group_constants`
+restype_rigid_group_rotation = torch.zeros([20, 8, 3, 3])
+restype_rigid_group_translation = torch.zeros([20, 8, 3])
+restype_heavyatom_to_rigid_group = torch.zeros([20, 14], dtype=torch.long)
+restype_heavyatom_rigid_group_positions = torch.zeros([20, 14, 3])
+
+
+def _make_rigid_group_constants():
+
+    for restype in AminoAcid3:
+        atom_groups = {
+            name: group for name, group, _ in rigid_group_heavy_atom_positions[restype]
+        }
+        atom_positions = {
+            name: torch.FloatTensor(pos)
+            for name, _, pos in rigid_group_heavy_atom_positions[restype]
+        }
+
+        # Atom 14 rigid group positions
+        for atom_idx, atom_name in enumerate(restype_to_heavyatom_names[restype]):
+            if (atom_name == "") or (atom_name not in atom_groups):
+                continue
+            restype_heavyatom_to_rigid_group[restype, atom_idx] = atom_groups[atom_name]
+            restype_heavyatom_rigid_group_positions[restype, atom_idx, :] = (
+                atom_positions[atom_name]
+            )
+
+        # 0: backbone to backbone
+        restype_rigid_group_rotation[restype, Torsion.BACKBONE, :, :] = torch.eye(3)
+        restype_rigid_group_translation[restype, Torsion.BACKBONE, :] = torch.zeros([3])
+
+        # 1: omega-frame to backbone
+        restype_rigid_group_rotation[restype, Torsion.OMEGA, :, :] = torch.eye(3)
+        restype_rigid_group_translation[restype, Torsion.OMEGA, :] = torch.zeros([3])
+
+        # 2: phi-frame to backbone
+        restype_rigid_group_rotation[restype, Torsion.PHI, :, :] = (
+            create_rotation_matrix(
+                ex=atom_positions["N"] - atom_positions["CA"],
+                ey=torch.FloatTensor([1.0, 0.0, 0.0]),
+            )
+        )
+        restype_rigid_group_translation[restype, Torsion.PHI, :] = atom_positions["N"]
+
+        # 3: psi-frame to backbone
+        restype_rigid_group_rotation[restype, Torsion.PSI, :, :] = (
+            create_rotation_matrix(
+                ex=atom_positions["C"] - atom_positions["CA"],
+                ey=atom_positions["CA"]
+                - atom_positions["N"],  # In accordance to the definition of psi angle
+            )
+        )
+        restype_rigid_group_translation[restype, Torsion.PSI, :] = atom_positions["C"]
+
+        # 4: chi1-frame to backbone
+        if chi_angles_mask[restype][0]:
+            base_atom_names = chi_angles_atoms[restype][0]
+            base_atom_positions = [atom_positions[name] for name in base_atom_names]
+            restype_rigid_group_rotation[restype, Torsion.CHI1, :, :] = (
+                create_rotation_matrix(
+                    ex=base_atom_positions[2] - base_atom_positions[1],
+                    ey=base_atom_positions[0] - base_atom_positions[1],
+                )
+            )
+            restype_rigid_group_translation[restype, Torsion.CHI1, :] = (
+                base_atom_positions[2]
+            )
+
+        # chi2-chi1
+        # chi3-chi2
+        # chi4-chi3
+        for chi_idx in range(1, 4):
+            if chi_angles_mask[restype][chi_idx]:
+                axis_end_atom_name = chi_angles_atoms[restype][chi_idx][2]
+                axis_end_atom_position = atom_positions[axis_end_atom_name]
+                restype_rigid_group_rotation[restype, Torsion.CHI1 + chi_idx, :, :] = (
+                    create_rotation_matrix(
+                        ex=axis_end_atom_position,
+                        ey=torch.FloatTensor([-1.0, 0.0, 0.0]),
+                    )
+                )
+                restype_rigid_group_translation[restype, Torsion.CHI1 + chi_idx, :] = (
+                    axis_end_atom_position
+                )
+
+
+_make_rigid_group_constants()
+
+
+def _make_psi_chi_rotation_matrices(angles: torch.Tensor) -> torch.Tensor:
+    """Compute psi and chi rotation matrices from torsional angles.
+
+    Here we provide angles instead of alpha in af2 between (0,2pi)
+
+    See alphafold supplementary Algorithm 25 for details.
+
+    Args:
+        angles: (B, N, 5), angles between (0,2pi)
+
+    Returns:
+        Torsional angle rotation matrices, (B, N, 5, 3, 3).
+    """
+    batch_size, n_res = angles.shape[:2]
+    sine, cosine = torch.sin(angles), torch.cos(angles)
+    sine = sine.reshape(batch_size, n_res, -1, 1, 1)
+    cosine = cosine.reshape(batch_size, n_res, -1, 1, 1)
+    zero = torch.zeros_like(sine)
+    one = torch.ones_like(sine)
+
+    row1 = torch.cat([one, zero, zero], dim=-1)  # (B, N, 5, 1, 3)
+    row2 = torch.cat([zero, cosine, -sine], dim=-1)  # (B, N, 5, 1, 3)
+    row3 = torch.cat([zero, sine, cosine], dim=-1)  # (B, N, 5, 1, 3)
+    R = torch.cat([row1, row2, row3], dim=-2)  # (B, N, 5, 3, 3)
+
+    return R
+
+
+def _get_rigid_group(
+    aa: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Extract rigid group constants.
+
+    Args:
+        aa: Amino acid types, (B, N).
+
+    Returns:
+        A tuple of rigid group rotation, translation, atom14 group and atom14 position.
+    """
+    batch_size, n_res = aa.size()
+    aa = aa.flatten()
+    rotation = restype_rigid_group_rotation.to(aa.device)[aa].reshape(
+        batch_size, n_res, 8, 3, 3
+    )
+    translation = restype_rigid_group_translation.to(aa.device)[aa].reshape(
+        batch_size, n_res, 8, 3
+    )
+    atom14_group = restype_heavyatom_to_rigid_group.to(aa.device)[aa].reshape(
+        batch_size, n_res, 14
+    )
+    atom14_position = restype_heavyatom_rigid_group_positions.to(aa.device)[aa].reshape(
+        batch_size, n_res, 14, 3
+    )
+    return rotation, translation, atom14_group, atom14_position
+
+
+def full_atom_reconstruction(
+    R_bb: torch.Tensor,
+    t_bb: torch.Tensor,
+    angles: torch.Tensor,
+    aa: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Compute full atom positions from backbone frames and torsional angles.
+
+    See alphafold supplementary Algorithm 24 for details.
+
+    Args:
+        R_bb: Rotation of backbone frames, (B, N, 3, 3).
+        t_bb: Translation of backbone frames, (B, N, 3).
+        angles: (B, N, 5), angles between (0,2pi)
+        aa: Amino acid types, (B, N).
+
+    Returns:
+        A tuple of atom positions and full frames, (pos14, R, t).
+        pos14: Full atom positions in pos14 representations, (B, N, 14, 3).
+        R: Rotation of backbone, psi, chi1-4 frames, (B, N, 5, 3, 3).
+        t: Rotation of backbone, psi, chi1-4 frames, (B, N, 5, 3).
+    """
+    N, L = aa.size()
+
+    rot_psi, rot_chi1, rot_chi2, rot_chi3, rot_chi4 = _make_psi_chi_rotation_matrices(
+        angles
+    ).unbind(dim=2)
+    # (B, N, 3, 3)
+    zeros = torch.zeros_like(t_bb)
+
+    rigid_rotation, rigid_translation, atom14_group, atom14_position = _get_rigid_group(
+        aa
+    )
+
+    R_psi, t_psi = compose_chain(
+        [
+            (R_bb, t_bb),
+            (rigid_rotation[:, :, Torsion.PSI], rigid_translation[:, :, Torsion.PSI]),
+            (rot_psi, zeros),
+        ]
+    )
+
+    R_chi1, t_chi1 = compose_chain(
+        [
+            (R_bb, t_bb),
+            (rigid_rotation[:, :, Torsion.CHI1], rigid_translation[:, :, Torsion.CHI1]),
+            (rot_chi1, zeros),
+        ]
+    )
+
+    R_chi2, t_chi2 = compose_chain(
+        [
+            (R_chi1, t_chi1),
+            (rigid_rotation[:, :, Torsion.CHI2], rigid_translation[:, :, Torsion.CHI2]),
+            (rot_chi2, zeros),
+        ]
+    )
+
+    R_chi3, t_chi3 = compose_chain(
+        [
+            (R_chi2, t_chi2),
+            (rigid_rotation[:, :, Torsion.CHI3], rigid_translation[:, :, Torsion.CHI3]),
+            (rot_chi3, zeros),
+        ]
+    )
+
+    R_chi4, t_chi4 = compose_chain(
+        [
+            (R_chi3, t_chi3),
+            (rigid_rotation[:, :, Torsion.CHI4], rigid_translation[:, :, Torsion.CHI4]),
+            (rot_chi4, zeros),
+        ]
+    )
+
+    # Return Frame
+    R_ret = torch.stack([R_bb, R_psi, R_chi1, R_chi2, R_chi3, R_chi4], dim=2)
+    t_ret = torch.stack([t_bb, t_psi, t_chi1, t_chi2, t_chi3, t_chi4], dim=2)
+
+    # BACKBONE, OMEGA, PHI, PSI, CHI1, CHI2, CHI3, CHI4
+    R_all = torch.stack(
+        [R_bb, R_bb, R_bb, R_psi, R_chi1, R_chi2, R_chi3, R_chi4], dim=2
+    )  # (B, N, 8, 3, 3)
+    t_all = torch.stack(
+        [t_bb, t_bb, t_bb, t_psi, t_chi1, t_chi2, t_chi3, t_chi4], dim=2
+    )  # (B, N, 8, 3)
+
+    index_R = atom14_group.reshape(N, L, 14, 1, 1).repeat(
+        1, 1, 1, 3, 3
+    )  # (B, N, 14, 3, 3)
+    index_t = atom14_group.reshape(N, L, 14, 1).repeat(1, 1, 1, 3)  # (B, N, 14, 3)
+
+    R_atom = torch.gather(R_all, dim=2, index=index_R)  # (N, L, 14, 3, 3)
+    t_atom = torch.gather(t_all, dim=2, index=index_t)  # (N, L, 14, 3)
+    p_atom = atom14_position  # (N, L, 14, 3)
+
+    pos14 = torch.matmul(R_atom, p_atom.unsqueeze(-1)).squeeze(-1) + t_atom
+    return pos14, R_ret, t_ret
 
 
 class CDRName(IntEnum):
