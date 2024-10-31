@@ -7,7 +7,7 @@ import torch.nn as nn
 
 from .ipa import InvariantPointAttention
 from .pairformer import Transition
-from .rigid_utils import Rigid
+from ..rigid import Rigid
 
 
 class DenoisingModule(nn.Module):

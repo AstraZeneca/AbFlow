@@ -5,7 +5,7 @@ Contains utility functions for data manipulation.
 import torch
 from typing import List
 
-from .nn.rigid_utils import Rigid, Rotation
+from ..rigid import Rigid, Rotation
 
 
 def expand_mask(mask: torch.Tensor, data: torch.Tensor) -> torch.Tensor:

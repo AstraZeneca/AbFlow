@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 from typing import List
 
-from ..utils import combine_masks, average_data
+from ..utils.utils import combine_masks, average_data
 from ..nn.feature_embedder import one_hot
 
 

@@ -9,7 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
 
-from .rigid_utils import Rigid
+from ..rigid import Rigid
 
 
 class InvariantPointAttention(nn.Module):

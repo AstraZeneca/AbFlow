@@ -8,6 +8,9 @@ Description: Wrapper function for training routine.
 import os
 import copy
 import time
+import torch.distributed as dist
+import torch
+
 from datetime import date, timedelta
 
 import yaml
@@ -17,10 +20,7 @@ from utils.arguments import get_arguments, get_config, print_config_summary
 import lightning as L
 from lightning.pytorch.strategies import DDPStrategy
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
-from lightning.pytorch.loggers import CSVLogger, WandbLogger
-
-import torch.distributed as dist
-import torch
+from lightning.pytorch.loggers import WandbLogger
 
 from abflow.model.model import AbFlow
 from abflow.model.network import FlowPrediction
@@ -29,7 +29,7 @@ from abflow.model.network import FlowPrediction
 os.environ["NCCL_BLOCKING_WAIT"] = "1"
 
 
-def setup_model(config, checkpoint_path=None, load_optimizer=False):
+def setup_model(config, checkpoint_path: str = None, load_optimizer=False):
 
     network_instance = FlowPrediction(**config["network"])
 

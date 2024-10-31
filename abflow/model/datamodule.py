@@ -1,0 +1,320 @@
+import torch
+import lmdb
+import pickle
+import os
+import random
+import pandas as pd
+
+from torch.utils.data import Dataset
+from pytorch_lightning import LightningDataModule
+from itertools import chain
+
+from .utils import rm_duplicates
+
+
+class AntibodyAntigenDataset(Dataset):
+    """Antibody-antigen structure dataset."""
+
+    def __init__(self, config: dict, split: str = "train", is_transform: bool = False):
+        """
+        :param config: Configuration dictionary.
+        :param split: Dataset split (train, val, test).
+        :param is_transform: Apply data transformation if True.
+        """
+        super().__init__()
+
+        self.config = config
+        self.split = split
+        self.is_transform = is_transform
+        self.transform = None  # TODO: Implement transformations
+        self.db_connection = None
+
+        self.data_path = config["paths"]["data"]
+        self.map_size = 250 * 1024**3  # 250GB - Maximum size of the whole DB
+        self._load_entries()
+        self._load_clusters()
+        self._load_split()
+
+    @property
+    def structure_data_path(self):
+        return os.path.join(self.data_path, self.config["dataset"], "structures.lmdb")
+
+    def _load_entries(self):
+        """Loads the entries of the dataset"""
+
+        entries_path = os.path.join(
+            self.data_path, self.config["dataset"], "entries_list.pkl"
+        )
+
+        with open(entries_path, "rb") as f:
+            self.all_entries = pickle.load(f)
+
+    def _load_clusters(self):
+        """Loads the clusters of the dataset.
+        self.clusters contains all the clusters with their pdb entries.
+        self.id_to_cluster maps each pdb entry to its cluster.
+
+        Example:
+        self.clusters: {'7st5_H_L_A': ['7st5_H_L_A', '7st5_h_l_F'],
+                        '7trk_H_h_AB': ['7trk_H_h_AB', '7trp_H_h_AB', '7trq_H_h_AB', '7trs_H_h_AB', '7t6s_E_e_AB', '7yk6_S_s_IT', '7rgp_E_e_A', '6xox_E_e_A'],
+                        ...}
+
+        self.id_to_cluster: {'7st5_H_L_A': '7st5_H_L_A', '7st5_h_l_F': '7st5_H_L_A', '7trk_H_h_AB': '7trk_H_h_AB',...}
+        """
+
+        random.seed(self.config["seed"])
+
+        self.cluster_path = os.path.join(
+            self.data_path, self.config["dataset"], "cluster_result_cluster.tsv"
+        )
+
+        clusters, id_to_cluster = {}, {}
+        with open(self.cluster_path, "r") as f:
+            for line in f.readlines():
+                cluster_name, data_id = line.split()
+
+                if cluster_name not in clusters:
+                    clusters[cluster_name] = []
+
+                clusters[cluster_name].append(data_id)
+                id_to_cluster[data_id] = cluster_name
+
+        self.clusters = clusters
+        self.id_to_cluster = id_to_cluster
+
+        print(f"Number of pdbs in the full dataset: {len(self.id_to_cluster.keys())}")
+        print(f"Number of clusters in the full dataset: {len(self.clusters.keys())}")
+
+    def _load_split(self):
+
+        random.seed(self.config["seed"])
+
+        # Get pdb ids in RABD
+        rabd_df = pd.read_csv(
+            f"{self.config['paths']['data']}/rabd/rabd.csv",
+            header=None,
+            usecols=[0],
+            names=["ids"],
+        )
+        rabd_ids = rabd_df["ids"].tolist()
+
+        # test cluster ids
+        test_ids = [
+            entry_dict["id"]
+            for entry_dict in self.all_entries
+            if entry_dict is not None and entry_dict["id"][:4] in rabd_ids
+        ]
+        test_clusters = rm_duplicates(
+            [self.id_to_cluster[test_id] for test_id in test_ids]
+        )
+
+        # Get pdb ids from SAbDab
+        sabdab_df = pd.read_csv(
+            os.path.join(
+                f"{self.config['paths']['data']}/sabdab/", "sabdab_summary_all.tsv"
+            ),
+            sep="\t",
+        )
+        sabdab_pdbs = sabdab_df["pdb"].tolist()
+        sabdab_pdbs_unique = set(sabdab_pdbs)
+
+        # Get the SAbDab ids
+        sabdab_ids = [
+            entry_dict["id"]
+            for entry_dict in self.all_entries
+            if entry_dict is not None and entry_dict["id"][:4] in sabdab_pdbs_unique
+        ]
+        clusters_sabdab = rm_duplicates(
+            [self.id_to_cluster[sid] for sid in sabdab_ids if sid in self.id_to_cluster]
+        )
+
+        # train / val / test split
+        train_val_clusters = [
+            c_id for c_id in clusters_sabdab if c_id not in test_clusters
+        ]
+        random.shuffle(train_val_clusters)
+        num_val_cluster = self.config["num_val_cluster"]
+        val_clusters = train_val_clusters[:num_val_cluster]
+        train_clusters = train_val_clusters[num_val_cluster:]
+
+        if self.split == "test":
+            self.split_ids = test_ids
+        elif self.split == "val":
+            self.split_ids = list(
+                chain.from_iterable(
+                    self.clusters[c_id]
+                    for c_id in val_clusters
+                    if c_id in self.clusters
+                )
+            )
+        else:
+            self.split_ids = list(
+                chain.from_iterable(
+                    self.clusters[c_id]
+                    for c_id in train_clusters
+                    if c_id in self.clusters
+                )
+            )
+
+        pre_filter_len = len(self.split_ids)
+        self.split_ids = self._filter_ids(self.split_ids, sabdab_df)
+
+        print(f"Number of RAbD id: {len(rabd_ids)}")
+        print(f"Number of clusters in training: {len(train_clusters)}")
+        print(f"Number of clusters in validation: {len(val_clusters)}")
+        print(f"Number of clusters in test: {len(test_clusters)}")
+        print(
+            f"Number of pre-filtered structures in the {self.split} split: {pre_filter_len}"
+        )
+        print(
+            f"Number of post-filtered structures in the {self.split} split: {len(self.split_ids)}"
+        )
+
+    def __len__(self):
+        """Returns number of samples in the data"""
+        length = len(self.split_ids)
+        return length
+
+    def __getitem__(self, idx: int):
+        structure_id = self.split_ids[idx]
+        item = self._get_data_from_id(structure_id)
+        return item
+
+    def _get_data_from_id(self, id: str):
+        data = self._get_structure(id)
+        data = (
+            self.transform(data)
+            if self.is_transform and self.transform is not None
+            else data
+        )
+        return data
+
+    def _get_structure(self, db_id: str):
+        """
+        If connection is not started yet, initialize the connection and load the structure
+        (dictionary) using its ID.
+        """
+
+        # If connection is not started yet, initialize it
+        if self.db_connection is None:
+            self.db_connection = lmdb.open(
+                self.structure_data_path,
+                map_size=self.map_size,
+                create=False,
+                subdir=False,
+                readonly=True,
+                lock=False,
+                readahead=False,
+                meminit=False,
+            )
+
+        # Load the structure (dictionary) using its ID
+        with self.db_connection.begin() as txn:
+            return pickle.loads(txn.get(db_id.encode()))
+
+    def _filter_ids(self, ids_list: list, data_df: pd.DataFrame):
+        """Filter the entries of the dataset
+
+        Data is filtered based on the following criteria:
+        - The structure must at least contain an antigen and a heavy chain
+        - If the structure does not contain a light chain, it must be a nanobody
+        as described in the 'compound' column of the data_df (searching for 'nanobody' or 'VHH' as substrings).
+        """
+        filtered_ids = []
+        for ids in ids_list:
+            try:
+                data = self._get_structure(ids)
+            except TypeError:
+                continue
+            if data["antigen"] is None or data["heavy"] is None:
+                continue
+            else:
+                if data["light"] is None:
+                    row = data_df[
+                        data_df["pdb"].str.contains(ids[:4], case=False, na=False)
+                    ]
+                    if len(row["compound"].values) == 0:
+                        continue
+                    compound_text = row["compound"].values[0].lower()
+                    if not ("nanobody" in compound_text or "vhh" in compound_text):
+                        continue
+
+            filtered_ids.append(ids)
+        return filtered_ids
+
+
+class AntibodyAntigenDataModule(LightningDataModule):
+    """A datamodule for antibody-antigen complexes."""
+
+    def __init__(self, config: dict):
+        """
+        :param config: Configuration dictionary.
+        """
+        super().__init__()
+
+        self.config = config
+        self._train_dataset = AntibodyAntigenDataset(
+            config, split="train", is_transform=True
+        )
+        self._val_dataset = AntibodyAntigenDataset(
+            config, split="val", is_transform=True
+        )
+        self._test_dataset = AntibodyAntigenDataset(
+            config, split="test", is_transform=True
+        )
+
+        self._num_workers = config["num_workers"]
+        self._batch_size = config["batch_size"]
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}(batch_size={self._batch_size})"
+
+    @property
+    def train_dataset(self):
+        """The training dataset."""
+        return self._train_dataset
+
+    @property
+    def validation_dataset(self):
+        """The validation dataset."""
+        return self._val_dataset
+
+    @property
+    def test_dataset(self):
+        """The test dataset."""
+        return self._test_dataset
+
+    def train_dataloader(self) -> torch.utils.data.DataLoader:
+        """The train dataloader using the train dataset."""
+        return torch.utils.data.DataLoader(
+            self._train_dataset,
+            shuffle=True,
+            num_workers=self._num_workers,
+            batch_size=self._batch_size,
+            pin_memory=True,
+        )
+
+    def val_dataloader(self) -> torch.utils.data.DataLoader:
+        """
+        The validation dataloader using the validation dataset.
+        """
+        return torch.utils.data.DataLoader(
+            self._val_dataset,
+            shuffle=False,
+            num_workers=self._num_workers,
+            batch_size=self._batch_size,
+            pin_memory=True,
+        )
+
+    def test_dataloader(self) -> torch.utils.data.DataLoader:
+        """
+        The test dataloader using the test dataset. This is typically used
+        for final model evaluation.
+        """
+        return torch.utils.data.DataLoader(
+            self._test_dataset,
+            shuffle=False,
+            num_workers=self._num_workers,
+            batch_size=self._batch_size,
+            pin_memory=True,
+        )

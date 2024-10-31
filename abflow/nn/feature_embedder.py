@@ -23,7 +23,7 @@ from ..constants import (
     PAD_TOKEN,
     GlyBBCoords,
 )
-from ..utils import (
+from ..utils.utils import (
     create_rigid,
     apply_mask,
     mask_data,

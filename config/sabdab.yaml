@@ -11,16 +11,17 @@ paths:
 project_name: flow_matching
 model_name: predict_backbone_HCDR3_200e
 
-batch_size: 2 # batch size per GPU
-
 trainer:
     devices: 8
     max_epochs: 200
     val_check_interval: 0.5
     gradient_clip_val: 0.0
 
-design_mode: ["backbone"] # ["sequence", "backbone"]
+checkpoint:
+    path: null
+    load_optimizer: False
 
+design_mode: ["backbone"] # ["sequence", "backbone"]
 redesign:
     FRAMEWORK: False
     HCDR1: False
@@ -29,7 +30,6 @@ redesign:
     LCDR1: False
     LCDR2: False
     LCDR3: False
-
 crop: True
 crop_args:
     max_crop_size: 180 # ideally 192
@@ -77,3 +77,6 @@ network:
             N_head: 6 # 12
             N_query_points: 4
             N_point_values: 8
+
+datamodule:
+    batch_size: 2 # batch size per GPU

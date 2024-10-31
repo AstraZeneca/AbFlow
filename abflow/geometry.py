@@ -1,6 +1,4 @@
 import torch
-from .nn.rigid_utils import Rigid
-from typing import List
 
 
 def create_rotation_matrix(v1: torch.Tensor, v2: torch.Tensor) -> torch.Tensor:
@@ -77,3 +75,31 @@ def compose_chain(Ts):
         T_next = compose_rotation_and_translation(R1, t1, R2, t2)
         Ts = Ts[:-2] + [T_next]
     return Ts[0]
+
+
+def create_psi_chi_rotation_matrix(angles: torch.Tensor) -> torch.Tensor:
+    """Compute psi and chi rotation matrices from torsional angles.
+
+    Here we provide angles instead of alpha in af2 between (0,2pi)
+
+    See alphafold supplementary Algorithm 25 for details.
+
+    Args:
+        angles: (B, N, 5), angles between (0,2pi)
+
+    Returns:
+        Torsional angle rotation matrices, (B, N, 5, 3, 3).
+    """
+    batch_size, n_res = angles.shape[:2]
+    sine, cosine = torch.sin(angles), torch.cos(angles)
+    sine = sine.reshape(batch_size, n_res, -1, 1, 1)
+    cosine = cosine.reshape(batch_size, n_res, -1, 1, 1)
+    zero = torch.zeros_like(sine)
+    one = torch.ones_like(sine)
+
+    row1 = torch.cat([one, zero, zero], dim=-1)  # (B, N, 5, 1, 3)
+    row2 = torch.cat([zero, cosine, -sine], dim=-1)  # (B, N, 5, 1, 3)
+    row3 = torch.cat([zero, sine, cosine], dim=-1)  # (B, N, 5, 1, 3)
+    R = torch.cat([row1, row2, row3], dim=-2)  # (B, N, 5, 3, 3)
+
+    return R

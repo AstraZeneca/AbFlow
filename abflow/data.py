@@ -16,25 +16,14 @@ def crop_mask(
     and `redesign_mask`, and then by selecting the closest antigen residues defined in `antigen_mask` up to
     `antigen_crop_size`. Finally, it fills the mask up to `max_crop_size` with the closest antibody remaining residues.
 
-    Parameters:
-    -----------
-    cdr_mask : torch.Tensor
-        Tensor indicating CDR (1) and non-CDR (0) residues.
-    antigen_mask : torch.Tensor
-        Tensor indicating antigen (1) and non-antigen (0) residues.
-    redesign_mask : torch.Tensor
-        Tensor indicating which residues to redesign (1) and which to ignore (0).
-    coords : torch.Tensor
-        Tensor of shape (num_residues, 3) representing the 3D coordinates of each residue.
-    max_crop_size : int
-        Maximum number of residues to be marked as 1 in the crop mask.
-    antigen_crop_size : int
-        Number of antigen residues to be marked as 1 in the crop mask.
+    :param cdr_mask: Tensor indicating CDR (1) and non-CDR (0) residues.
+    :param antigen_mask: Tensor indicating antigen (1) and non-antigen (0) residues.
+    :param redesign_mask: Tensor indicating which residues to redesign (1) and which to ignore (0).
+    :param coords: Tensor of shape (num_residues, 3) representing the 3D coordinates of each residue.
+    :param max_crop_size: Maximum number of residues to be marked as 1 in the crop mask.
+    :param antigen_crop_size: Number of antigen residues to be marked as 1 in the crop mask.
 
-    Returns:
-    --------
-    torch.Tensor
-        A tensor representing the crop mask with selected residues marked as 1.
+    :return: A tensor representing the crop mask with selected residues marked as 1.
     """
 
     redesign_cdr_mask = cdr_mask & redesign_mask
@@ -120,15 +109,8 @@ def create_chain_id(res_index: torch.Tensor):
     This function creates a tensor of chain IDs corresponding to the input tensor of residue indices. The chain ID increments
     whenever a residue index is smaller than the previous one, indicating a restart or a new chain.
 
-    Parameters:
-    -----------
-    res_index : torch.Tensor
-        A tensor of residue indices, where a smaller index than the previous one indicates the start of a new chain.
-
-    Returns:
-    --------
-    torch.Tensor
-        A tensor of the same length as `res_index`, where each element represents the chain ID for the corresponding residue.
+    :param res_index: A tensor of residue indices, where a smaller index than the previous one indicates the start of a new chain.
+    :return: A tensor of the same length as `res_index`, where each element represents the chain ID for the corresponding residue.
     """
 
     n = len(res_index)

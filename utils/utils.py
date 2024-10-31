@@ -2,7 +2,7 @@ import os
 import yaml
 import pandas as pd
 
-from abflow.structure import extract_pdb
+from abflow.pdb import extract_pdb
 from abflow.model.metrics import (
     get_rmsd,
     get_aar,
@@ -12,7 +12,6 @@ from abflow.model.metrics import (
     get_tm_score,
     get_liability_issues,
 )
-from abflow.data_utils import inv_mask
 from Bio.PDB import PDBList, PDBParser, Select, PDBIO
 
 
@@ -130,10 +129,10 @@ def calculate_metrics(
 
     metrics = {
         "fixed_region_aar": get_aar(
-            pred_res_type, true_res_type, masks=[inv_mask(redesign_mask)]
+            pred_res_type, true_res_type, masks=[~redesign_mask]
         ).item(),
         "fixed_region_rmsd": get_rmsd(
-            [pred_CA_coords], [true_CA_coords], masks=[inv_mask(redesign_mask)]
+            [pred_CA_coords], [true_CA_coords], masks=[~redesign_mask]
         ).item(),
         "designed_cdr_aar": get_aar(
             pred_res_type, true_res_type, masks=[redesign_mask]
