@@ -299,9 +299,13 @@ class StructureEmbedder(nn.Module):
 
         self.linear_no_bias_s = nn.Linear(20 + 1, c_s, bias=False)
 
-        self._translation_flow = OptimalTransportEuclideanFlow()
-        self._rotation_flow = LinearSO3Flow()
-        self._sequence_flow = LinearSimplexFlow()
+        self._translation_flow = OptimalTransportEuclideanFlow(
+            dim=3,
+            schedule_type="linear",
+        )
+        self._rotation_flow = LinearSO3Flow(schedule_type="linear")
+        self._sequence_flow = LinearSimplexFlow(dim=20, schedule_type="linear")
+        self._dihedral_flow = LinearToricFlow(dim=4, schedule_type="linear")
 
     def forward(self, f_star: dict[str, torch.Tensor]):
 

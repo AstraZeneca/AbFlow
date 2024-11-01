@@ -1,62 +1,27 @@
 import torch
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
+import seaborn as sns
+from typing import Optional
+from .constants import AminoAcid1Index
 
-from .constants import AminoAcid1
-
-DARK_BLUE = "#1f77b4"
+# Define the custom colors
 LIGHT_BLUE = "#aec7e8"
-DARK_RED = "#d62728"
-LIGHT_RED = "#ff9896"
+BLUE = "#1f77b4"
+DARK_BLUE = "#4c78a8"
+SALMON_RED = "#d62728"
 
 plt.rcParams["font.family"] = "DejaVu Sans"
 
 
-def plot_scatter(
-    pred: torch.Tensor,
-    true: torch.Tensor,
-    x_label="Pred",
-    y_label="True",
-    save_path: str = None,
-):
-    """
-    Plot true data against pred data on the resolved region.
-
-    Args:
-        true (torch.Tensor): True data of shape (N_batch,).
-        plddt (torch.Tensor): Pred data of shape (N_batch,).
-        save_path (str, optional): Path to save the figure. Defaults to None.
-    """
-
-    true = np.array(true)
-    pred = np.array(pred)
-
-    plt.figure(figsize=(8, 6))
-    plt.scatter(pred, true, s=50, alpha=0.6, color=DARK_BLUE, edgecolor="black")
-
-    plt.xlabel(x_label, fontsize=25)
-    plt.ylabel(y_label, fontsize=25)
-
-    plt.xticks(fontsize=20)
-    plt.yticks(fontsize=20)
-
-    plt.grid(True)
-    plt.tight_layout()
-
-    if save_path:
-        plt.savefig(save_path)
-    else:
-        plt.show()
-
-
-def plot_plddt(plddt: torch.Tensor, lddt: torch.Tensor, save_path: str = None):
+def plot_plddt(plddt: np.ndarray, lddt: np.ndarray, save_path: str = None):
     """
     Plot LDDT against Average pLDDT on the resolved region.
 
-    Args:
-        lddt (torch.Tensor): LDDT scores of shape (N_batch,).
-        plddt (torch.Tensor): pLDDT scores of shape (N_batch,).
-        save_path (str, optional): Path to save the figure. Defaults to None.
+    :param lddt: LDDT scores of shape (N_batch,).
+    :param plddt: pLDDT scores of shape (N_batch,).
+    :param save_path: Path to save the figure. Defaults to None.
     """
 
     lddt = np.array(lddt)
@@ -83,49 +48,61 @@ def plot_plddt(plddt: torch.Tensor, lddt: torch.Tensor, save_path: str = None):
         plt.show()
 
 
-def plot_aa_distribution(
-    pred_seq: torch.Tensor, true_seq: torch.Tensor, save_path: str = None
+def plot_sequence_distribution(
+    pred_sequence: np.ndarray,
+    true_sequence: np.ndarray,
+    save_path: Optional[str] = None,
 ):
     """
-    Plot histogram distribution for predicted and ground truth amino acid sequences.
+    Create a bar plot to compare the distribution of amino acids
+    in the predicted and true sequences.
 
-    Args:
-        pred_seq (torch.Tensor): Predicted amino acid sequence of shape (N,).
-        true_seq (torch.Tensor): Ground truth amino acid sequence of shape (N,).
-        save_path (str, optional): Path to save the figure. Defaults to None.
+    :param pred_sequence: Predicted amino acid indices with shape (n).
+    :param true_sequence: True amino acid indices with shape (n).
+    :param save_path: Optional path to save the plot. If None, the plot will be displayed.
     """
 
-    pred_seq = np.array(pred_seq)
-    true_seq = np.array(true_seq)
-
-    bins = np.arange(21) - 0.5  # Create 21 bins for 20 amino acids + 1
-
-    fig, axs = plt.subplots(1, 2, figsize=(14, 6), sharey=True)
-
-    # Plot for predicted sequence
-    axs[0].hist(
-        pred_seq, bins=bins, alpha=0.7, color=DARK_BLUE, edgecolor="black", density=True
+    pred_amino_acids = [AminoAcid1Index[aa] for aa in pred_sequence]
+    true_amino_acids = [AminoAcid1Index[aa] for aa in true_sequence]
+    data = pd.DataFrame(
+        {
+            "Amino Acid": pred_amino_acids + true_amino_acids,
+            "Type": ["Generated"] * len(pred_amino_acids)
+            + ["True"] * len(true_amino_acids),
+        }
     )
-    axs[0].set_xlabel("Amino Acids", fontsize=25)
-    axs[0].set_ylabel("Density", fontsize=25)
-    axs[0].set_title("Designed Sequence Distribution", fontsize=25)
-    axs[0].set_xticks(np.arange(20))
-    axs[0].set_xticklabels([aa for aa in AminoAcid1.__members__.keys()], fontsize=14)
-    axs[0].grid(True)
 
-    # Plot for ground truth sequence
-    axs[1].hist(
-        true_seq, bins=bins, alpha=0.7, color=DARK_RED, edgecolor="black", density=True
+    amino_acid_counts = (
+        data.groupby(["Amino Acid", "Type"]).size().reset_index(name="Count")
     )
-    axs[1].set_xlabel("Amino Acids", fontsize=25)
-    axs[1].set_title("True Sequence Distribution", fontsize=25)
-    axs[1].set_xticks(np.arange(20))
-    axs[1].set_xticklabels([aa for aa in AminoAcid1.__members__.keys()], fontsize=14)
-    axs[1].grid(True)
 
-    plt.tight_layout()
+    total_counts = data["Type"].value_counts()
+    amino_acid_counts["Density"] = amino_acid_counts.apply(
+        lambda row: row["Count"] / total_counts[row["Type"]], axis=1
+    )
+
+    plt.figure(figsize=(12, 6))
+    sns.barplot(
+        x="Amino Acid",
+        y="Density",
+        hue="Type",
+        data=amino_acid_counts,
+        width=0.8,
+        alpha=0.8,
+        palette={"Generated": BLUE, "True": SALMON_RED},
+        edgecolor="black",
+    )
+
+    plt.xlabel("Amino Acid", fontsize=18)
+    plt.ylabel("Density", fontsize=18)
+    plt.title("Amino Acid Distribution", fontsize=20)
+    plt.legend(title=None, fontsize=16)
+    plt.tick_params(axis="x", labelsize=15)
+    plt.tick_params(axis="y", labelsize=15)
 
     if save_path:
-        plt.savefig(save_path)
+        plt.savefig(save_path, bbox_inches="tight")
     else:
         plt.show()
+
+    plt.close()

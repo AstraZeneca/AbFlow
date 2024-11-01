@@ -41,7 +41,6 @@ rotmat = rotvec_to_rotmat(rotvec)
 rotmat = rotquat_to_rotmat(rotquat)
 rotvec = rotquat_to_rotvec(rotquat)
 rotquat = rotvec_to_rotquat(rotvec)
-
 ```
 """
 

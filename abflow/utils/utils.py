@@ -23,12 +23,9 @@ def combine_masks(masks: List[torch.Tensor], data: torch.Tensor) -> torch.Tensor
     Combine a list of boolean masks for data with shape (N_batch, ...).
     Masks may have fewer dimensions, but will be expanded to the shape of the data before combining.
 
-    Args:
-        masks: A list of boolean masks with shape less than data.
-        data: The data tensor with shape (N_batch, ...).
-
-    Returns:
-        combined_mask: A boolean tensor with the same shape as dimensions of `data`.
+    :param masks: A list of boolean masks with shape less than data.
+    :param data: The data tensor with shape (N_batch, ...).
+    :return: A boolean tensor with the same shape as dimensions of `data`.
     """
 
     combined_mask = torch.ones(data.shape, dtype=torch.bool, device=data.device)
@@ -46,12 +43,9 @@ def average_data(data: torch.Tensor, masks: List[torch.Tensor] = None) -> torch.
     Apply masks and compute the average over the masked elements for data with shapes (N_batch, ...).
     Dimensionality of data is assumed to be at least 2.
 
-    Args:
-        data: The data tensor to apply the mask to, shape (N_batch, ...).
-        masks: A list of boolean masks with shape less than data.
-
-    Returns:
-        torch.Tensor: Averaged values after applying the mask, shape (N_batch,).
+    :param data: The data tensor to apply the mask to, shape (N_batch, ...).
+    :param masks: A list of boolean masks with shape less than data.
+    :return: Averaged values after applying the mask, shape (N_batch,).
     """
     mask = combine_masks(masks, data)
 
@@ -92,12 +86,9 @@ def combine_coords(*coord_args: list[torch.Tensor], coord_dim: int = 3) -> torch
     Combines a set of identically shaped 3-D coordinates into a tensor of shape (..., 3). The combination
     preserves ordering along the 2nd-to-last dimension among the input arguments.
 
-    Args:
-        coord_args (torch.Tensor): List of tensors to combine of same shape (..., 3).
-        coord_dim (int): Dimensionality of the coordinate vectors.
-
-    Returns:
-        torch.Tensor: Combined tensor of shape (..., 3).
+    :param coord_args: List of tensors to combine of same shape (..., 3).
+    :param coord_dim: Dimensionality of the coordinate vectors.
+    :return: Combined tensor of shape (..., 3).
     """
 
     outshape = coord_args[0].shape[: len(coord_args[0].shape) - 2] + (-1, coord_dim)

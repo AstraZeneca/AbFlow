@@ -103,11 +103,9 @@ def sidechain_coords_to_dihedrals(
     sequence: torch.Tensor, sidechain_coords: torch.Tensor
 ) -> torch.Tensor:
     """
-    Args:
-        sequence: (N_batch, N_res) - the amino acid indices tensor
-        sidechain_coords: (N_batch, N_res, 14, 3) - the coordinates for sidechains
-    Returns:
-            (N_batch, N_res, 4) dihedrals padded with zeros for amino acids with less than 4 chi angles
+    :param sequence: (N_batch, N_res) - the amino acid indices tensor
+    :param sidechain_coords: (N_batch, N_res, 14, 3) - the coordinates for sidechains
+    :return: (N_batch, N_res, 4) dihedrals padded with zeros for amino acids with less than 4 chi angles
     """
 
     N_batch, N_res = sequence.shape
@@ -138,17 +136,16 @@ def full_atom_reconstruction(
 
     See alphafold supplementary Algorithm 24 for details.
 
-    Args:
-        R_bb: Rotation of backbone frames, (B, N, 3, 3).
-        t_bb: Translation of backbone frames, (B, N, 3).
-        angles: (B, N, 5), angles between (0,2pi)
-        aa: Amino acid types, (B, N).
+    :param R_bb: Rotation of backbone frames, (B, N, 3, 3).
+    :param t_bb: Translation of backbone frames, (B, N, 3).
+    :param angles: (B, N, 5), angles between (0,2pi)
+    :param aa: Amino acid types, (B, N).
 
-    Returns:
-        A tuple of atom positions and full frames, (pos14, R, t).
-        pos14: Full atom positions in pos14 representations, (B, N, 14, 3).
-        R: Rotation of backbone, psi, chi1-4 frames, (B, N, 5, 3, 3).
-        t: Rotation of backbone, psi, chi1-4 frames, (B, N, 5, 3).
+    :return: A tuple of atom positions and full frames, (pos14, R, t).
+
+    pos14: Full atom positions in pos14 representations, (B, N, 14, 3).
+    R: Rotation of backbone, psi, chi1-4 frames, (B, N, 5, 3, 3).
+    t: Rotation of backbone, psi, chi1-4 frames, (B, N, 5, 3).
     """
     N, L = aa.size()
 

@@ -26,10 +26,8 @@ def create_rotation_matrix(v1: torch.Tensor, v2: torch.Tensor) -> torch.Tensor:
 
 def get_dihedrals(coords: torch.Tensor) -> torch.Tensor:
     """
-    Args:
-        coords: (..., N_res, 4, 3).
-    Returns:
-        Dihedral angles in radians from -pi to pi, (..., N_res).
+    :param coords: Tensor of shape (..., N_res, 4, 3)
+    :return: Dihedral angles in radians from -pi to pi, (..., N_res)
     """
 
     # Get the vectors between the atoms
@@ -54,14 +52,15 @@ def get_dihedrals(coords: torch.Tensor) -> torch.Tensor:
     return dihedral_angles
 
 
-def compose_rotation_and_translation(R1, t1, R2, t2):
+def compose_rotation_and_translation(
+    R1: torch.Tensor, t1: torch.Tensor, R2: torch.Tensor, t2: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
     """
-    Args:
-        R1,t1:  Frame basis and coordinate, (N, L, 3, 3), (N, L, 3).
-        R2,t2:  Rotation and translation to be applied to (R1, t1), (N, L, 3, 3), (N, L, 3).
-    Returns
-        R_new <- R1R2
-        t_new <- R1t2 + t1
+    :param R1: Frame basis, (N, L, 3, 3)
+    :param t1: Frame coordinate, (N, L, 3)
+    :param R2: Rotation to be applied, (N, L, 3, 3)
+    :param t2: Translation to be applied, (N, L, 3)
+    :return: R_new <- R1R2, t_new <- R1t2 + t1
     """
     R_new = torch.matmul(R1, R2)  # (N, L, 3, 3)
     t_new = torch.matmul(R1, t2.unsqueeze(-1)).squeeze(-1) + t1
@@ -84,11 +83,8 @@ def create_psi_chi_rotation_matrix(angles: torch.Tensor) -> torch.Tensor:
 
     See alphafold supplementary Algorithm 25 for details.
 
-    Args:
-        angles: (B, N, 5), angles between (0,2pi)
-
-    Returns:
-        Torsional angle rotation matrices, (B, N, 5, 3, 3).
+    :param angles: (B, N, 5), angles between (0,2pi)
+    :return: Torsional angle rotation matrices, (B, N, 5, 3, 3).
     """
     batch_size, n_res = angles.shape[:2]
     sine, cosine = torch.sin(angles), torch.cos(angles)

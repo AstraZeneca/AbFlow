@@ -45,11 +45,15 @@ class AminoAcid3(IntEnum):
     TYR = 19
 
 
+AminoAcid3Index = {aa: index for index, aa in AminoAcid3.__members__.items()}
+
 # stores indices under the 1-letter code of each AA
 AminoAcid1 = IntEnum(
     "AminoAcid1",
     {protein_letters_3to1[aa]: index for aa, index in AminoAcid3.__members__.items()},
 )
+
+AminoAcid1Index = {aa: index for index, aa in AminoAcid1.__members__.items()}
 
 
 # Mappings between amino acid indices and their 3-letter and 1-letter codes
@@ -609,11 +613,8 @@ def get_rigid_group(
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Extract rigid group constants.
 
-    Args:
-        aa: Amino acid types, (B, N).
-
-    Returns:
-        A tuple of rigid group rotation, translation, atom14 group and atom14 position.
+    :param aa: Amino acid types, (B, N).
+    :return: A tuple of rigid group rotation, translation, atom14 group and atom14 position.
     """
     batch_size, n_res = aa.size()
     aa = aa.flatten()

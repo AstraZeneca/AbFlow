@@ -4,23 +4,20 @@ import torch
 def concat_dicts(dicts: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
     """
     Concatenate a list of dictionaries of tensors.
-    The tensors must have the same shape in all dictionaries.
-
-    Args:
-        dicts (list of dict): List of dictionaries with tensor values.
-
-    Returns:
-        dict: Dictionary with concatenated tensors along the first dimension.
+    The tensors must have the same batch dimension in all dictionaries.
 
     Example:
-        >>> dicts = [
-        ...     {"a": torch.tensor([1, 2]), "b": torch.tensor([3, 4])},
-        ...     {"a": torch.tensor([5, 6]), "b": torch.tensor([7, 8])},
-        ...     {"a": torch.tensor([9, 10]), "b": torch.tensor([11, 12])},
-        ... ]
-        >>> concat_dicts(dicts)
-        {'a': tensor([ 1,  2,  5,  6,  9, 10]),
-         'b': tensor([ 3,  4,  7,  8, 11, 12])}
+    >>> dicts = [
+    ...     {"a": torch.tensor([1, 2]), "b": torch.tensor([3, 4])},
+    ...     {"a": torch.tensor([5, 6]), "b": torch.tensor([7, 8])},
+    ...     {"a": torch.tensor([9, 10]), "b": torch.tensor([11, 12])},
+    ... ]
+    >>> concat_dicts(dicts)
+    {'a': tensor([ 1,  2,  5,  6,  9, 10]),
+        'b': tensor([ 3,  4,  7,  8, 11, 12])}
+
+    :param dicts: List of dictionaries with tensor values.
+    :return: Dictionary with concatenated tensors along the first dimension.
     """
 
     keys = dicts[0].keys()

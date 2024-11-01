@@ -11,9 +11,15 @@ Example usage of a concrete ManifoldFlow class:
     >>> x_1 = torch.randn(1, 10) # True data point
     >>> t = torch.tensor(0.5) # sampled time step
     >>> x_t = flow.interpolate_path(x_1, t)
-    >>> x_1_hat = neural_network(x_t)
-    >>> x_1_hat = flow.nn_to_manifold(x_1_hat)
-    >>> loss = loss_fn(x_1, x_1_hat)
+    >>> v_t = flow.get_cond_vfs(x_t, x_1, t)
+    >>> if neural network predicts x_1_hat:
+        >>> x_1_hat = neural_network(x_t)
+        >>> x_1_hat = flow.nn_to_manifold(x_1_hat)
+        >>> v_t_hat = flow.get_cond_vfs(x_t, x_1_hat, t)
+    >>> if neural network predicts v_t_hat:
+        >>> v_t_hat = neural_network(x_t)
+    >>> loss = loss_fn(v_t, v_t_hat)
+    
 
     >>> # Inference
     >>> x_0 = flow.prior_sample(size=(1, 10), device=device)
@@ -45,6 +51,7 @@ class ManifoldFlow(ABC):
     Base abstract class for manifold flow frameworks.
 
     Child classes **must** instantiate the following attributes:
+        - _schedule: The flow schedule with FlowSchedule class.
         - _prior: The prior distribution with BaseDistribution class.
 
     Child classes **must** implement the following 3 core methods:
