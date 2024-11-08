@@ -37,11 +37,10 @@ class AbFlow(LightningModule):
         """
         Initialize the AbFlow model.
 
-        Args:
-            network (nn.Module): The neural network architecture.
-            loss_weighting (Dict[str, float]): The loss weighting for different components of the loss function.
-            learning_rate (float, optional): The optimizer learning rate. Defaults to 1e-4.
-            seed (Optional[int], optional): The random seed used for reproducibility. Defaults to None.
+        param network: The neural network architecture.
+        param loss_weighting: The loss weighting for different components of the loss function.
+        param learning_rate: The optimizer learning rate. Defaults to 1e-4.
+        param seed: The random seed used for reproducibility. Defaults to None.
         """
 
         super().__init__()

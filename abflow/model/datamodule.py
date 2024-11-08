@@ -15,20 +15,16 @@ from .utils import rm_duplicates
 class AntibodyAntigenDataset(Dataset):
     """Antibody-antigen structure dataset."""
 
-    def __init__(self, config: dict, split: str = "train", is_transform: bool = False):
+    def __init__(self, config: dict, split: str = "train"):
         """
         :param config: Configuration dictionary.
         :param split: Dataset split (train, val, test).
-        :param is_transform: Apply data transformation if True.
         """
         super().__init__()
 
         self.config = config
         self.split = split
-        self.is_transform = is_transform
-        self.transform = None  # TODO: Implement transformations
         self.db_connection = None
-
         self.data_path = config["paths"]["data"]
         self.map_size = 250 * 1024**3  # 250GB - Maximum size of the whole DB
         self._load_entries()
@@ -37,7 +33,9 @@ class AntibodyAntigenDataset(Dataset):
 
     @property
     def structure_data_path(self):
-        return os.path.join(self.data_path, self.config["dataset"], "structures.lmdb")
+        return os.path.join(
+            self.data_path, self.config["dataset"], "processed_structures.lmdb"
+        )
 
     def _load_entries(self):
         """Loads the entries of the dataset"""
@@ -62,7 +60,7 @@ class AntibodyAntigenDataset(Dataset):
         self.id_to_cluster: {'7st5_H_L_A': '7st5_H_L_A', '7st5_h_l_F': '7st5_H_L_A', '7trk_H_h_AB': '7trk_H_h_AB',...}
         """
 
-        random.seed(self.config["seed"])
+        random.seed(self.config["dataset"]["seed"])
 
         self.cluster_path = os.path.join(
             self.data_path, self.config["dataset"], "cluster_result_cluster.tsv"
@@ -156,19 +154,11 @@ class AntibodyAntigenDataset(Dataset):
                 )
             )
 
-        pre_filter_len = len(self.split_ids)
-        self.split_ids = self._filter_ids(self.split_ids, sabdab_df)
-
         print(f"Number of RAbD id: {len(rabd_ids)}")
         print(f"Number of clusters in training: {len(train_clusters)}")
         print(f"Number of clusters in validation: {len(val_clusters)}")
         print(f"Number of clusters in test: {len(test_clusters)}")
-        print(
-            f"Number of pre-filtered structures in the {self.split} split: {pre_filter_len}"
-        )
-        print(
-            f"Number of post-filtered structures in the {self.split} split: {len(self.split_ids)}"
-        )
+        print(f"Number of structures in the {self.split} split: {len(self.split_ids)}")
 
     def __len__(self):
         """Returns number of samples in the data"""
@@ -182,11 +172,6 @@ class AntibodyAntigenDataset(Dataset):
 
     def _get_data_from_id(self, id: str):
         data = self._get_structure(id)
-        data = (
-            self.transform(data)
-            if self.is_transform and self.transform is not None
-            else data
-        )
         return data
 
     def _get_structure(self, db_id: str):
@@ -212,36 +197,6 @@ class AntibodyAntigenDataset(Dataset):
         with self.db_connection.begin() as txn:
             return pickle.loads(txn.get(db_id.encode()))
 
-    def _filter_ids(self, ids_list: list, data_df: pd.DataFrame):
-        """Filter the entries of the dataset
-
-        Data is filtered based on the following criteria:
-        - The structure must at least contain an antigen and a heavy chain
-        - If the structure does not contain a light chain, it must be a nanobody
-        as described in the 'compound' column of the data_df (searching for 'nanobody' or 'VHH' as substrings).
-        """
-        filtered_ids = []
-        for ids in ids_list:
-            try:
-                data = self._get_structure(ids)
-            except TypeError:
-                continue
-            if data["antigen"] is None or data["heavy"] is None:
-                continue
-            else:
-                if data["light"] is None:
-                    row = data_df[
-                        data_df["pdb"].str.contains(ids[:4], case=False, na=False)
-                    ]
-                    if len(row["compound"].values) == 0:
-                        continue
-                    compound_text = row["compound"].values[0].lower()
-                    if not ("nanobody" in compound_text or "vhh" in compound_text):
-                        continue
-
-            filtered_ids.append(ids)
-        return filtered_ids
-
 
 class AntibodyAntigenDataModule(LightningDataModule):
     """A datamodule for antibody-antigen complexes."""
@@ -253,15 +208,9 @@ class AntibodyAntigenDataModule(LightningDataModule):
         super().__init__()
 
         self.config = config
-        self._train_dataset = AntibodyAntigenDataset(
-            config, split="train", is_transform=True
-        )
-        self._val_dataset = AntibodyAntigenDataset(
-            config, split="val", is_transform=True
-        )
-        self._test_dataset = AntibodyAntigenDataset(
-            config, split="test", is_transform=True
-        )
+        self._train_dataset = AntibodyAntigenDataset(config, split="train")
+        self._val_dataset = AntibodyAntigenDataset(config, split="val")
+        self._test_dataset = AntibodyAntigenDataset(config, split="test")
 
         self._num_workers = config["num_workers"]
         self._batch_size = config["batch_size"]

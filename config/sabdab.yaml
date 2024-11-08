@@ -1,40 +1,46 @@
 ---
-seed: 2025
-load_val_test: True  # True only during training, and False during data pre-processing
-scheme: chothia       # Scheme to use for sequence alignment. Default: chothia
-num_val_cluster: 10
 
+# data preprocessing
 paths:
     data: /scratch/hz362/datavol/data/
     model: /scratch/hz362/datavol/model/
+redesign:
+    framework: False
+    hcdr1: False
+    hcdr2: False
+    hcdr3: True
+    lcdr1: True
+    lcdr2: False
+    lcdr3: False
+crop: 
+    max_crop_size: 180 # ideally 192
+    antigen_crop_size: 60 # ideally 64
 
+# model settings
+design_mode: ["sequence", "backbone", "sidechain"]
 project_name: flow_matching
-model_name: predict_backbone_HCDR3_200e
+model_name: all_atom_de_novo
 
+# training settings
 trainer:
     devices: 8
     max_epochs: 200
     val_check_interval: 0.5
-    gradient_clip_val: 0.0
-
+    gradient_clip_val: 1.0
 checkpoint:
     path: null
     load_optimizer: False
 
-design_mode: ["backbone"] # ["sequence", "backbone"]
-redesign:
-    FRAMEWORK: False
-    HCDR1: False
-    HCDR2: False
-    HCDR3: True
-    LCDR1: False
-    LCDR2: False
-    LCDR3: False
-crop: True
-crop_args:
-    max_crop_size: 180 # ideally 192
-    antigen_crop_size: 60 # ideally 64
+# abflow data spliting
+dataset:
+    seed: 2025
+    load_val_test: True  # True only during training, and False during data pre-processing
+    scheme: chothia       # Scheme to use for sequence alignment. Default: chothia
+    num_val_cluster: 10
+datamodule:
+    batch_size: 2 # batch size per GPU
 
+# abflow model settings
 model:
     loss_weighting:
         trans_vf_loss: 1.0
@@ -45,6 +51,7 @@ model:
     learning_rate: 0.0001
     seed: 42
 
+# abflow network settings
 network:
     c_s: 96 # default: 384
     c_z: 32 # default: 128
@@ -77,6 +84,3 @@ network:
             N_head: 6 # 12
             N_query_points: 4
             N_point_values: 8
-
-datamodule:
-    batch_size: 2 # batch size per GPU
