@@ -9,6 +9,7 @@ import lmdb
 import pickle
 import os
 import torch
+
 from tqdm import tqdm
 
 from abflow.utils.arguments import get_arguments, get_config, print_config_summary
@@ -41,6 +42,9 @@ def preprocess_and_save(config: dict):
     entries_path = os.path.join(data_folder, "entries_list.pkl")
     source_db_path = os.path.join(data_folder, "structures.lmdb")
     output_db_path = os.path.join(data_folder, "processed_structures.lmdb")
+
+    if os.path.exists(output_db_path):
+        os.remove(output_db_path)
 
     with open(entries_path, "rb") as f:
         all_entries = pickle.load(f)
@@ -91,6 +95,8 @@ def preprocess_and_save(config: dict):
             # Serialize and store in the new LMDB
             processed_data = pickle.dumps(processed_data)
             output_txn.put(db_id.encode(), processed_data)
+
+            break
 
     source_db.close()
     output_db.close()
@@ -356,9 +362,19 @@ def pad_data(data: dict, max_res: int) -> dict:
 
     :param data: Dictionary with value each of shape (N_res, ...).
     :param max_res: Maximum number of residues.
+
+    :return: Dictionary containing the padded data. One additional key is added:
+        - valid_mask: A tensor of shape (max_res,) indicating which residues are valid (True) and which are padded (False).
     """
 
     padded_data = {}
+    valid_length = data["res_type"].size(0)
+    valid_mask = torch.cat(
+        [
+            torch.ones(valid_length, dtype=torch.bool),
+            torch.zeros(max_res - valid_length, dtype=torch.bool),
+        ]
+    )
     for key, value in data.items():
         if isinstance(value, torch.Tensor):
             padding = max_res - value.size(0)
@@ -370,6 +386,7 @@ def pad_data(data: dict, max_res: int) -> dict:
             else:
                 padded_data[key] = value
 
+    padded_data["valid_mask"] = valid_mask
     return padded_data
 
 
