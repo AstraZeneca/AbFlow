@@ -9,7 +9,7 @@ from torch.utils.data import Dataset
 from pytorch_lightning import LightningDataModule
 from itertools import chain
 
-from .utils import rm_duplicates
+from .utils import rm_duplicates, batch_dict
 
 
 class AntibodyAntigenDataset(Dataset):
@@ -34,14 +34,14 @@ class AntibodyAntigenDataset(Dataset):
     @property
     def structure_data_path(self):
         return os.path.join(
-            self.data_path, self.config["dataset"], "processed_structures.lmdb"
+            self.data_path, self.config["name"], "processed_structures.lmdb"
         )
 
     def _load_entries(self):
         """Loads the entries of the dataset"""
 
         entries_path = os.path.join(
-            self.data_path, self.config["dataset"], "entries_list.pkl"
+            self.data_path, self.config["name"], "entries_list.pkl"
         )
 
         with open(entries_path, "rb") as f:
@@ -60,10 +60,10 @@ class AntibodyAntigenDataset(Dataset):
         self.id_to_cluster: {'7st5_H_L_A': '7st5_H_L_A', '7st5_h_l_F': '7st5_H_L_A', '7trk_H_h_AB': '7trk_H_h_AB',...}
         """
 
-        random.seed(self.config["dataset"]["seed"])
+        random.seed(self.config["seed"])
 
         self.cluster_path = os.path.join(
-            self.data_path, self.config["dataset"], "cluster_result_cluster.tsv"
+            self.data_path, self.config["name"], "cluster_result_cluster.tsv"
         )
 
         clusters, id_to_cluster = {}, {}
@@ -208,15 +208,29 @@ class AntibodyAntigenDataModule(LightningDataModule):
         super().__init__()
 
         self.config = config
-        self._train_dataset = AntibodyAntigenDataset(config, split="train")
-        self._val_dataset = AntibodyAntigenDataset(config, split="val")
-        self._test_dataset = AntibodyAntigenDataset(config, split="test")
+        self._train_dataset = AntibodyAntigenDataset(config["dataset"], split="train")
+        self._val_dataset = AntibodyAntigenDataset(config["dataset"], split="val")
+        self._test_dataset = AntibodyAntigenDataset(config["dataset"], split="test")
 
         self._num_workers = config["num_workers"]
         self._batch_size = config["batch_size"]
 
     def __repr__(self):
         return f"{self.__class__.__name__}(batch_size={self._batch_size})"
+
+    def collate(
+        self, data_dict: list[dict[str, torch.Tensor]]
+    ) -> dict[str, torch.Tensor]:
+        """
+        Combines a list of dictionaries into a single dictionary with an additional batch dimension.
+        """
+        data_dict = batch_dict(data_dict)
+        return data_dict
+
+    @property
+    def batch_size(self) -> int:
+        """The batch size."""
+        return self._batch_size
 
     @property
     def train_dataset(self):
@@ -238,6 +252,7 @@ class AntibodyAntigenDataModule(LightningDataModule):
         return torch.utils.data.DataLoader(
             self._train_dataset,
             shuffle=True,
+            collate_fn=self.collate,
             num_workers=self._num_workers,
             batch_size=self._batch_size,
             pin_memory=True,
@@ -250,6 +265,7 @@ class AntibodyAntigenDataModule(LightningDataModule):
         return torch.utils.data.DataLoader(
             self._val_dataset,
             shuffle=False,
+            collate_fn=self.collate,
             num_workers=self._num_workers,
             batch_size=self._batch_size,
             pin_memory=True,
@@ -263,6 +279,7 @@ class AntibodyAntigenDataModule(LightningDataModule):
         return torch.utils.data.DataLoader(
             self._test_dataset,
             shuffle=False,
+            collate_fn=self.collate,
             num_workers=self._num_workers,
             batch_size=self._batch_size,
             pin_memory=True,

@@ -280,17 +280,15 @@ def get_bb_clash_violation(
     Be aware the mask region to calculate bond angle has to be continuous (assuming all residues are covalently bonded in order).
     This implementation is adapted from loopgen (https://arxiv.org/abs/2310.07051).
 
-    Args:
-        N_coords: Predicted N coordinates, shape (N_batch, N_res, 3).
-        CA_coords: Predicted CA coordinates, shape (N_batch, N_res, 3).
-        C_coords: Predicted C coordinates, shape (N_batch, N_res, 3).
-        tolerance: Tolerance for clash detection. Defaults to 1.5.
-        masks_dim_1: List of masks to apply to the first residue dimension, each shape (N_batch, N_res).
-        masks_dim_2: List of masks to apply to the second residue dimension, each shape (N_batch, N_res).
+    :param N_coords: Predicted N coordinates, shape (N_batch, N_res, 3).
+    :param CA_coords: Predicted CA coordinates, shape (N_batch, N_res, 3).
+    :param C_coords: Predicted C coordinates, shape (N_batch, N_res, 3).
+    :param tolerance: Tolerance for clash detection. Defaults to 1.5.
+    :param masks_dim_1: List of masks to apply to the first residue dimension, each shape (N_batch, N_res).
+    :param masks_dim_2: List of masks to apply to the second residue dimension, each shape (N_batch, N_res).
 
-    Returns:
-        torch.Tensor: Backbone clash loss for each complex, shape (N_batch,).
-        torch.Tensor: Percentage of residue with backbone clash violation for each complex, shape (N_batch,).
+    :return: Backbone clash loss for each complex, shape (N_batch,).
+    :return: Percentage of residue with backbone clash violation for each complex, shape (N_batch,).
     """
 
     N_N_lit_dist = 2.0 * AtomVanDerWaalRadii["N"].value
@@ -304,9 +302,13 @@ def get_bb_clash_violation(
     N_C_dist = torch.cdist(N_coords, C_coords.roll(1, dims=-2), p=2)
     CA_C_dist = torch.cdist(CA_coords, C_coords, p=2)
 
+    # cut the first row and column of N_C_dist
+    N_C_dist[:, 0] = C_N_lit_dist
+    N_C_dist[:, :, 0] = C_N_lit_dist
+
     # fill diagonals so that each residue itself is not penalised for being within VDW radius
-    diag_mask_matrix = torch.eye(N_dist.shape[1], device=N_dist.device).expand_as(
-        N_dist
+    diag_mask_matrix = (
+        torch.eye(N_dist.shape[1], device=N_dist.device).expand_as(N_dist).bool()
     )
     N_dist = mask_data(N_dist, 1e9, diag_mask_matrix)
     CA_dist = mask_data(CA_dist, 1e9, diag_mask_matrix)
@@ -332,7 +334,10 @@ def get_bb_clash_violation(
     )
     masks_dim_2 = [mask[:, None, :] for mask in masks_dim_2]
     mask_dim_2 = combine_masks(masks_dim_2, total_clash_loss)
-    total_clash_loss = total_clash_loss.sum(dim=-1) / (mask_dim_2.sum(dim=-1) + 1e-9)
+
+    total_clash_loss = (total_clash_loss * mask_dim_2).sum(dim=-1) / (
+        mask_dim_2.sum(dim=-1) + 1e-9
+    )
     total_clash_violation = (total_clash_loss > 0.0).float()
 
     clash_loss = average_data(total_clash_loss, masks=masks_dim_1)
@@ -359,9 +364,14 @@ def get_bb_bond_angle_violation(
     Be aware the mask region to calculate bond angle has to be continuous (assuming all residues are covalently bonded in order).
     This implementation is adapted from loopgen (https://arxiv.org/abs/2310.07051).
 
-    Returns:
-        torch.Tensor: Bond angle loss for each complex, shape (N_batch,).
-        torch.Tensor: Percentage of residues with bond angle violation for each complex, shape (N_batch,).
+    :param N_coords: Predicted N coordinates, shape (N_batch, N_res, 3).
+    :param CA_coords: Predicted CA coordinates, shape (N_batch, N_res, 3).
+    :param C_coords: Predicted C coordinates, shape (N_batch, N_res, 3).
+    :param num_stds: Number of standard deviations to use for the flat-bottomed loss. Defaults to 12.
+    :param masks: List of masks to apply, each shape (N_batch, N_res).
+
+    :return: Bond angle loss for each complex, shape (N_batch,).
+    :return: Percentage of residues with bond angle violation for each complex, shape (N_batch,).
     """
 
     N_CA_vectors = F.normalize(N_coords - CA_coords, dim=-1)
@@ -378,22 +388,26 @@ def get_bb_bond_angle_violation(
     CA_C_N_bond_angles = torch.acos(cos_CA_C_N_bond_angles)
     C_N_CA_bond_angles = torch.acos(cos_C_N_CA_bond_angles)
 
-    CA_C_N_bond_angles[:, -1] = BondAngles["CA_C_N"].value
-    C_N_CA_bond_angles[:, -1] = BondAngles["C_N_CA"].value
+    # set the last element to the literature value
+    for i in range(N_coords.shape[0]):
+        mask = combine_masks(masks, N_CA_C_bond_angles)
+        last_valid_idx = torch.nonzero(mask[i], as_tuple=True)[0].max().item()
+        CA_C_N_bond_angles[i, last_valid_idx] = BackboneBondAngles["CA_C_N"].value
+        C_N_CA_bond_angles[i, last_valid_idx] = BackboneBondAngles["C_N_CA"].value
 
     N_CA_C_angle_loss = torch.clamp_min(
-        torch.abs(N_CA_C_bond_angles - BondAngles["N_CA_C"].value)
-        - num_stds * BondAngleStdDevs["N_CA_C"].value,
+        torch.abs(N_CA_C_bond_angles - BackboneBondAngles["N_CA_C"].value)
+        - num_stds * BackboneBondAngleStdDevs["N_CA_C"].value,
         0.0,
     )
     CA_C_N_angle_loss = torch.clamp_min(
-        torch.abs(CA_C_N_bond_angles - BondAngles["CA_C_N"].value)
-        - num_stds * BondAngleStdDevs["CA_C_N"].value,
+        torch.abs(CA_C_N_bond_angles - BackboneBondAngles["CA_C_N"].value)
+        - num_stds * BackboneBondAngleStdDevs["CA_C_N"].value,
         0.0,
     )
     C_N_CA_angle_loss = torch.clamp_min(
-        torch.abs(C_N_CA_bond_angles - BondAngles["C_N_CA"].value)
-        - num_stds * BondAngleStdDevs["C_N_CA"].value,
+        torch.abs(C_N_CA_bond_angles - BackboneBondAngles["C_N_CA"].value)
+        - num_stds * BackboneBondAngleStdDevs["C_N_CA"].value,
         0.0,
     )
 
@@ -423,29 +437,38 @@ def get_bb_bond_length_violation(
     Be aware the mask region to calculate bond length has to be continuous (assuming all residues are covalently bonded in order).
     This implementation is adapted from loopgen (https://arxiv.org/abs/2310.07051).
 
-    Returns:
-        torch.Tensor: Bond length loss for each complex, shape (N_batch,).
-        torch.Tensor: Percentage of residues with bond length violation for each complex, shape (N_batch,).
+    :param N_coords: Predicted N coordinates, shape (N_batch, N_res, 3).
+    :param CA_coords: Predicted CA coordinates, shape (N_batch, N_res, 3).
+    :param C_coords: Predicted C coordinates, shape (N_batch, N_res, 3).
+    :param num_stds: Number of standard deviations to use for the flat-bottomed loss. Defaults to 12.
+    :param masks: List of masks to apply, each shape (N_batch, N_res).
+
+    :return: Bond length loss for each complex, shape (N_batch,).
+    :return: Percentage of residues with bond length violation for each complex, shape (N_batch,).
     """
     N_CA_bond_lengths = torch.norm(N_coords - CA_coords, dim=-1)
     CA_C_bond_lengths = torch.norm(CA_coords - C_coords, dim=-1)
     # Roll the N coords, so that the coords are lined up correctly, and then cut the last element
     C_N_bond_lengths = torch.norm(C_coords - N_coords.roll(-1, dims=-2), dim=-1)
-    C_N_bond_lengths[:, -1] = BondLengths["C_N"].value
+    # set the last element to the literature value
+    for i in range(N_coords.shape[0]):
+        mask = combine_masks(masks, N_CA_bond_lengths)
+        last_valid_idx = torch.nonzero(mask[i], as_tuple=True)[0].max().item()
+        C_N_bond_lengths[i, last_valid_idx] = BackboneBondLengths["C_N"].value
 
     N_CA_length_loss = torch.clamp_min(
-        torch.abs(N_CA_bond_lengths - BondLengths["N_CA"].value)
-        - num_stds * BondLengthStdDevs["N_CA"].value,
+        torch.abs(N_CA_bond_lengths - BackboneBondLengths["N_CA"].value)
+        - num_stds * BackboneBondLengthStdDevs["N_CA"].value,
         0.0,
     )
     CA_C_length_loss = torch.clamp_min(
-        torch.abs(CA_C_bond_lengths - BondLengths["CA_C"].value)
-        - num_stds * BondLengthStdDevs["CA_C"].value,
+        torch.abs(CA_C_bond_lengths - BackboneBondLengths["CA_C"].value)
+        - num_stds * BackboneBondLengthStdDevs["CA_C"].value,
         0.0,
     )
     C_N_length_loss = torch.clamp_min(
-        torch.abs(C_N_bond_lengths - BondLengths["C_N"].value)
-        - num_stds * BondLengthStdDevs["C_N"].value,
+        torch.abs(C_N_bond_lengths - BackboneBondLengths["C_N"].value)
+        - num_stds * BackboneBondLengthStdDevs["C_N"].value,
         0.0,
     )
 
@@ -471,10 +494,7 @@ def get_total_violation(
     Returns a binary float tensor with a 1 for each structure with a violation,
     and a 0 for each structure without a violation.
 
-    Returns:
-        torch.Tensor: Violation tensor for each complex, containing
-        a 1 for each structure with a violation, and
-        a 0 for each structure without a violation, shape (N_batch,).
+    :return: Violation tensor for each complex, containing a 1 for each structure with a violation, and a 0 for each structure without a violation, shape (N_batch,).
     """
 
     _, bond_length_violation = get_bb_bond_length_violation(
@@ -508,13 +528,11 @@ def get_sidechain_mae(
     \text{MAE} = \frac{1}{N} \sum_{i=1}^{N} \left| \text{pred\_angle}_i - \text{true\_angle}_i \right|
     \]
 
-    Args:
-        pred_dihedral_angles: Predicted dihedral angles, shape (N_batch, N_res, 4).
-        true_dihedral_angles: True dihedral angles, shape (N_batch, N_res, 4).
-        masks: List of masks to apply, each shape (N_batch, N_res) or (N_batch, N_res, 4) for sidechain masks.
+    :param pred_dihedral_angles: Predicted dihedral angles, shape (N_batch, N_res, 4).
+    :param true_dihedral_angles: True dihedral angles, shape (N_batch, N_res, 4).
+    :param masks: List of masks to apply, each shape (N_batch, N_res) or (N_batch, N_res, 4) for sidechain masks.
 
-    Returns:
-        torch.Tensor: Sidechain MAE score, shape (N_batch,).
+    :return: Sidechain MAE score, shape (N_batch,).
     """
     diff = torch.abs(pred_dihedral_angles - true_dihedral_angles)
     sidechain_mae = average_data(diff, masks=masks)

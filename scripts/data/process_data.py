@@ -1,7 +1,7 @@
 """
 This script process a saved LMDB database to the input data dict in lmdb format.
 
-To use this script, run: python scripts/data/process_data.py -d sabdab 
+To use this script, run: python scripts/data/process_data.py -d sabdab
 The config file is at: ./config/sabdab.yaml
 """
 
@@ -38,7 +38,7 @@ backbone_atoms_index_to_names = {0: "N", 1: "CA", 2: "C", 3: "O"}
 
 def preprocess_and_save(config: dict):
 
-    data_folder = f"{config['paths']['data']}{config['dataset']}"
+    data_folder = f"{config['paths']['data']}{config['name']}"
     entries_path = os.path.join(data_folder, "entries_list.pkl")
     source_db_path = os.path.join(data_folder, "structures.lmdb")
     output_db_path = os.path.join(data_folder, "processed_structures.lmdb")
@@ -95,8 +95,6 @@ def preprocess_and_save(config: dict):
             # Serialize and store in the new LMDB
             processed_data = pickle.dumps(processed_data)
             output_txn.put(db_id.encode(), processed_data)
-
-            break
 
     source_db.close()
     output_db.close()
@@ -394,4 +392,4 @@ if __name__ == "__main__":
     args = get_arguments()
     config = get_config(args)
     print_config_summary(config, args)
-    preprocess_and_save(config)
+    preprocess_and_save(config["datamodule"]["dataset"])

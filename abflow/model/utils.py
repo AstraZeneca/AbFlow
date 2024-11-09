@@ -1,6 +1,17 @@
 import torch
 
 
+def batch_dict(data_dict: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
+    """
+    Combine a list of dictionaries into a single dictionary with an additional batch dimension.
+    """
+    keys = data_dict[0].keys()
+    batched_dict = {
+        key: torch.stack([d[key] for d in data_dict], dim=0) for key in keys
+    }
+    return batched_dict
+
+
 def concat_dicts(dicts: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
     """
     Concatenate a list of dictionaries of tensors.

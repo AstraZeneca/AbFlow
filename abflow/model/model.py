@@ -31,6 +31,7 @@ class AbFlow(LightningModule):
         self,
         network: nn.Module,
         loss_weighting: Dict[str, float],
+        design_mode: list[str],
         learning_rate: float = 1e-4,
         seed: Optional[int] = None,
     ):
@@ -39,6 +40,7 @@ class AbFlow(LightningModule):
 
         param network: The neural network architecture.
         param loss_weighting: The loss weighting for different components of the loss function.
+        param design_mode: The design mode for redesigning loops. All-atom de novo design is ['sequence', 'backbone', 'sidechain'].
         param learning_rate: The optimizer learning rate. Defaults to 1e-4.
         param seed: The random seed used for reproducibility. Defaults to None.
         """
@@ -49,22 +51,15 @@ class AbFlow(LightningModule):
         self._learning_rate = learning_rate
         self._seed = seed
         self._loss_weighting = loss_weighting
+        self._design_mode = design_mode
 
         self._epoch_loss = {
-            "val_sequence": [],
-            "val_backbone": [],
-            "val_backbone_sequence": [],
-            "test_sequence": [],
-            "test_backbone": [],
-            "test_backbone_sequence": [],
+            "val": [],
+            "test": [],
         }
         self._epoch_metrics = {
-            "val_sequence": [],
-            "val_backbone": [],
-            "val_backbone_sequence": [],
-            "test_sequence": [],
-            "test_backbone": [],
-            "test_backbone_sequence": [],
+            "val": [],
+            "test": [],
         }
 
     def configure_optimizers(self) -> torch.optim.Optimizer:
@@ -77,14 +72,17 @@ class AbFlow(LightningModule):
         return self._network
 
     def loss(
-        self, d_star: Dict[str, torch.Tensor], design_mode: list[str], network_mode: str
+        self,
+        data_dict: Dict[str, torch.Tensor],
+        design_mode: list[str],
+        network_mode: str,
     ) -> Tuple[torch.Tensor]:
         """
         Compute the loss for the given input data.
 
-        Args:
-            d_star (Dict[str, torch.Tensor]): The input data dictionary.
-            network_mode (str): The network_mode of network (e.g., 'train', 'eval').
+        params data_dict: The input data dictionary.
+        params design_mode: The design mode for redesigning loops.
+        params network_mode: The network mode of network (e.g., 'train', 'eval').
 
         Returns:
             Tuple[torch.Tensor, ...]: The computed losses for different components.
@@ -97,10 +95,10 @@ class AbFlow(LightningModule):
             p_lddt_i,
             p_pred_distogram_ij,
             p_true_distogram_ij,
-        ) = self._network(d_star, design_mode=design_mode, network_mode=network_mode)
+        ) = self._network(data_dict, design_mode=design_mode, network_mode=network_mode)
 
-        redesign_mask = d_star["redesign_mask"]
-        valid_mask = d_star["valid_mask"]
+        redesign_mask = data_dict["redesign_mask"]
+        valid_mask = data_dict["valid_mask"]
 
         trans_vf_loss = (
             get_mse_loss(
@@ -159,7 +157,7 @@ class AbFlow(LightningModule):
         Perform a single training step.
         """
 
-        true_d_star = batch
+        true_data_dict = batch
 
         (
             trans_vf_loss,
@@ -168,9 +166,9 @@ class AbFlow(LightningModule):
             plddt_loss,
             distogram_loss,
         ) = self.loss(
-            true_d_star,
+            true_data_dict,
             network_mode="train",
-            design_mode=true_d_star["design_mode"],
+            design_mode=self._design_mode,
         )
 
         loss = trans_vf_loss + rots_vf_loss + seq_vf_loss + plddt_loss + distogram_loss
@@ -197,7 +195,6 @@ class AbFlow(LightningModule):
             batch: The input batch of data.
             step_type (str): The type of step ('val' or 'test').
         """
-        design_type = "_".join(sorted(design_mode))
         true_d_star = batch
 
         # validation or test loss
@@ -205,10 +202,10 @@ class AbFlow(LightningModule):
             self.loss(
                 true_d_star,
                 network_mode="train",
-                design_mode=true_d_star["design_mode"],
+                design_mode=self._design_mode,
             )
         )
-        self._epoch_loss[f"{step_type}_{design_type}"].append(step_loss)
+        self._epoch_loss[f"{step_type}"].append(step_loss)
 
         # Redesign the antibody/antigen complexes
         pred_d_star, _ = self._generate_complexes(
@@ -270,21 +267,21 @@ class AbFlow(LightningModule):
             pred_d_star["lddt"], masks=[valid_mask, redesign_mask]
         )
 
-        # get all-atom rmsd - need to impute and ground truth all-atom coordinates
+        # get sidechain dihedral mae
 
         # get structure-sequence consistence from AntiFold
 
         step_metrics = {
-            f"complex_aar_{design_type}": complex_aar,
-            f"redesign_aar_{design_type}": redesign_aar,
-            f"complex_bb_rmsd_{design_type}": complex_bb_rmsd,
-            f"redesign_bb_rmsd_{design_type}": redesign_bb_rmsd,
-            f"complex_CA_rmsd_{design_type}": complex_CA_rmsd,
-            f"redesign_CA_rmsd_{design_type}": redesign_CA_rmsd,
-            f"complex_CA_tm_score_{design_type}": complex_CA_tm_score,
-            f"redesign_CA_tm_score_{design_type}": redesign_CA_tm_score,
-            f"redesign_CA_plddt_{design_type}": redesign_CA_plddt,
-            f"redesign_CA_lddt_{design_type}": redesign_CA_lddt,
+            f"complex_aar": complex_aar,
+            f"redesign_aar": redesign_aar,
+            f"complex_bb_rmsd": complex_bb_rmsd,
+            f"redesign_bb_rmsd": redesign_bb_rmsd,
+            f"complex_CA_rmsd": complex_CA_rmsd,
+            f"redesign_CA_rmsd": redesign_CA_rmsd,
+            f"complex_CA_tm_score": complex_CA_tm_score,
+            f"redesign_CA_tm_score": redesign_CA_tm_score,
+            f"redesign_CA_plddt": redesign_CA_plddt,
+            f"redesign_CA_lddt": redesign_CA_lddt,
         }
 
         # Calculate CDR-specific metrics
@@ -343,100 +340,67 @@ class AbFlow(LightningModule):
                 pred_d_star["lddt"], masks=[valid_mask, cdr_mask, redesign_mask]
             )
 
-            step_metrics[f"{cdr_name}_aar_{design_type}"] = cdr_aar
-            step_metrics[f"{cdr_name}_bb_rmsd_{design_type}"] = cdr_bb_rmsd
-            step_metrics[f"{cdr_name}_bb_clash_violation_{design_type}"] = (
-                cdr_bb_clash_violation
-            )
-            step_metrics[f"{cdr_name}_bb_bond_angle_violation_{design_type}"] = (
+            step_metrics[f"{cdr_name}_aar"] = cdr_aar
+            step_metrics[f"{cdr_name}_bb_rmsd"] = cdr_bb_rmsd
+            step_metrics[f"{cdr_name}_bb_clash_violation"] = cdr_bb_clash_violation
+            step_metrics[f"{cdr_name}_bb_bond_angle_violation"] = (
                 cdr_bb_bond_angle_violation
             )
-            step_metrics[f"{cdr_name}_bb_bond_length_violation_{design_type}"] = (
+            step_metrics[f"{cdr_name}_bb_bond_length_violation"] = (
                 cdr_bb_bond_length_violation
             )
-            step_metrics[f"{cdr_name}_bb_violation_{design_type}"] = cdr_bb_violation
-            step_metrics[f"{cdr_name}_CA_rmsd_{design_type}"] = cdr_CA_rmsd
-            step_metrics[f"{cdr_name}_CA_tm_score_{design_type}"] = cdr_CA_tm_score
-            step_metrics[f"{cdr_name}_CA_plddt_{design_type}"] = cdr_CA_plddt
-            step_metrics[f"{cdr_name}_CA_lddt_{design_type}"] = cdr_CA_lddt
+            step_metrics[f"{cdr_name}_bb_violation"] = cdr_bb_violation
+            step_metrics[f"{cdr_name}_CA_rmsd"] = cdr_CA_rmsd
+            step_metrics[f"{cdr_name}_CA_tm_score"] = cdr_CA_tm_score
+            step_metrics[f"{cdr_name}_CA_plddt"] = cdr_CA_plddt
+            step_metrics[f"{cdr_name}_CA_lddt"] = cdr_CA_lddt
 
-        self._epoch_metrics[f"{step_type}_{design_type}"].append(step_metrics)
+        self._epoch_metrics[f"{step_type}"].append(step_metrics)
 
     def validation_step(self, batch, batch_idx):
         """Perform a single validation step."""
-        self.common_step(batch, step_type="val", design_mode=["sequence"])
-        self.common_step(batch, step_type="val", design_mode=["backbone"])
-        self.common_step(batch, step_type="val", design_mode=["sequence", "backbone"])
+        self.common_step(batch, step_type="val", design_mode=self._design_mode)
 
     def test_step(self, batch, batch_idx):
         """Perform a single test step."""
-        self.common_step(batch, step_type="test", design_mode=["sequence"])
-        self.common_step(batch, step_type="test", design_mode=["backbone"])
-        self.common_step(batch, step_type="test", design_mode=["sequence", "backbone"])
+        self.common_step(batch, step_type="test", design_mode=self._design_mode)
 
-    def on_epoch_end(self, epoch_type: str, design_mode: list[str]):
+    def on_epoch_end(self, epoch_type: str):
         """
         End-of-epoch processing.
 
         Args:
             epoch_type (str): The type of epoch ('val' or 'test').
         """
-        design_type = "_".join(sorted(design_mode))
-        avg_epoch_loss = torch.mean(
-            torch.stack(self._epoch_loss[f"{epoch_type}_{design_type}"])
-        )
-        epoch_metrics = concat_dicts(self._epoch_metrics[f"{epoch_type}_{design_type}"])
+        avg_epoch_loss = torch.mean(torch.stack(self._epoch_loss[f"{epoch_type}"]))
+        epoch_metrics = concat_dicts(self._epoch_metrics[f"{epoch_type}"])
 
         log_values = {
-            f"{epoch_type}_loss_{design_type}": avg_epoch_loss.item(),
-            f"{epoch_type}_complex_aar_{design_type}": epoch_metrics[
-                f"complex_aar_{design_type}"
-            ]
+            f"{epoch_type}_loss": avg_epoch_loss.item(),
+            f"{epoch_type}_complex_aar": epoch_metrics[f"complex_aar"].mean().item(),
+            f"{epoch_type}_redesign_aar": epoch_metrics[f"redesign_aar"].mean().item(),
+            f"{epoch_type}_complex_bb_rmsd": epoch_metrics[f"complex_bb_rmsd"]
             .mean()
             .item(),
-            f"{epoch_type}_redesign_aar_{design_type}": epoch_metrics[
-                f"redesign_aar_{design_type}"
-            ]
+            f"{epoch_type}_redesign_bb_rmsd": epoch_metrics[f"redesign_bb_rmsd"]
             .mean()
             .item(),
-            f"{epoch_type}_complex_bb_rmsd_{design_type}": epoch_metrics[
-                f"complex_bb_rmsd_{design_type}"
-            ]
+            f"{epoch_type}_complex_CA_rmsd": epoch_metrics[f"complex_CA_rmsd"]
             .mean()
             .item(),
-            f"{epoch_type}_redesign_bb_rmsd_{design_type}": epoch_metrics[
-                f"redesign_bb_rmsd_{design_type}"
-            ]
+            f"{epoch_type}_redesign_CA_rmsd": epoch_metrics[f"redesign_CA_rmsd"]
             .mean()
             .item(),
-            f"{epoch_type}_complex_CA_rmsd_{design_type}": epoch_metrics[
-                f"complex_CA_rmsd_{design_type}"
-            ]
+            f"{epoch_type}_complex_CA_tm_score": epoch_metrics[f"complex_CA_tm_score"]
             .mean()
             .item(),
-            f"{epoch_type}_redesign_CA_rmsd_{design_type}": epoch_metrics[
-                f"redesign_CA_rmsd_{design_type}"
-            ]
+            f"{epoch_type}_redesign_CA_tm_score": epoch_metrics[f"redesign_CA_tm_score"]
             .mean()
             .item(),
-            f"{epoch_type}_complex_CA_tm_score_{design_type}": epoch_metrics[
-                f"complex_CA_tm_score_{design_type}"
-            ]
+            f"{epoch_type}_redesign_CA_plddt": epoch_metrics[f"redesign_CA_plddt"]
             .mean()
             .item(),
-            f"{epoch_type}_redesign_CA_tm_score_{design_type}": epoch_metrics[
-                f"redesign_CA_tm_score_{design_type}"
-            ]
-            .mean()
-            .item(),
-            f"{epoch_type}_redesign_CA_plddt_{design_type}": epoch_metrics[
-                f"redesign_CA_plddt_{design_type}"
-            ]
-            .mean()
-            .item(),
-            f"{epoch_type}_redesign_CA_lddt_{design_type}": epoch_metrics[
-                f"redesign_CA_lddt_{design_type}"
-            ]
+            f"{epoch_type}_redesign_CA_lddt": epoch_metrics[f"redesign_CA_lddt"]
             .mean()
             .item(),
         }
@@ -444,45 +408,35 @@ class AbFlow(LightningModule):
         # Log CDR-specific metrics
         for cdr_name in CDRName.__members__.keys():
 
-            log_values[f"{epoch_type}_{cdr_name}_aar_{design_type}"] = (
-                epoch_metrics[f"{cdr_name}_aar_{design_type}"].mean().item()
+            log_values[f"{epoch_type}_{cdr_name}_aar"] = (
+                epoch_metrics[f"{cdr_name}_aar"].mean().item()
             )
-            log_values[f"{epoch_type}_{cdr_name}_bb_rmsd_{design_type}"] = (
-                epoch_metrics[f"{cdr_name}_bb_rmsd_{design_type}"].mean().item()
+            log_values[f"{epoch_type}_{cdr_name}_bb_rmsd"] = (
+                epoch_metrics[f"{cdr_name}_bb_rmsd"].mean().item()
             )
-            log_values[f"{epoch_type}_{cdr_name}_bb_clash_violation_{design_type}"] = (
-                epoch_metrics[f"{cdr_name}_bb_clash_violation_{design_type}"]
-                .mean()
-                .item()
+            log_values[f"{epoch_type}_{cdr_name}_bb_clash_violation"] = (
+                epoch_metrics[f"{cdr_name}_bb_clash_violation"].mean().item()
             )
-            log_values[
-                f"{epoch_type}_{cdr_name}_bb_bond_angle_violation_{design_type}"
-            ] = (
-                epoch_metrics[f"{cdr_name}_bb_bond_angle_violation_{design_type}"]
-                .mean()
-                .item()
+            log_values[f"{epoch_type}_{cdr_name}_bb_bond_angle_violation"] = (
+                epoch_metrics[f"{cdr_name}_bb_bond_angle_violation"].mean().item()
             )
-            log_values[
-                f"{epoch_type}_{cdr_name}_bb_bond_length_violation_{design_type}"
-            ] = (
-                epoch_metrics[f"{cdr_name}_bb_bond_length_violation_{design_type}"]
-                .mean()
-                .item()
+            log_values[f"{epoch_type}_{cdr_name}_bb_bond_length_violation"] = (
+                epoch_metrics[f"{cdr_name}_bb_bond_length_violation"].mean().item()
             )
-            log_values[f"{epoch_type}_{cdr_name}_bb_violation_{design_type}"] = (
-                epoch_metrics[f"{cdr_name}_bb_violation_{design_type}"].mean().item()
+            log_values[f"{epoch_type}_{cdr_name}_bb_violation"] = (
+                epoch_metrics[f"{cdr_name}_bb_violation"].mean().item()
             )
-            log_values[f"{epoch_type}_{cdr_name}_CA_rmsd_{design_type}"] = (
-                epoch_metrics[f"{cdr_name}_CA_rmsd_{design_type}"].mean().item()
+            log_values[f"{epoch_type}_{cdr_name}_CA_rmsd"] = (
+                epoch_metrics[f"{cdr_name}_CA_rmsd"].mean().item()
             )
-            log_values[f"{epoch_type}_{cdr_name}_CA_tm_score_{design_type}"] = (
-                epoch_metrics[f"{cdr_name}_CA_tm_score_{design_type}"].mean().item()
+            log_values[f"{epoch_type}_{cdr_name}_CA_tm_score"] = (
+                epoch_metrics[f"{cdr_name}_CA_tm_score"].mean().item()
             )
-            log_values[f"{epoch_type}_{cdr_name}_CA_plddt_{design_type}"] = (
-                epoch_metrics[f"{cdr_name}_CA_plddt_{design_type}"].mean().item()
+            log_values[f"{epoch_type}_{cdr_name}_CA_plddt"] = (
+                epoch_metrics[f"{cdr_name}_CA_plddt"].mean().item()
             )
-            log_values[f"{epoch_type}_{cdr_name}_CA_lddt_{design_type}"] = (
-                epoch_metrics[f"{cdr_name}_CA_lddt_{design_type}"].mean().item()
+            log_values[f"{epoch_type}_{cdr_name}_CA_lddt"] = (
+                epoch_metrics[f"{cdr_name}_CA_lddt"].mean().item()
             )
 
         self.log_dict(
@@ -490,18 +444,14 @@ class AbFlow(LightningModule):
         )
 
         # Clear metrics and loss lists
-        self._epoch_loss[f"{epoch_type}_{design_type}"].clear()
-        self._epoch_metrics[f"{epoch_type}_{design_type}"].clear()
+        self._epoch_loss[f"{epoch_type}"].clear()
+        self._epoch_metrics[f"{epoch_type}"].clear()
 
     def on_validation_epoch_end(self):
-        self.on_epoch_end(epoch_type="val", design_mode=["sequence"])
-        self.on_epoch_end(epoch_type="val", design_mode=["backbone"])
-        self.on_epoch_end(epoch_type="val", design_mode=["sequence", "backbone"])
+        self.on_epoch_end(epoch_type="val")
 
     def on_test_epoch_end(self):
-        self.on_epoch_end(epoch_type="test", design_mode=["sequence"])
-        self.on_epoch_end(epoch_type="test", design_mode=["backbone"])
-        self.on_epoch_end(epoch_type="test", design_mode=["sequence", "backbone"])
+        self.on_epoch_end(epoch_type="test")
 
     @torch.no_grad()
     def _generate_complexes(

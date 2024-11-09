@@ -11,12 +11,14 @@ def setup_model(
     """Setup model and datamodule instances."""
 
     network_instance = FlowPrediction(**config["network"])
-    datamodule_instance = AntibodyAntigenDataModule(**config["datamodule"])
+    datamodule_instance = AntibodyAntigenDataModule(config["datamodule"])
 
     if checkpoint_path is not None and load_optimizer:
         # Load full model state including optimizer
         model_instance = AbFlow.load_from_checkpoint(
-            checkpoint_path=checkpoint_path, network=network_instance, **config["model"]
+            checkpoint_path=checkpoint_path,
+            network=network_instance,
+            **config["model"],
         )
     elif checkpoint_path is not None and not load_optimizer:
         # Load only model weights, ignore optimizer state

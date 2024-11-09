@@ -16,3 +16,5 @@ data/rabd/pdb/
 config/
 scripts/design/
 scripts/analysis/
+scripts/circe/
+scripts/hpc/

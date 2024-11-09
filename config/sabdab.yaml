@@ -1,23 +1,6 @@
 ---
 
-# data preprocessing
-paths:
-    data: /scratch/hz362/datavol/data/
-    model: /scratch/hz362/datavol/model/
-redesign:
-    framework: False
-    hcdr1: False
-    hcdr2: False
-    hcdr3: True
-    lcdr1: True
-    lcdr2: False
-    lcdr3: False
-crop: 
-    max_crop_size: 180 # ideally 192
-    antigen_crop_size: 60 # ideally 64
-
-# model settings
-design_mode: ["sequence", "backbone", "sidechain"]
+# wandb settings
 project_name: flow_matching
 model_name: all_atom_de_novo
 
@@ -31,14 +14,30 @@ checkpoint:
     path: null
     load_optimizer: False
 
-# abflow data spliting
-dataset:
-    seed: 2025
-    load_val_test: True  # True only during training, and False during data pre-processing
-    scheme: chothia       # Scheme to use for sequence alignment. Default: chothia
-    num_val_cluster: 10
+# abflow datamodule settings
 datamodule:
+    num_workers: 8
     batch_size: 2 # batch size per GPU
+    dataset:
+        name: sabdab
+        seed: 2025
+        load_val_test: True  # True only during training, and False during data pre-processing
+        scheme: chothia       # Scheme to use for sequence alignment. Default: chothia
+        num_val_cluster: 10
+        paths:
+            data: /scratch/hz362/datavol/data/
+            model: /scratch/hz362/datavol/model/
+        redesign:
+            framework: False
+            hcdr1: False
+            hcdr2: False
+            hcdr3: True
+            lcdr1: True
+            lcdr2: False
+            lcdr3: False
+        crop: 
+            max_crop_size: 180 # ideally 192
+            antigen_crop_size: 60 # ideally 64
 
 # abflow model settings
 model:
@@ -49,6 +48,7 @@ model:
         plddt_loss: 0.01
         distogram_loss: 0.01
     learning_rate: 0.0001
+    design_mode: ["sequence", "backbone", "sidechain"]
     seed: 42
 
 # abflow network settings

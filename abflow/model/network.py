@@ -57,26 +57,24 @@ class FlowPrediction(nn.Module):
         """
         Initialize the FlowPrediction network。
 
-        Args:
-            network_params (dict): A dictionary containing the network hyperparameters.
-            n_condition_module_blocks (int): The number of Pairformer blocks in condition module.
-            n_denoising_module_blocks (int): The number of Structure Module blocks (based on IPA).
-            n_confidence_head_blocks (int): The number of Confidence Head blocks (based on Pairformer).
-            c_s (int): The number of feature channels of node embeddings.
-            c_z (int): The number of feature channels of edge embeddings.
-            n_cycle (int): The number of cycles in the pairformer module.
-            mini_rollout_steps (int): The number of steps in the mini-rollout for confidence estimation.
-            num_time_steps (int): The number of steps in the full rollout for final structure prediction.
-            self_condition_rate (float): The rate of self-conditioning. If 0, no self-conditioning is applied.
-                                        If 0.5, self-conditioning is applied after time >= 0.5.
-            self_condition_steps (int): The number of multi-step self-conditioning features to keep.
-            label_smoothing (float): A float in [0.0, 1.0]. Specifies the amount of smoothing for true category
-                                    on probability simplex, where 0.0 means no smoothing. The targets become a
-                                    mixture of the original ground truth and a uniform distribution as inspired by
-                                    paper: Rethinking the Inception Architecture for Computer Vision.
-                                    link: https://arxiv.org/abs/1512.00567. Default: 0.0.
+        params network_params: A dictionary containing the network hyperparameters.
+        params n_condition_module_blocks: The number of Pairformer blocks in condition module.
+        params n_denoising_module_blocks: The number of Structure Module blocks (based on IPA).
+        params n_confidence_head_blocks: The number of Confidence Head blocks (based on Pairformer).
+        params c_s: The number of feature channels of node embeddings.
+        params c_z: The number of feature channels of edge embeddings.
+        params n_cycle: The number of cycles in the pairformer module.
+        params mini_rollout_steps: The number of steps in the mini-rollout for confidence estimation.
+        params num_time_steps: The number of steps in the full rollout for final structure prediction.
+        params self_condition_rate: The rate of self-conditioning. If 0, no self-conditioning is applied.
+                                    If 0.5, self-conditioning is applied after time >= 0.5.
+        params self_condition_steps: The number of multi-step self-conditioning features to keep.
+        params label_smoothing: A float in [0.0, 1.0]. Specifies the amount of smoothing for true category
+                                on probability simplex, where 0.0 means no smoothing. The targets become a
+                                mixture of the original ground truth and a uniform distribution as inspired by
+                                paper: Rethinking the Inception Architecture for Computer Vision.
+                                link: https://arxiv.org/abs/1512.00567. Default: 0.0.
         """
-
         super().__init__()
 
         self.n_cycle = n_cycle
@@ -123,15 +121,29 @@ class FlowPrediction(nn.Module):
 
     def forward(
         self,
-        d_star: dict[str, torch.Tensor],
+        data_dict: dict[str, torch.Tensor],
         design_mode: list[str],
         network_mode: str = "train",
     ) -> Tuple:
         """
 
-        Args:
+        params data_dict: A dictionary containing the input data information:
+        - res_type: [num_batch, num_res] - The sequence of the protein complex - 20 aa.
+        - chain_type: [num_batch, num_res] - The chain type of the residue. 4 types. Antigen, Heavy, Light Kappa, Light Lambda.
+        - res_index: [num_batch, num_res] - Residue index for each residue, offset 500 for each chain.
+        - cdr_index: [num_batch, num_res] - The CDR index of the residue. 8 types. framework, hcdr1, hcdr2, hcdr3, lcdr1, lcdr2, lcdr3, antigen.
+        - pos_heavyatom: [num_batch, num_res, 15, 3] - The heavy atom coordinates for each residue.
+        - redesign_mask: [num_batch, num_res] - The mask for the redesign CDR residues (single / multiple). True for redesign, False for not redesign.
+        - valid_mask: [num_batch, num_res] - The mask for the valid complex residues. True for valid residues. False for padded residues.
+        params design_mode: The design mode of the forward pass, a list of modes from ["sequence", "backbone", sidechain"].
+        params network_mode: The network mode of the forward pass. Can be "train" or "eval".
+
             design_mode (list): The design mode of the forward pass, a list of modes from ["sequence", "backbone"].
             network_mode (str): The network mode of the forward pass. Can be "train" or "eval".
+
+
+
+
 
         d_star - A dictionary containing ground truth data information:
         redesign_mask: [num_batch, num_res] - The mask for the redesign CDR residues (single / multiple). 1 for redesign, 0 for not redesign.
@@ -146,7 +158,6 @@ class FlowPrediction(nn.Module):
         O_coords: [num_batch, num_res, 3] - Backbone O atom coordinates.
         CB_coords: [num_batch, num_res, 3] - Side chain CB atom coordinates.
         cdr_indices: [num_batch, num_res] - The CDR index of the residue. 7 types. NONCDR, HCDR1, HCDR2, HCDR3, LCDR1, LCDR2, LCDR3.
-        design_mode: The design mode used for training is in d_star["design_mode"].
 
         f_star - A dictionary containing the input features for the network:
         # masked features
@@ -188,7 +199,9 @@ class FlowPrediction(nn.Module):
         """
 
         # conditioning module
-        f_star = self.input_feature_embedder.init_feat(d_star, design_mode=design_mode)
+        feature_dict = self.input_feature_embedder.init_feat(
+            d_star, design_mode=design_mode
+        )
         s_inputs_i, z_inputs_ij = self.input_feature_embedder(f_star)
 
         s_init_i = s_inputs_i.clone()

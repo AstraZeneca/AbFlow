@@ -29,7 +29,9 @@ os.environ["NCCL_BLOCKING_WAIT"] = "1"
 def train(config: dict):
     """Function for training and saving the model."""
     # Save the config file to keep a record of the settings
-    results_dir = f"{config['paths']['model']}/{config['model_name']}"
+    results_dir = (
+        f"{config['datamodule']['dataset']['paths']['model']}/{config['model_name']}"
+    )
     if not os.path.exists(results_dir):
         os.makedirs(results_dir)
     with open(results_dir + "/config.yaml", "w") as config_file:
