@@ -524,9 +524,8 @@ def get_sidechain_mae(
     These predictions are assumed for the same amino acid sequences.
     Sidechain MAE is calculated as:
 
-    \[
-    \text{MAE} = \frac{1}{N} \sum_{i=1}^{N} \left| \text{pred\_angle}_i - \text{true\_angle}_i \right|
-    \]
+    Formula:
+    MAE = 1/N * sum(min(|pred - true|, 2*pi - |pred - true|))
 
     :param pred_dihedral_angles: Predicted dihedral angles, shape (N_batch, N_res, 4).
     :param true_dihedral_angles: True dihedral angles, shape (N_batch, N_res, 4).
@@ -535,6 +534,7 @@ def get_sidechain_mae(
     :return: Sidechain MAE score, shape (N_batch,).
     """
     diff = torch.abs(pred_dihedral_angles - true_dihedral_angles)
+    diff = torch.min(diff, 2 * torch.pi - diff)
     sidechain_mae = average_data(diff, masks=masks)
 
     return sidechain_mae
