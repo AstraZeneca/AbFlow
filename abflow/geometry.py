@@ -76,26 +76,29 @@ def compose_chain(Ts):
     return Ts[0]
 
 
-def create_psi_chi_rotation_matrix(angles: torch.Tensor) -> torch.Tensor:
-    """Compute psi and chi rotation matrices from torsional angles.
-
-    Here we provide angles instead of alpha in af2 between (0,2pi)
-
-    See alphafold supplementary Algorithm 25 for details.
-
-    :param angles: (B, N, 5), angles between (0,2pi)
-    :return: Torsional angle rotation matrices, (B, N, 5, 3, 3).
+def create_chi_rotation(
+    sidechain_dihedrals: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
-    batch_size, n_res = angles.shape[:2]
-    sine, cosine = torch.sin(angles), torch.cos(angles)
-    sine = sine.reshape(batch_size, n_res, -1, 1, 1)
-    cosine = cosine.reshape(batch_size, n_res, -1, 1, 1)
-    zero = torch.zeros_like(sine)
-    one = torch.ones_like(sine)
+    Converting dihedral angles to rotation matrices around the x-axis.
+    See Alphafold2 Supplementary Algorithm 25.
 
-    row1 = torch.cat([one, zero, zero], dim=-1)  # (B, N, 5, 1, 3)
-    row2 = torch.cat([zero, cosine, -sine], dim=-1)  # (B, N, 5, 1, 3)
-    row3 = torch.cat([zero, sine, cosine], dim=-1)  # (B, N, 5, 1, 3)
-    R = torch.cat([row1, row2, row3], dim=-2)  # (B, N, 5, 3, 3)
+    :param sidechain_dihedrals: Sidechain dihedrals of shape (N_batch, N_res, 4)
+    """
+    angle_sin, angle_cos = torch.sin(sidechain_dihedrals), torch.cos(
+        sidechain_dihedrals
+    )
+    angle_sin = angle_sin[..., None, None]  # (N_batch, N_res, 4, 1, 1)
+    angle_cos = angle_cos[..., None, None]  # (N_batch, N_res, 4, 1, 1)
+    zero = torch.zeros_like(angle_sin)
+    one = torch.ones_like(angle_sin)
 
-    return R
+    row1 = torch.cat([one, zero, zero], dim=-1)  # (N_batch, N_res, 4, 1, 3)
+    row2 = torch.cat([zero, angle_cos, -angle_sin], dim=-1)  # (N_batch, N_res, 4, 1, 3)
+    row3 = torch.cat([zero, angle_sin, angle_cos], dim=-1)  # (N_batch, N_res, 4, 1, 3)
+    chi_rotations = torch.cat([row1, row2, row3], dim=-2)  # (N_batch, N_res, 4, 3, 3)
+
+    chi1_rotations, chi2_rotations, chi3_rotations, chi4_rotations = (
+        chi_rotations.unbind(dim=-3)
+    )  # (N_batch, N_res, 3, 3)
+    return chi1_rotations, chi2_rotations, chi3_rotations, chi4_rotations

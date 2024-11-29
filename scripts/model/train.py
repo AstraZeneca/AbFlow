@@ -69,7 +69,7 @@ def train(config: dict):
         strategy=DDPStrategy(
             timeout=timedelta(seconds=15400), find_unused_parameters=True
         ),
-        precision=32,
+        precision="bf16",
         max_epochs=config["trainer"]["max_epochs"],
         logger=logger,
         callbacks=callbacks,
@@ -79,8 +79,8 @@ def train(config: dict):
         gradient_clip_val=config["trainer"]["gradient_clip_val"],
     )
 
-    trainer.fit(model, datamodule)
-    trainer.test(model, datamodule)
+    trainer.fit(model, datamodule=datamodule)
+    trainer.test(model, datamodule=datamodule)
     print("Done with training...")
 
 

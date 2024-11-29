@@ -159,6 +159,8 @@ class AbFlow(LightningModule):
 
         true_data_dict = batch
 
+        print(true_data_dict)
+
         (
             trans_vf_loss,
             rots_vf_loss,

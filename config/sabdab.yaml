@@ -6,7 +6,7 @@ model_name: all_atom_de_novo
 
 # training settings
 trainer:
-    devices: 8
+    devices: 1
     max_epochs: 200
     val_check_interval: 0.5
     gradient_clip_val: 1.0

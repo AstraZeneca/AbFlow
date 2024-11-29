@@ -8,6 +8,32 @@ from Bio.PDB.Polypeptide import protein_letters_3to1
 
 from .geometry import create_rotation_matrix
 
+# ---------------------------------------------- some new constants ----------------------------------------------
+chain_id_to_index = {
+    "antigen": 0,
+    "heavy": 1,
+    "light_kappa": 2,
+    "light_lambda": 3,
+}
+antibody_chain_names = ["heavy", "light_kappa", "light_lambda"]
+antigen_chain_name = ["antigen"]
+antibody_index = [chain_id_to_index[chain] for chain in antibody_chain_names]
+antigen_index = [chain_id_to_index[chain] for chain in antigen_chain_name]
+
+region_to_index = {
+    "framework": 0,
+    "hcdr1": 1,
+    "hcdr2": 2,
+    "hcdr3": 3,
+    "lcdr1": 4,
+    "lcdr2": 5,
+    "lcdr3": 6,
+    "antigen": 7,
+}
+
+backbone_atoms_names_to_index = {"N": 0, "CA": 1, "C": 2, "O": 3}
+backbone_atoms_index_to_names = {0: "N", 1: "CA", 2: "C", 3: "O"}
+
 # Conversion scales between nanometers and angstroms
 NM_TO_ANG_SCALE = 10.0
 ANG_TO_NM_SCALE = 1 / NM_TO_ANG_SCALE
@@ -62,6 +88,8 @@ aa1_index_to_name = {v: k for k, v in AminoAcid1.__members__.items()}
 aa3_name_to_index = {k: v for k, v in AminoAcid3.__members__.items()}
 aa1_name_to_index = {k: v for k, v in AminoAcid1.__members__.items()}
 
+
+# fmt: off
 chi_angles_atoms = {
     AminoAcid3.ALA: [],
     # Chi5 in arginine is always 0 +- 5 degrees, so ignore it.
@@ -110,29 +138,28 @@ chi_angles_atoms = {
 
 
 chi_angles_mask = {
-    AminoAcid3.ALA: [False, False, False, False],  # ALA
-    AminoAcid3.ARG: [True, True, True, True],  # ARG
-    AminoAcid3.ASN: [True, True, False, False],  # ASN
-    AminoAcid3.ASP: [True, True, False, False],  # ASP
-    AminoAcid3.CYS: [True, False, False, False],  # CYS
-    AminoAcid3.GLN: [True, True, True, False],  # GLN
-    AminoAcid3.GLU: [True, True, True, False],  # GLU
-    AminoAcid3.GLY: [False, False, False, False],  # GLY
-    AminoAcid3.HIS: [True, True, False, False],  # HIS
-    AminoAcid3.ILE: [True, True, False, False],  # ILE
-    AminoAcid3.LEU: [True, True, False, False],  # LEU
-    AminoAcid3.LYS: [True, True, True, True],  # LYS
-    AminoAcid3.MET: [True, True, True, False],  # MET
-    AminoAcid3.PHE: [True, True, False, False],  # PHE
-    AminoAcid3.PRO: [True, True, False, False],  # PRO
-    AminoAcid3.SER: [True, False, False, False],  # SER
-    AminoAcid3.THR: [True, False, False, False],  # THR
-    AminoAcid3.TRP: [True, True, False, False],  # TRP
-    AminoAcid3.TYR: [True, True, False, False],  # TYR
-    AminoAcid3.VAL: [True, False, False, False],  # VAL
+    AminoAcid3.ALA: [False, False, False, False],
+    AminoAcid3.ARG: [True, True, True, True],
+    AminoAcid3.ASN: [True, True, False, False],
+    AminoAcid3.ASP: [True, True, False, False],
+    AminoAcid3.CYS: [True, False, False, False],
+    AminoAcid3.GLN: [True, True, True, False],
+    AminoAcid3.GLU: [True, True, True, False],
+    AminoAcid3.GLY: [False, False, False, False],
+    AminoAcid3.HIS: [True, True, False, False],
+    AminoAcid3.ILE: [True, True, False, False],
+    AminoAcid3.LEU: [True, True, False, False],
+    AminoAcid3.LYS: [True, True, True, True],
+    AminoAcid3.MET: [True, True, True, False],
+    AminoAcid3.PHE: [True, True, False, False],
+    AminoAcid3.PRO: [True, True, False, False],
+    AminoAcid3.SER: [True, False, False, False],
+    AminoAcid3.THR: [True, False, False, False],
+    AminoAcid3.TRP: [True, True, False, False],
+    AminoAcid3.TYR: [True, True, False, False],
+    AminoAcid3.VAL: [True, False, False, False],
 }
 
-# fmt: off
 restype_to_heavyatom_names = {
     AminoAcid3.ALA: ["N", "CA", "C", "O", "CB", "", "", "", "", "", "", "", "", "", "OXT"],
     AminoAcid3.ARG: ["N", "CA", "C", "O", "CB", "CG", "CD", "NE", "CZ", "NH1", "NH2", "", "", "", "OXT"],
@@ -162,317 +189,292 @@ restype_atom14_name_to_index = {
     for resname, atoms in restype_to_heavyatom_names.items()
 }
 
-rigid_group_heavy_atom_positions = {
+
+class Torsion(IntEnum):
+    BACKBONE = 0
+    CHI1 = 1
+    CHI2 = 2
+    CHI3 = 3
+    CHI4 = 4
+
+
+HEAVY_ATOM_COORDS = {
     AminoAcid3.ALA: [
         ["N", 0, (-0.525, 1.363, 0.000)],
         ["CA", 0, (0.000, 0.000, 0.000)],
         ["C", 0, (1.526, -0.000, -0.000)],
         ["CB", 0, (-0.529, -0.774, -1.205)],
-        ["O", 3, (0.627, 1.062, 0.000)],
+        ["O", 0, (0.627, 1.062, 0.000)],
     ],
     AminoAcid3.ARG: [
         ["N", 0, (-0.524, 1.362, -0.000)],
         ["CA", 0, (0.000, 0.000, 0.000)],
         ["C", 0, (1.525, -0.000, -0.000)],
         ["CB", 0, (-0.524, -0.778, -1.209)],
-        ["O", 3, (0.626, 1.062, 0.000)],
-        ["CG", 4, (0.616, 1.390, -0.000)],
-        ["CD", 5, (0.564, 1.414, 0.000)],
-        ["NE", 6, (0.539, 1.357, -0.000)],
-        ["NH1", 7, (0.206, 2.301, 0.000)],
-        ["NH2", 7, (2.078, 0.978, -0.000)],
-        ["CZ", 7, (0.758, 1.093, -0.000)],
+        ["O", 0, (0.626, 1.062, 0.000)],
+        ["CG", 1, (0.616, 1.390, -0.000)],
+        ["CD", 2, (0.564, 1.414, 0.000)],
+        ["NE", 3, (0.539, 1.357, -0.000)],
+        ["NH1", 4, (0.206, 2.301, 0.000)],
+        ["NH2", 4, (2.078, 0.978, -0.000)],
+        ["CZ", 4, (0.758, 1.093, -0.000)],
     ],
     AminoAcid3.ASN: [
         ["N", 0, (-0.536, 1.357, 0.000)],
         ["CA", 0, (0.000, 0.000, 0.000)],
         ["C", 0, (1.526, -0.000, -0.000)],
         ["CB", 0, (-0.531, -0.787, -1.200)],
-        ["O", 3, (0.625, 1.062, 0.000)],
-        ["CG", 4, (0.584, 1.399, 0.000)],
-        ["ND2", 5, (0.593, -1.188, 0.001)],
-        ["OD1", 5, (0.633, 1.059, 0.000)],
+        ["O", 0, (0.625, 1.062, 0.000)],
+        ["CG", 1, (0.584, 1.399, 0.000)],
+        ["ND2", 2, (0.593, -1.188, 0.001)],
+        ["OD1", 2, (0.633, 1.059, 0.000)],
     ],
     AminoAcid3.ASP: [
         ["N", 0, (-0.525, 1.362, -0.000)],
         ["CA", 0, (0.000, 0.000, 0.000)],
         ["C", 0, (1.527, 0.000, -0.000)],
         ["CB", 0, (-0.526, -0.778, -1.208)],
-        ["O", 3, (0.626, 1.062, -0.000)],
-        ["CG", 4, (0.593, 1.398, -0.000)],
-        ["OD1", 5, (0.610, 1.091, 0.000)],
-        ["OD2", 5, (0.592, -1.101, -0.003)],
+        ["O", 0, (0.626, 1.062, -0.000)],
+        ["CG", 1, (0.593, 1.398, -0.000)],
+        ["OD1", 2, (0.610, 1.091, 0.000)],
+        ["OD2", 2, (0.592, -1.101, -0.003)],
     ],
     AminoAcid3.CYS: [
         ["N", 0, (-0.522, 1.362, -0.000)],
         ["CA", 0, (0.000, 0.000, 0.000)],
         ["C", 0, (1.524, 0.000, 0.000)],
         ["CB", 0, (-0.519, -0.773, -1.212)],
-        ["O", 3, (0.625, 1.062, -0.000)],
-        ["SG", 4, (0.728, 1.653, 0.000)],
+        ["O", 0, (0.625, 1.062, -0.000)],
+        ["SG", 1, (0.728, 1.653, 0.000)],
     ],
     AminoAcid3.GLN: [
         ["N", 0, (-0.526, 1.361, -0.000)],
         ["CA", 0, (0.000, 0.000, 0.000)],
         ["C", 0, (1.526, 0.000, 0.000)],
         ["CB", 0, (-0.525, -0.779, -1.207)],
-        ["O", 3, (0.626, 1.062, -0.000)],
-        ["CG", 4, (0.615, 1.393, 0.000)],
-        ["CD", 5, (0.587, 1.399, -0.000)],
-        ["NE2", 6, (0.593, -1.189, -0.001)],
-        ["OE1", 6, (0.634, 1.060, 0.000)],
+        ["O", 0, (0.626, 1.062, -0.000)],
+        ["CG", 1, (0.615, 1.393, 0.000)],
+        ["CD", 2, (0.587, 1.399, -0.000)],
+        ["NE2", 3, (0.593, -1.189, -0.001)],
+        ["OE1", 3, (0.634, 1.060, 0.000)],
     ],
     AminoAcid3.GLU: [
         ["N", 0, (-0.528, 1.361, 0.000)],
         ["CA", 0, (0.000, 0.000, 0.000)],
         ["C", 0, (1.526, -0.000, -0.000)],
         ["CB", 0, (-0.526, -0.781, -1.207)],
-        ["O", 3, (0.626, 1.062, 0.000)],
-        ["CG", 4, (0.615, 1.392, 0.000)],
-        ["CD", 5, (0.600, 1.397, 0.000)],
-        ["OE1", 6, (0.607, 1.095, -0.000)],
-        ["OE2", 6, (0.589, -1.104, -0.001)],
+        ["O", 0, (0.626, 1.062, 0.000)],
+        ["CG", 1, (0.615, 1.392, 0.000)],
+        ["CD", 2, (0.600, 1.397, 0.000)],
+        ["OE1", 3, (0.607, 1.095, -0.000)],
+        ["OE2", 3, (0.589, -1.104, -0.001)],
     ],
     AminoAcid3.GLY: [
         ["N", 0, (-0.572, 1.337, 0.000)],
         ["CA", 0, (0.000, 0.000, 0.000)],
         ["C", 0, (1.517, -0.000, -0.000)],
-        ["O", 3, (0.626, 1.062, -0.000)],
+        ["O", 0, (0.626, 1.062, -0.000)],
     ],
     AminoAcid3.HIS: [
         ["N", 0, (-0.527, 1.360, 0.000)],
         ["CA", 0, (0.000, 0.000, 0.000)],
         ["C", 0, (1.525, 0.000, 0.000)],
         ["CB", 0, (-0.525, -0.778, -1.208)],
-        ["O", 3, (0.625, 1.063, 0.000)],
-        ["CG", 4, (0.600, 1.370, -0.000)],
-        ["CD2", 5, (0.889, -1.021, 0.003)],
-        ["ND1", 5, (0.744, 1.160, -0.000)],
-        ["CE1", 5, (2.030, 0.851, 0.002)],
-        ["NE2", 5, (2.145, -0.466, 0.004)],
+        ["O", 0, (0.625, 1.063, 0.000)],
+        ["CG", 1, (0.600, 1.370, -0.000)],
+        ["CD2", 2, (0.889, -1.021, 0.003)],
+        ["ND1", 2, (0.744, 1.160, -0.000)],
+        ["CE1", 2, (2.030, 0.851, 0.002)],
+        ["NE2", 2, (2.145, -0.466, 0.004)],
     ],
     AminoAcid3.ILE: [
         ["N", 0, (-0.493, 1.373, -0.000)],
         ["CA", 0, (0.000, 0.000, 0.000)],
         ["C", 0, (1.527, -0.000, -0.000)],
         ["CB", 0, (-0.536, -0.793, -1.213)],
-        ["O", 3, (0.627, 1.062, -0.000)],
-        ["CG1", 4, (0.534, 1.437, -0.000)],
-        ["CG2", 4, (0.540, -0.785, -1.199)],
-        ["CD1", 5, (0.619, 1.391, 0.000)],
+        ["O", 0, (0.627, 1.062, -0.000)],
+        ["CG1", 1, (0.534, 1.437, -0.000)],
+        ["CG2", 2, (0.540, -0.785, -1.199)],
+        ["CD1", 3, (0.619, 1.391, 0.000)],
     ],
     AminoAcid3.LEU: [
         ["N", 0, (-0.520, 1.363, 0.000)],
         ["CA", 0, (0.000, 0.000, 0.000)],
         ["C", 0, (1.525, -0.000, -0.000)],
         ["CB", 0, (-0.522, -0.773, -1.214)],
-        ["O", 3, (0.625, 1.063, -0.000)],
-        ["CG", 4, (0.678, 1.371, 0.000)],
-        ["CD1", 5, (0.530, 1.430, -0.000)],
-        ["CD2", 5, (0.535, -0.774, 1.200)],
+        ["O", 0, (0.625, 1.063, -0.000)],
+        ["CG", 1, (0.678, 1.371, 0.000)],
+        ["CD1", 2, (0.530, 1.430, -0.000)],
+        ["CD2", 2, (0.535, -0.774, 1.200)],
     ],
     AminoAcid3.LYS: [
         ["N", 0, (-0.526, 1.362, -0.000)],
         ["CA", 0, (0.000, 0.000, 0.000)],
         ["C", 0, (1.526, 0.000, 0.000)],
         ["CB", 0, (-0.524, -0.778, -1.208)],
-        ["O", 3, (0.626, 1.062, -0.000)],
-        ["CG", 4, (0.619, 1.390, 0.000)],
-        ["CD", 5, (0.559, 1.417, 0.000)],
-        ["CE", 6, (0.560, 1.416, 0.000)],
-        ["NZ", 7, (0.554, 1.387, 0.000)],
+        ["O", 0, (0.626, 1.062, -0.000)],
+        ["CG", 1, (0.619, 1.390, 0.000)],
+        ["CD", 2, (0.559, 1.417, 0.000)],
+        ["CE", 3, (0.560, 1.416, 0.000)],
+        ["NZ", 4, (0.554, 1.387, 0.000)],
     ],
     AminoAcid3.MET: [
         ["N", 0, (-0.521, 1.364, -0.000)],
         ["CA", 0, (0.000, 0.000, 0.000)],
         ["C", 0, (1.525, 0.000, 0.000)],
         ["CB", 0, (-0.523, -0.776, -1.210)],
-        ["O", 3, (0.625, 1.062, -0.000)],
-        ["CG", 4, (0.613, 1.391, -0.000)],
-        ["SD", 5, (0.703, 1.695, 0.000)],
-        ["CE", 6, (0.320, 1.786, -0.000)],
+        ["O", 0, (0.625, 1.062, -0.000)],
+        ["CG", 1, (0.613, 1.391, -0.000)],
+        ["SD", 2, (0.703, 1.695, 0.000)],
+        ["CE", 3, (0.320, 1.786, -0.000)],
     ],
     AminoAcid3.PHE: [
         ["N", 0, (-0.518, 1.363, 0.000)],
         ["CA", 0, (0.000, 0.000, 0.000)],
         ["C", 0, (1.524, 0.000, -0.000)],
         ["CB", 0, (-0.525, -0.776, -1.212)],
-        ["O", 3, (0.626, 1.062, -0.000)],
-        ["CG", 4, (0.607, 1.377, 0.000)],
-        ["CD1", 5, (0.709, 1.195, -0.000)],
-        ["CD2", 5, (0.706, -1.196, 0.000)],
-        ["CE1", 5, (2.102, 1.198, -0.000)],
-        ["CE2", 5, (2.098, -1.201, -0.000)],
-        ["CZ", 5, (2.794, -0.003, -0.001)],
+        ["O", 0, (0.626, 1.062, -0.000)],
+        ["CG", 1, (0.607, 1.377, 0.000)],
+        ["CD1", 2, (0.709, 1.195, -0.000)],
+        ["CD2", 2, (0.706, -1.196, 0.000)],
+        ["CE1", 2, (2.102, 1.198, -0.000)],
+        ["CE2", 2, (2.098, -1.201, -0.000)],
+        ["CZ", 2, (2.794, -0.003, -0.001)],
     ],
     AminoAcid3.PRO: [
         ["N", 0, (-0.566, 1.351, -0.000)],
         ["CA", 0, (0.000, 0.000, 0.000)],
         ["C", 0, (1.527, -0.000, 0.000)],
         ["CB", 0, (-0.546, -0.611, -1.293)],
-        ["O", 3, (0.621, 1.066, 0.000)],
-        ["CG", 4, (0.382, 1.445, 0.0)],
+        ["O", 0, (0.621, 1.066, 0.000)],
+        ["CG", 1, (0.382, 1.445, 0.0)],
         # ['CD', 5, (0.427, 1.440, 0.0)],
-        ["CD", 5, (0.477, 1.424, 0.0)],  # manually made angle 2 degrees larger
+        ["CD", 2, (0.477, 1.424, 0.0)],  # manually made angle 2 degrees larger
     ],
     AminoAcid3.SER: [
         ["N", 0, (-0.529, 1.360, -0.000)],
         ["CA", 0, (0.000, 0.000, 0.000)],
         ["C", 0, (1.525, -0.000, -0.000)],
         ["CB", 0, (-0.518, -0.777, -1.211)],
-        ["O", 3, (0.626, 1.062, -0.000)],
-        ["OG", 4, (0.503, 1.325, 0.000)],
+        ["O", 0, (0.626, 1.062, -0.000)],
+        ["OG", 1, (0.503, 1.325, 0.000)],
     ],
     AminoAcid3.THR: [
         ["N", 0, (-0.517, 1.364, 0.000)],
         ["CA", 0, (0.000, 0.000, 0.000)],
         ["C", 0, (1.526, 0.000, -0.000)],
         ["CB", 0, (-0.516, -0.793, -1.215)],
-        ["O", 3, (0.626, 1.062, 0.000)],
-        ["CG2", 4, (0.550, -0.718, -1.228)],
-        ["OG1", 4, (0.472, 1.353, 0.000)],
+        ["O", 0, (0.626, 1.062, 0.000)],
+        ["CG2", 1, (0.550, -0.718, -1.228)],
+        ["OG1", 1, (0.472, 1.353, 0.000)],
     ],
     AminoAcid3.TRP: [
         ["N", 0, (-0.521, 1.363, 0.000)],
         ["CA", 0, (0.000, 0.000, 0.000)],
         ["C", 0, (1.525, -0.000, 0.000)],
         ["CB", 0, (-0.523, -0.776, -1.212)],
-        ["O", 3, (0.627, 1.062, 0.000)],
-        ["CG", 4, (0.609, 1.370, -0.000)],
-        ["CD1", 5, (0.824, 1.091, 0.000)],
-        ["CD2", 5, (0.854, -1.148, -0.005)],
-        ["CE2", 5, (2.186, -0.678, -0.007)],
-        ["CE3", 5, (0.622, -2.530, -0.007)],
-        ["NE1", 5, (2.140, 0.690, -0.004)],
-        ["CH2", 5, (3.028, -2.890, -0.013)],
-        ["CZ2", 5, (3.283, -1.543, -0.011)],
-        ["CZ3", 5, (1.715, -3.389, -0.011)],
+        ["O", 0, (0.627, 1.062, 0.000)],
+        ["CG", 1, (0.609, 1.370, -0.000)],
+        ["CD1", 2, (0.824, 1.091, 0.000)],
+        ["CD2", 2, (0.854, -1.148, -0.005)],
+        ["CE2", 2, (2.186, -0.678, -0.007)],
+        ["CE3", 2, (0.622, -2.530, -0.007)],
+        ["NE1", 2, (2.140, 0.690, -0.004)],
+        ["CH2", 2, (3.028, -2.890, -0.013)],
+        ["CZ2", 2, (3.283, -1.543, -0.011)],
+        ["CZ3", 2, (1.715, -3.389, -0.011)],
     ],
     AminoAcid3.TYR: [
         ["N", 0, (-0.522, 1.362, 0.000)],
         ["CA", 0, (0.000, 0.000, 0.000)],
         ["C", 0, (1.524, -0.000, -0.000)],
         ["CB", 0, (-0.522, -0.776, -1.213)],
-        ["O", 3, (0.627, 1.062, -0.000)],
-        ["CG", 4, (0.607, 1.382, -0.000)],
-        ["CD1", 5, (0.716, 1.195, -0.000)],
-        ["CD2", 5, (0.713, -1.194, -0.001)],
-        ["CE1", 5, (2.107, 1.200, -0.002)],
-        ["CE2", 5, (2.104, -1.201, -0.003)],
-        ["OH", 5, (4.168, -0.002, -0.005)],
-        ["CZ", 5, (2.791, -0.001, -0.003)],
+        ["O", 0, (0.627, 1.062, -0.000)],
+        ["CG", 1, (0.607, 1.382, -0.000)],
+        ["CD1", 2, (0.716, 1.195, -0.000)],
+        ["CD2", 2, (0.713, -1.194, -0.001)],
+        ["CE1", 2, (2.107, 1.200, -0.002)],
+        ["CE2", 2, (2.104, -1.201, -0.003)],
+        ["OH", 2, (4.168, -0.002, -0.005)],
+        ["CZ", 2, (2.791, -0.001, -0.003)],
     ],
     AminoAcid3.VAL: [
         ["N", 0, (-0.494, 1.373, -0.000)],
         ["CA", 0, (0.000, 0.000, 0.000)],
         ["C", 0, (1.527, -0.000, -0.000)],
         ["CB", 0, (-0.533, -0.795, -1.213)],
-        ["O", 3, (0.627, 1.062, -0.000)],
-        ["CG1", 4, (0.540, 1.429, -0.000)],
-        ["CG2", 4, (0.533, -0.776, 1.203)],
+        ["O", 0, (0.627, 1.062, -0.000)],
+        ["CG1", 1, (0.540, 1.429, -0.000)],
+        ["CG2", 1, (0.533, -0.776, 1.203)],
     ],
 }
 
 
-# torsion angle indices of rotation and translation stored
-class Torsion(IntEnum):
-    BACKBONE = 0
-    OMEGA = 1
-    PHI = 2
-    PSI = 3
-    CHI1 = 4
-    CHI2 = 5
-    CHI3 = 6
-    CHI4 = 7
+PREVIOUS_SIDECHAIN_ATOM_ROTATIONS = torch.zeros([20, 5, 3, 3])
+PREVIOUS_SIDECHAIN_ATOM_TRANSLATIONS = torch.zeros([20, 5, 3])
+HEAVY_ATOM_TORSION_INDEX = torch.zeros([20, 14], dtype=torch.int64)
+HEAYY_ATOM_POSITIONS = torch.zeros([20, 14, 3])
 
 
-# The following tensors are initialized by `_make_rigid_group_constants`
-restype_rigid_group_rotation = torch.zeros([20, 8, 3, 3])
-restype_rigid_group_translation = torch.zeros([20, 8, 3])
-restype_heavyatom_to_rigid_group = torch.zeros([20, 14], dtype=torch.long)
-restype_heavyatom_rigid_group_positions = torch.zeros([20, 14, 3])
+def _init_heavy_atom_constants():
 
-
-def _make_rigid_group_constants():
-
-    for restype in AminoAcid3:
-        atom_groups = {
-            name: group for name, group, _ in rigid_group_heavy_atom_positions[restype]
-        }
+    for aa in AminoAcid3:
+        atom_groups = {name: group for name, group, _ in HEAVY_ATOM_COORDS[aa]}
         atom_positions = {
-            name: torch.FloatTensor(pos)
-            for name, _, pos in rigid_group_heavy_atom_positions[restype]
+            name: torch.FloatTensor(pos) for name, _, pos in HEAVY_ATOM_COORDS[aa]
         }
 
-        # Atom 14 rigid group positions
-        for atom_idx, atom_name in enumerate(restype_to_heavyatom_names[restype]):
+        # heavy atom 14 positions
+        for atom_idx, atom_name in enumerate(restype_to_heavyatom_names[aa]):
             if (atom_name == "") or (atom_name not in atom_groups):
                 continue
-            restype_heavyatom_to_rigid_group[restype, atom_idx] = atom_groups[atom_name]
-            restype_heavyatom_rigid_group_positions[restype, atom_idx, :] = (
-                atom_positions[atom_name]
-            )
+            HEAVY_ATOM_TORSION_INDEX[aa, atom_idx] = atom_groups[atom_name]
+            HEAYY_ATOM_POSITIONS[aa, atom_idx, :] = atom_positions[atom_name]
 
-        # 0: backbone to backbone
-        restype_rigid_group_rotation[restype, Torsion.BACKBONE, :, :] = torch.eye(3)
-        restype_rigid_group_translation[restype, Torsion.BACKBONE, :] = torch.zeros([3])
+        # idenity matrix for backbone
+        PREVIOUS_SIDECHAIN_ATOM_ROTATIONS[aa, Torsion.BACKBONE] = torch.eye(3)
+        PREVIOUS_SIDECHAIN_ATOM_TRANSLATIONS[aa, Torsion.BACKBONE] = torch.zeros(3)
 
-        # 1: omega-frame to backbone
-        restype_rigid_group_rotation[restype, Torsion.OMEGA, :, :] = torch.eye(3)
-        restype_rigid_group_translation[restype, Torsion.OMEGA, :] = torch.zeros([3])
-
-        # 2: phi-frame to backbone
-        restype_rigid_group_rotation[restype, Torsion.PHI, :, :] = (
-            create_rotation_matrix(
-                v1=atom_positions["N"] - atom_positions["CA"],
-                v2=torch.FloatTensor([1.0, 0.0, 0.0]),
-            )
-        )
-        restype_rigid_group_translation[restype, Torsion.PHI, :] = atom_positions["N"]
-
-        # 3: psi-frame to backbone
-        restype_rigid_group_rotation[restype, Torsion.PSI, :, :] = (
-            create_rotation_matrix(
-                v1=atom_positions["C"] - atom_positions["CA"],
-                v2=atom_positions["CA"]
-                - atom_positions["N"],  # In accordance to the definition of psi angle
-            )
-        )
-        restype_rigid_group_translation[restype, Torsion.PSI, :] = atom_positions["C"]
-
-        # 4: chi1-frame to backbone
-        if chi_angles_mask[restype][0]:
-            base_atom_names = chi_angles_atoms[restype][0]
-            base_atom_positions = [atom_positions[name] for name in base_atom_names]
-            restype_rigid_group_rotation[restype, Torsion.CHI1, :, :] = (
-                create_rotation_matrix(
-                    v1=base_atom_positions[2] - base_atom_positions[1],
-                    v2=base_atom_positions[0] - base_atom_positions[1],
-                )
-            )
-            restype_rigid_group_translation[restype, Torsion.CHI1, :] = (
-                base_atom_positions[2]
-            )
-
-        # chi2-chi1
-        # chi3-chi2
-        # chi4-chi3
-        for chi_idx in range(1, 4):
-            if chi_angles_mask[restype][chi_idx]:
-                axis_end_atom_name = chi_angles_atoms[restype][chi_idx][2]
-                axis_end_atom_position = atom_positions[axis_end_atom_name]
-                restype_rigid_group_rotation[restype, Torsion.CHI1 + chi_idx, :, :] = (
+        # previous sidechain atom rotations and translations
+        # for chi1, chi2, chi3, chi4
+        for chi_idx in range(4):
+            if chi_angles_mask[aa][chi_idx]:
+                previous_end_atom_name = chi_angles_atoms[aa][chi_idx][2]
+                previous_end_atom_position = atom_positions[previous_end_atom_name]
+                PREVIOUS_SIDECHAIN_ATOM_ROTATIONS[aa, chi_idx + 1, :, :] = (
                     create_rotation_matrix(
-                        v1=axis_end_atom_position,
-                        v2=torch.FloatTensor([-1.0, 0.0, 0.0]),
+                        v1=previous_end_atom_position, v2=torch.FloatTensor([-1, 0, 0])
                     )
                 )
-                restype_rigid_group_translation[restype, Torsion.CHI1 + chi_idx, :] = (
-                    axis_end_atom_position
+                PREVIOUS_SIDECHAIN_ATOM_TRANSLATIONS[aa, chi_idx + 1, :] = (
+                    previous_end_atom_position
                 )
 
 
-_make_rigid_group_constants()
+_init_heavy_atom_constants()
+
+
+def get_heavy_atom_constants(
+    res_type: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    N_batch, N_res = res_type.size()
+    res_type = res_type.flatten()
+    prev_rotation = PREVIOUS_SIDECHAIN_ATOM_ROTATIONS.to(res_type.device)[
+        res_type
+    ].reshape(N_batch, N_res, 5, 3, 3)
+    prev_translation = PREVIOUS_SIDECHAIN_ATOM_TRANSLATIONS.to(res_type.device)[
+        res_type
+    ].reshape(N_batch, N_res, 5, 3)
+    torsion_index = HEAVY_ATOM_TORSION_INDEX.to(res_type.device)[res_type].reshape(
+        N_batch, N_res, 14
+    )
+    atom14_position = HEAYY_ATOM_POSITIONS.to(res_type.device)[res_type].reshape(
+        N_batch, N_res, 14, 3
+    )
+    return prev_rotation, prev_translation, torsion_index, atom14_position
+
+
+# ---------------------------------------------- some new constants ----------------------------------------------
 
 
 class CDRName(IntEnum):
@@ -494,11 +496,10 @@ cdr_index_to_name = {cdr: cdr.name for cdr in CDRName}
 cdr_name_to_index = {cdr.name: cdr for cdr in CDRName}
 
 
-class BondLengths(Enum):
+class BackboneBondLengths(Enum):
     """
-    Enumeration for backbone bond lengths in proteins.
+    Enum for storing mean backbone bond lengths, taken from:
 
-    Values are taken from:
     Engh, R.A., & Huber, R. (2006).
     Structure quality and target parameters. International Tables for Crystallography.
     """
@@ -507,9 +508,10 @@ class BondLengths(Enum):
     CA_C = 1.525
     C_N = 1.336
     C_O = 1.229
+    CA_CB = 1.532
 
 
-class BondLengthStdDevs(Enum):
+class BackboneBondLengthStdDevs(Enum):
     """
     Enum for storing standard deviations in backbone bond lengths, taken from:
 
@@ -522,11 +524,10 @@ class BondLengthStdDevs(Enum):
     C_N = 0.023
 
 
-class BondAngles(Enum):
+class BackboneBondAngles(Enum):
     """
-    Enumeration for backbone bond angles in proteins.
+    Enum for storing backbone bond angles, taken from:
 
-    Values are taken from:
     Engh, R.A., & Huber, R. (2006).
     Structure quality and target parameters. International Tables for Crystallography.
     """
@@ -536,7 +537,7 @@ class BondAngles(Enum):
     C_N_CA = 2.124
 
 
-class BondAngleStdDevs(Enum):
+class BackboneBondAngleStdDevs(Enum):
     """
     Enum for storing backbone bond angle standard deviations, taken from:
 
@@ -606,28 +607,3 @@ class Liability(Enum):
     DeAmdL_SN = ("S", "N")
     DeAmdL_TN = ("T", "N")
     DeAmdL_KN = ("K", "N")
-
-
-def get_rigid_group(
-    aa: torch.Tensor,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Extract rigid group constants.
-
-    :param aa: Amino acid types, (B, N).
-    :return: A tuple of rigid group rotation, translation, atom14 group and atom14 position.
-    """
-    batch_size, n_res = aa.size()
-    aa = aa.flatten()
-    rotation = restype_rigid_group_rotation.to(aa.device)[aa].reshape(
-        batch_size, n_res, 8, 3, 3
-    )
-    translation = restype_rigid_group_translation.to(aa.device)[aa].reshape(
-        batch_size, n_res, 8, 3
-    )
-    atom14_group = restype_heavyatom_to_rigid_group.to(aa.device)[aa].reshape(
-        batch_size, n_res, 14
-    )
-    atom14_position = restype_heavyatom_rigid_group_positions.to(aa.device)[aa].reshape(
-        batch_size, n_res, 14, 3
-    )
-    return rotation, translation, atom14_group, atom14_position

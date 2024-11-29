@@ -224,6 +224,8 @@ class AntibodyAntigenDataModule(LightningDataModule):
         """
         Combines a list of dictionaries into a single dictionary with an additional batch dimension.
         """
+
+        # check default collate from torch.utils.data
         data_dict = batch_dict(data_dict)
         return data_dict
 

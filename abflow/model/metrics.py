@@ -3,18 +3,20 @@ Contains functions used in validation/testing evaluation metrics calculations.
 """
 
 import torch
+from torch import nn
 import torch.nn.functional as F
 from typing import List
 
 from ..utils.utils import combine_coords, combine_masks, mask_data, average_data
 from ..constants import (
     AtomVanDerWaalRadii,
-    BondLengths,
-    BondLengthStdDevs,
-    BondAngles,
-    BondAngleStdDevs,
+    BackboneBondAngles,
+    BackboneBondLengths,
+    BackboneBondLengthStdDevs,
+    BackboneBondAngleStdDevs,
     Liability,
     AminoAcid1,
+    region_to_index,
 )
 
 
@@ -24,16 +26,12 @@ def get_aar(
     masks: List[torch.Tensor] = None,
 ) -> torch.Tensor:
     """
-    Calculate the AAR between predicted and true sequences.
+    Calculate the Amino Acid Recovery Rate (AAR) between the predicted and true sequences.
 
-    Args:
-        pred_seq: Predicted sequence, shape (N_batch, N_res).
-        true_seq: True sequence, shape (N_batch, N_res).
-        batch: Batch tensor, shape (N_batch,).
-        masks: List of masks to apply to first dimension, each shape less than or equal to (N_batch, N_res).
-
-    Returns:
-        torch.Tensor: AAR score, shape (N_batch,).
+    :param pred_seq: Predicted sequence of shape (N_batch, N_res).
+    :param true_seq: True sequence of shape (N_batch, N_res).
+    :param masks: List of masks to apply to first dimension, each shape less than or equal to (N_batch, N_res).
+    :return: torch.Tensor: AAR score for each complex, shape (N_batch,).
     """
     pred_equal = (pred_seq == true_seq).float()
     aar = average_data(pred_equal, masks=masks)
@@ -48,16 +46,13 @@ def get_liability_issues(
     Calculate the liability issues within the CDR regions of the predicted sequence.
     Flag 1 for each liability issue, 0 otherwise.
 
-    Liability flags are taken from:
-    Satława, Tadeusz, et al.
-    "LAP: Liability Antibody Profiler by sequence & structural mapping of natural and therapeutic antibodies"
+    Liability flags are taken from
+    paper: Liability Antibody Profiler by sequence & structural mapping of natural and therapeutic antibodies
+    link: https://journals.plos.org/ploscompbiol/article?id=10.1371/journal.pcbi.1011881
 
-    Args:
-        pred_seq (torch.Tensor): Predicted sequence, shape (N_batch, N_res).
-        masks (List[torch.Tensor], optional): List of masks to apply to first dimension, each shape (N_batch, N_res).
-
-    Returns:
-        torch.Tensor: Percentage of residue with liability issues for each complex, shape (N_batch,).
+    :param pred_seq: Predicted sequence of shape (N_batch, N_res).
+    :param masks: List of masks to apply to first dimension, each shape less than or equal to (N_batch, N_res).
+    :return: torch.Tensor: Percentage of residue with liability issues for each complex, shape (N_batch,).
     """
     N_batch, N_res = pred_seq.shape
     liability_issues = torch.zeros_like(pred_seq, dtype=torch.long)
@@ -109,14 +104,12 @@ def kabsch_alignment(
 
     Algorithm adapted from: https://hunterheidenreich.com/posts/kabsch_algorithm/.
 
-    Args:
-        P: A BxNx3 matrix of points.
-        Q: A BxNx3 matrix of points.
-        masks: List of masks to apply to first dimension, each shape (B, N).
+    :param P: A BxNx3 matrix of points.
+    :param Q: A BxNx3 matrix of points.
+    :param masks: List of masks to apply to first dimension, each shape (B, N).
 
-    Returns:
-            torch.Tensor: Aligned P points, shape (B, N, 3).
-            torch.Tensor: Aligned Q points, shape (B, N, 3).
+    :return: Aligned P points, shape (B, N, 3).
+    :return: Aligned Q points, shape (B, N, 3).
     """
     assert P.shape == Q.shape, "Matrix dimensions must match"
     mask = combine_masks(masks, P)
@@ -179,14 +172,12 @@ def get_rmsd(
     \text{RMSD} = \sqrt{\frac{1}{N} \sum_{i=1}^{N} \left( \text{pred\_coord}_i - \text{true\_coord}_i \right)^2}
     \]
 
-    Args:
-        pred_coords: List of predicted coordinates, each shape (N_batch, N_res, 3).
-        true_coords: List of true coordinates, each shape (N_batch, N_res, 3).
-        masks: List of masks to apply, each shape (N_batch, N_res).
-        alignment_masks: List of masks to apply for alignment, each shape (N_batch, N_res).
+    :param pred_coords: List of predicted coordinates, each shape (N_batch, N_res, 3).
+    :param true_coords: List of true coordinates, each shape (N_batch, N_res, 3).
+    :param masks: List of masks to apply, each shape (N_batch, N_res).
+    :param alignment_masks: List of masks to apply for alignment, each shape (N_batch, N_res).
 
-    Returns:
-        torch.Tensor: RMSD score, shape (N_batch,).
+    :return: RMSD score, shape (N_batch,).
     """
 
     pred_coord = combine_coords(*pred_coords)
@@ -237,13 +228,12 @@ def get_tm_score(
     \( d_0(L) = 1.24 \sqrt[3]{\text{max}(L, 19)  - 15 } - 1.8 \). In the scaling factor, we clamp the length of
     the target protein to 19 to avoid negative or undefined values for very short proteins.
 
-    Args:
-        pred_coords: Predicted coordinates, shape (N_batch, N_res, 3).
-        true_coords: True coordinates, shape (N_batch, N_res, 3).
-        masks: List of masks to apply, each shape (N_batch, N_res).
+    :param pred_coords: Predicted coordinates, shape (N_batch, N_res, 3).
+    :param true_coords: True coordinates, shape (N_batch, N_res, 3).
+    :param masks: List of masks to apply, each shape (N_batch, N_res).
+    :param alignment_masks: List of masks to apply for alignment, each shape (N_batch, N_res).
 
-    Returns:
-        torch.Tensor: TM-score, shape (N_batch,).
+    :return: TM-score, shape (N_batch,).
     """
     if alignment_masks is not None:
         pred_coord, true_coord = kabsch_alignment(
@@ -540,6 +530,118 @@ def get_sidechain_mae(
     return sidechain_mae
 
 
+# --------------------------------------- some old code ---------------------------------------
+
+from ..utils.utils import combine_masks, average_data
+from ..nn.feature_embedder import one_hot
+
+
+def get_lddt(
+    pred_coord: torch.Tensor,
+    true_coord: torch.Tensor,
+    masks: list[torch.Tensor] = None,
+    distance_cutoff: float = 15.0,
+):
+    """
+    Compute the lDDT (Local Distance Difference Test) score for each residue.
+    Typically the atom is residue CA atom. Ground truth lDDT is used in confidence plddt loss.
+
+    The lDDT score for an atom \( i \) is calculated using the formula:
+
+    \[
+    \text{lddt}_{i} = \frac{100}{|R_i|} \sum_{j \in R_i} \frac{1}{4} \sum_{c \in \{0.5, 1, 2, 4\}} \mathbb{I}(\left\| d^{pred}_{j} - d^{GT}_{j} \right\| < c)
+    \]
+
+    where:
+    - \( R_i \) is the set of atoms \( j \) such that the distance in the ground truth between atom \( i \) and atom \( j \) is less than the cutoff.
+    - \( \mathbb{I} \) is the indicator function that is 1 if the condition inside is true and 0 otherwise.
+
+    :param pred_coord: Predicted atom coords, shape (N_batch, N_res, 3).
+    :param true_coord: Ground truth atom coords, shape (N_batch, N_res, 3).
+    :param masks: List of masks to apply to first dimension, each shape less than or equal to (N_batch, N_res).
+    :param distance_cutoff: Distance cutoff for local region.
+    :return: torch.Tensor: lDDT scores for each atom, shape (N_batch, N_res).
+    """
+    mask = combine_masks(masks, pred_coord)
+
+    # calculate the distance matrix of shape (N_batch, N_res, N_res)
+    d_dist = torch.cdist(pred_coord, true_coord, p=2)
+    d_dist_gt = torch.cdist(true_coord, true_coord, p=2)
+
+    N_batch, N_res, _ = pred_coord.shape
+    lddt_scores = torch.zeros(
+        N_batch, N_res, device=pred_coord.device, dtype=pred_coord.dtype
+    )
+
+    # distance thresholds
+    thresholds = torch.tensor(
+        [0.5, 1.0, 2.0, 4.0], device=pred_coord.device, dtype=pred_coord.dtype
+    )
+
+    for batch in range(N_batch):
+        for i in range(N_res):
+            # Select atoms j in R_i if
+            # 1) the distance between atom i and j is less than the cutoff
+            # 2) the masked position is 1
+            mask_i = mask[batch]
+
+            R_i = (
+                ((d_dist_gt[batch, i] < distance_cutoff) & (mask_i.bool()))
+                .nonzero(as_tuple=False)
+                .squeeze(1)
+            )
+
+            if len(R_i) == 0:
+                continue
+
+            lddt_i = 0
+            for j in R_i:
+                d_dist_jj = d_dist[batch, j, j]
+
+                lddt_jj = (d_dist_jj < thresholds).float().mean()
+                lddt_i = lddt_i + lddt_jj
+
+            lddt_scores[batch, i] = lddt_i / len(R_i) * 100
+
+    return lddt_scores
+
+
+def get_lddt_onehot(lddt_scores: torch.Tensor) -> torch.Tensor:
+    """
+    Convert lDDT scores to one-hot encoding.
+    The scores are equally binned into 50 bins from 0 to 100.
+
+    Args:
+        lddt_scores: lDDT scores, shape (N_batch, N_res).
+
+    Returns:
+        torch.Tensor: One-hot encoding of lDDT scores, shape (N_batch, N_res, 50).
+    """
+    bin_edges = torch.linspace(0, 100, steps=51, device=lddt_scores.device)
+    p_lddt = one_hot(lddt_scores, bin_edges, concat_inf=False)
+    return p_lddt
+
+
+def get_CB_distogram(CB_coords: torch.Tensor) -> torch.Tensor:
+    """
+    A one-hot pairwise feature indicating the distance between CB atoms (CA for glycine).
+    Pairwise distances are discretized into 66 bins: 64 bins between 2.0 and 22.0 Angstroms,
+    and two bins for any larger and smaller distances. Ground truth CB distogram is used in auxilary loss.
+
+    Args:
+        CB_coords: CB atom coordinates, shape (N_batch, N_res, 3).
+
+    Returns:
+        torch.Tensor: Pairwise distance feature, shape (N_batch, N_res, N_res, 66).
+    """
+
+    dist_matrix = torch.cdist(CB_coords, CB_coords, p=2)
+    bins = torch.linspace(2.0, 22.0, 65, device=CB_coords.device)
+
+    CB_distogram = one_hot(dist_matrix, bins)
+    return CB_distogram
+
+
 def get_res_lddt(p_i: torch.Tensor) -> torch.Tensor:
     """
     Compute the LDDT/pLDDT score during inference as the weighted average of the bin centers (1, 3, etc).
@@ -552,11 +654,8 @@ def get_res_lddt(p_i: torch.Tensor) -> torch.Tensor:
     - \( c_b \) are the center values of the bins.
     - \( p_{i}^{b} \) is the probability for bin \( b \) for atom \( i \).
 
-    Args:
-        p_i: One hot / predicted probabilities for each bin, shape (N_batch, N_res, 50).
-
-    Returns:
-        torch.Tensor: LDDT / pLDDT scores for each atom, shape (N_batch, N_res).
+    :param p_i: One hot / predicted probabilities for each bin, shape (N_batch, N_res, 50).
+    :return: LDDT / pLDDT scores for each atom, shape (N_batch, N_res).
     """
     bins = torch.linspace(0, 100, steps=51, device=p_i.device)
     bin_centers = (bins[1:] + bins[:-1]) / 2
@@ -571,13 +670,187 @@ def get_batch_lddt(
     """
     Compute the mean lddt/pLDDT score per protein complex.
 
-    Args:
-        lddt: pLDDT scores per residue, shape (N_batch, N_res).
-        masks: List of masks to apply, each shape (N_batch, N_res).
+    :param lddt: LDDT scores per residue, shape (N_batch, N_res).
+    :param masks: List of masks to apply, each shape (N_batch, N_res).
 
-    Returns:
-        torch.Tensor: Mean pLDDT scores for each complex, shape (N_batch,).
+    :return: Mean LDDT scores for each complex, shape (N_batch,).
     """
     mean_lddt_scores = average_data(lddt, masks=masks)
 
     return mean_lddt_scores
+
+
+# --------------------------------------- some old code ---------------------------------------
+
+
+class AbFlowMetrics(nn.Module):
+    """
+    This class takes in the antibody and antigen structures and computes the metrics for each data in a batch.
+    """
+
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, pred_data_dict: dict, true_data_dict: dict):
+
+        metrics = {}
+
+        # sequence metrics
+        metrics["aar/redesign"] = get_aar(
+            pred_data_dict["res_type"],
+            true_data_dict["res_type"],
+            masks=[true_data_dict["redesign_mask"], true_data_dict["valid_mask"]],
+        )
+        metrics["liability_issues/redesign"] = get_liability_issues(
+            pred_data_dict["res_type"],
+            masks=[true_data_dict["redesign_mask"], true_data_dict["valid_mask"]],
+        )
+        for region_name, region_index in region_to_index.items():
+            metrics[f"aar/{region_name}"] = get_aar(
+                pred_data_dict["res_type"],
+                true_data_dict["res_type"],
+                masks=[
+                    true_data_dict["region_index"] == region_index,
+                    true_data_dict["valid_mask"],
+                ],
+            )
+
+        # backbone N, CA, C metrics
+        metrics["rmsd/redesign"] = get_rmsd(
+            [
+                pred_data_dict["pos_heavyatom"][:, :, 0, :],
+                pred_data_dict["pos_heavyatom"][:, :, 1, :],
+                pred_data_dict["pos_heavyatom"][:, :, 2, :],
+            ],
+            [
+                true_data_dict["pos_heavyatom"][:, :, 0, :],
+                true_data_dict["pos_heavyatom"][:, :, 1, :],
+                true_data_dict["pos_heavyatom"][:, :, 2, :],
+            ],
+            masks=[true_data_dict["redesign_mask"], true_data_dict["valid_mask"]],
+            alignment_masks=None,
+        )
+        _, metrics["bb_clash_violation/redesign"] = get_bb_clash_violation(
+            N_coords=pred_data_dict["pos_heavyatom"][:, :, 0, :],
+            CA_coords=pred_data_dict["pos_heavyatom"][:, :, 1, :],
+            C_coords=pred_data_dict["pos_heavyatom"][:, :, 2, :],
+            masks_dim_1=[true_data_dict["redesign_mask"], true_data_dict["valid_mask"]],
+            masks_dim_2=[true_data_dict["valid_mask"]],
+        )
+        _, metrics["bb_bond_angle_violation/redesign"] = get_bb_bond_angle_violation(
+            N_coords=pred_data_dict["pos_heavyatom"][:, :, 0, :],
+            CA_coords=pred_data_dict["pos_heavyatom"][:, :, 1, :],
+            C_coords=pred_data_dict["pos_heavyatom"][:, :, 2, :],
+            masks=[true_data_dict["redesign_mask"], true_data_dict["valid_mask"]],
+        )
+        _, metrics["bb_bond_length_violation/redesign"] = get_bb_bond_length_violation(
+            N_coords=pred_data_dict["pos_heavyatom"][:, :, 0, :],
+            CA_coords=pred_data_dict["pos_heavyatom"][:, :, 1, :],
+            C_coords=pred_data_dict["pos_heavyatom"][:, :, 2, :],
+            masks=[true_data_dict["redesign_mask"], true_data_dict["valid_mask"]],
+        )
+        metrics["total_violation/redesign"] = get_total_violation(
+            N_coords=pred_data_dict["pos_heavyatom"][:, :, 0, :],
+            CA_coords=pred_data_dict["pos_heavyatom"][:, :, 1, :],
+            C_coords=pred_data_dict["pos_heavyatom"][:, :, 2, :],
+            masks_dim_1=[true_data_dict["redesign_mask"], true_data_dict["valid_mask"]],
+            masks_dim_2=[true_data_dict["valid_mask"]],
+        )
+        for region_name, region_index in region_to_index.items():
+            metrics[f"rmsd/{region_name}"] = get_rmsd(
+                [
+                    pred_data_dict["pos_heavyatom"][:, :, 0, :],
+                    pred_data_dict["pos_heavyatom"][:, :, 1, :],
+                    pred_data_dict["pos_heavyatom"][:, :, 2, :],
+                ],
+                [
+                    true_data_dict["pos_heavyatom"][:, :, 0, :],
+                    true_data_dict["pos_heavyatom"][:, :, 1, :],
+                    true_data_dict["pos_heavyatom"][:, :, 2, :],
+                ],
+                masks=[
+                    true_data_dict["region_index"] == region_index,
+                    true_data_dict["valid_mask"],
+                ],
+                alignment_masks=None,
+            )
+
+        # sidechain metrics
+        pred_sidechain_dihedrals, _ = get_sidechain_dihedrals(
+            pred_data_dict["pos_heavyatom"]
+        )
+        true_sidechain_dihedrals, true_sidechain_dihedral_mask = (
+            get_sidechain_dihedrals(true_data_dict["pos_heavyatom"])
+        )
+        metrics["sidechain_mae/redesign"] = get_sidechain_mae(
+            pred_sidechain_dihedrals,
+            true_sidechain_dihedrals,
+            masks=[
+                true_data_dict["redesign_mask"],
+                true_data_dict["valid_mask"],
+                true_sidechain_dihedral_mask,
+            ],
+        )
+        chi1_mask = torch.zeros_like(true_sidechain_dihedrals, dtype=torch.bool)
+        chi1_mask[:, :, 0] = True
+        chi2_mask = torch.zeros_like(true_sidechain_dihedrals, dtype=torch.bool)
+        chi2_mask[:, :, 1] = True
+        chi3_mask = torch.zeros_like(true_sidechain_dihedrals, dtype=torch.bool)
+        chi3_mask[:, :, 2] = True
+        chi4_mask = torch.zeros_like(true_sidechain_dihedrals, dtype=torch.bool)
+        chi4_mask[:, :, 3] = True
+        metrics["sidechain_mae_chi1/redesign"] = torch.rad2deg(
+            get_sidechain_mae(
+                pred_sidechain_dihedrals,
+                true_sidechain_dihedrals,
+                masks=[
+                    true_data_dict["redesign_mask"],
+                    true_data_dict["valid_mask"],
+                    true_sidechain_dihedral_mask,
+                    chi1_mask,
+                ],
+            )
+        )
+        metrics["sidechain_mae_chi2/redesign"] = torch.rad2deg(
+            get_sidechain_mae(
+                pred_sidechain_dihedrals,
+                true_sidechain_dihedrals,
+                masks=[
+                    true_data_dict["redesign_mask"],
+                    true_data_dict["valid_mask"],
+                    true_sidechain_dihedral_mask,
+                    chi2_mask,
+                ],
+            )
+        )
+        metrics["sidechain_mae_chi3/redesign"] = torch.rad2deg(
+            get_sidechain_mae(
+                pred_sidechain_dihedrals,
+                true_sidechain_dihedrals,
+                masks=[
+                    true_data_dict["redesign_mask"],
+                    true_data_dict["valid_mask"],
+                    true_sidechain_dihedral_mask,
+                    chi3_mask,
+                ],
+            )
+        )
+        metrics["sidechain_mae_chi4/redesign"] = torch.rad2deg(
+            get_sidechain_mae(
+                pred_sidechain_dihedrals,
+                true_sidechain_dihedrals,
+                masks=[
+                    true_data_dict["redesign_mask"],
+                    true_data_dict["valid_mask"],
+                    true_sidechain_dihedral_mask,
+                    chi4_mask,
+                ],
+            )
+        )
+
+        # remove nans
+        for key in metrics:
+            if isinstance(metrics[key], torch.Tensor):
+                metrics[key] = metrics[key][~torch.isnan(metrics[key])]
+
+        return metrics

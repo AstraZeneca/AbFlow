@@ -13,27 +13,14 @@ import torch
 from tqdm import tqdm
 
 from abflow.utils.arguments import get_arguments, get_config, print_config_summary
-
-chain_id_to_index = {
-    "antigen": 0,
-    "heavy": 1,
-    "light_kappa": 2,
-    "light_lambda": 3,
-}
-
-cdr_to_index = {
-    "framework": 0,
-    "hcdr1": 1,
-    "hcdr2": 2,
-    "hcdr3": 3,
-    "lcdr1": 4,
-    "lcdr2": 5,
-    "lcdr3": 6,
-    "antigen": 7,
-}
-
-backbone_atoms_names_to_index = {"N": 0, "CA": 1, "C": 2, "O": 3}
-backbone_atoms_index_to_names = {0: "N", 1: "CA", 2: "C", 3: "O"}
+from abflow.constants import (
+    chain_id_to_index,
+    region_to_index,
+    backbone_atoms_names_to_index,
+    backbone_atoms_index_to_names,
+    antibody_index,
+    antigen_index,
+)
 
 
 def preprocess_and_save(config: dict):
@@ -114,7 +101,7 @@ def filter_data(data: dict) -> bool:
 
 def process_chain_information(data: dict, redesign: dict) -> dict:
     """
-    Concatenate chains and create `res_type`, `chain_type`, `res_index`, `cdr_index`.
+    Concatenate chains and create `res_type`, `chain_type`, `res_index`, `region_index`.
 
     :param data: Dictionary containing the original lmdb data for a single complex.
     :param redesign: Dictionary containing the redesign dict with the following keys
@@ -131,15 +118,17 @@ def process_chain_information(data: dict, redesign: dict) -> dict:
         - chain_type: A tensor of shape (N_res,) containing the chain type index for each residue.
         - res_index: A tensor of shape (N_res,) containing the residue index for each residue, offset 500 for each chain.
         This offset is fine since we use relative position encoding in abflow and heavy/light chains are typically < 500 residues.
-        - cdr_index: A tensor of shape (N_res,) containing the antibody CDR/framework or antigen index for each residue.
+        - region_index: A tensor of shape (N_res,) containing the antibody CDR/framework or antigen index for each residue.
         - pos_heavyatom: A tensor of shape (N_res, 15, 3) containing the position of the heavy atoms for each residue.
         - redesign_mask: A tensor of shape (N_res,) indicating which residues to redesign (True) and which to fix (False).
+        - antibody_mask: A tensor of shape (N_res,) indicating which residues are part of the antibody (True) and otherwise (False).
+        - antigen_mask: A tensor of shape (N_res,) indicating which residues are part of the antigen (True) and otherwise (False).
     """
 
     res_type_list = []
     chain_type_list = []
     res_index_list = []
-    cdr_index_list = []
+    region_index_list = []
     pos_heavyatom_list = []
     redesign_mask_list = []
 
@@ -166,15 +155,17 @@ def process_chain_information(data: dict, redesign: dict) -> dict:
             res_index_list.append(chain_data["res_nb"] + offset)
             offset += 500
             redesign_index = [
-                index for cdr, index in cdr_to_index.items() if redesign.get(cdr, False)
+                index
+                for cdr, index in region_to_index.items()
+                if redesign.get(cdr, False)
             ]
             if chain_name == "antigen":
-                cdr_index_list.append(
-                    torch.full_like(chain_data["aa"], cdr_to_index["antigen"])
+                region_index_list.append(
+                    torch.full_like(chain_data["aa"], region_to_index["antigen"])
                 )
                 redesign_mask = torch.full_like(chain_data["aa"], 0, dtype=torch.bool)
             else:
-                cdr_index_list.append(chain_data["cdr_locations"])
+                region_index_list.append(chain_data["cdr_locations"])
                 redesign_mask = torch.tensor(
                     [
                         1 if res in redesign_index else 0
@@ -188,22 +179,26 @@ def process_chain_information(data: dict, redesign: dict) -> dict:
     res_type = torch.cat(res_type_list)
     chain_type = torch.cat(chain_type_list)
     res_index = torch.cat(res_index_list)
-    cdr_index = torch.cat(cdr_index_list)
+    region_index = torch.cat(region_index_list)
     pos_heavyatom = torch.cat(pos_heavyatom_list)
     redesign_mask = torch.cat(redesign_mask_list)
+    antibody_mask = torch.isin(chain_type, torch.tensor(antibody_index))
+    antigen_mask = torch.isin(chain_type, torch.tensor(antigen_index))
 
     return {
         "res_type": res_type,
         "chain_type": chain_type,
         "res_index": res_index,
-        "cdr_index": cdr_index,
+        "region_index": region_index,
         "pos_heavyatom": pos_heavyatom,
         "redesign_mask": redesign_mask,
+        "antibody_mask": antibody_mask,
+        "antigen_mask": antigen_mask,
     }
 
 
 def crop_complex(
-    cdr_index: torch.Tensor,
+    region_index: torch.Tensor,
     redesign_mask: torch.Tensor,
     pos_heavyatom: torch.Tensor,
     max_crop_size: int,
@@ -216,7 +211,7 @@ def crop_complex(
     It then selects the closest antigen residues up to `antigen_crop_size`.
     Finally, it fills the mask up to `max_crop_size` with the closest remaining residues.
 
-    :param cdr_index: A tensor of shape (N_res,) containing the CDR index for each residue.
+    :param region_index: A tensor of shape (N_res,) containing the CDR index for each residue.
     :param redesign_mask: A tensor of shape (N_res,) indicating which residues to redesign (True) and which to fix (False).
     :param pos_heavyatom: A tensor of shape (N_res, 15, 3) containing the position of the heavy atoms for each residue.
     :param max_crop_size: Maximum number of residues to be marked as True in the crop mask.
@@ -227,12 +222,12 @@ def crop_complex(
 
     redesign_cdr_mask = (
         (redesign_mask == True)
-        & (cdr_index != cdr_to_index["antigen"])
-        & (cdr_index != cdr_to_index["framework"])
+        & (region_index != region_to_index["antigen"])
+        & (region_index != region_to_index["framework"])
     )
     cdr_indices = torch.where(redesign_cdr_mask == True)[0]
     coords = pos_heavyatom[:, backbone_atoms_names_to_index["CA"]]
-    antigen_mask = cdr_index == cdr_to_index["antigen"]
+    antigen_mask = region_index == region_to_index["antigen"]
 
     anchor_points = []
     i = 0
@@ -321,7 +316,7 @@ def crop_data(data: dict, config: dict) -> dict:
     """
 
     crop_mask = crop_complex(
-        data["cdr_index"],
+        data["region_index"],
         data["redesign_mask"],
         data["pos_heavyatom"],
         config["crop"]["max_crop_size"],

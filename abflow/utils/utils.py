@@ -22,10 +22,6 @@ def combine_masks(masks: List[torch.Tensor], data: torch.Tensor) -> torch.Tensor
     """
     Combine a list of boolean masks for data with shape (N_batch, ...).
     Masks may have fewer dimensions, but will be expanded to the shape of the data before combining.
-
-    :param masks: A list of boolean masks with shape less than data.
-    :param data: The data tensor with shape (N_batch, ...).
-    :return: A boolean tensor with the same shape as dimensions of `data`.
     """
 
     combined_mask = torch.ones(data.shape, dtype=torch.bool, device=data.device)
@@ -38,21 +34,29 @@ def combine_masks(masks: List[torch.Tensor], data: torch.Tensor) -> torch.Tensor
     return combined_mask
 
 
-def average_data(data: torch.Tensor, masks: List[torch.Tensor] = None) -> torch.Tensor:
+def average_data(
+    data: torch.Tensor, masks: List[torch.Tensor] = None, eps: float = 0.0
+) -> torch.Tensor:
     """
-    Apply masks and compute the average over the masked elements for data with shapes (N_batch, ...).
-    Dimensionality of data is assumed to be at least 2.
+    Applies masks to the data tensor and computes the average over all dimensions except
+    the first (batch) dimension. Returns NaN if the mask is all False.
 
-    :param data: The data tensor to apply the mask to, shape (N_batch, ...).
-    :param masks: A list of boolean masks with shape less than data.
-    :return: Averaged values after applying the mask, shape (N_batch,).
+    :param data: The data tensor to be averaged, assumed to have at least one dimension,
+                 with shape (N_batch, ...).
+    :param masks: A list of boolean masks, each of which must be broadcastable to the shape of `data`.
+                  If no masks are provided, all data elements are included in the average.
+    :param eps: A small value added to the denominator to prevent division by zero.
+                Default is set to 0 to return NaN when the mask is all False.
+
+    :return: A tensor of shape (N_batch,), containing the averaged values for each batch
+             after applying the masks.
     """
     mask = combine_masks(masks, data)
 
     masked_data = data * mask
     sum_masked_data = masked_data.sum(dim=list(range(1, data.dim())))
     sum_mask = mask.sum(dim=list(range(1, mask.dim())))
-    average_data = sum_masked_data / (sum_mask + 1e-9)
+    average_data = sum_masked_data / (sum_mask + eps)
 
     return average_data
 
