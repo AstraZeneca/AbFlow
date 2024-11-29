@@ -1,60 +1,39 @@
 # AbFlow
 
-![AbFlow](./media/AbFlow_architecture.png)
-
-Redesign antibody CDR loops with SE(3) flow matching
+Redesign antibody CDR loops with all-atom flow matching
 
 (paper) (demo)
 
-## Install
+## Installation
 
+Git clone and `cd` into the repository:
 ```bash
-conda env create -f env.yaml -n abflow
-conda activate abflow
+git clone https://github.com/AstraZeneca/AbFlow.git
+cd AbFlow
 ```
 
-## Datasets and Trained Weights
-
-Trained model weights are available at (huggingface)
-
-## Redesign Antibody-Antigen Complex
-
-4 design modes are available. Each mode corresponds to a config file in the `configs/test` folder:
-
-| Config File                   | Description                                                   |
-| ------------------------------| ------------------------------------------------------------  |
-| `codesign_single.yml`         | Sample both the **sequence** and **backbone** of **one** CDR. |
-| `predict_sequence_single.yml` | Sample only the **sequence** of **one** CDR (fix-backbone sequence design). |
-| `predict_backbone_single.yml` | Sample only the **backbone** of **one** CDR (structure prediction). |
-| `codesign_multicdrs.yml`      | Sample both the **sequence** and **backbone** of **all** the CDRs simultaneously. |
-
-Below is the usage of `design_pdb.py`. It samples CDRs for antibody-antigen complexes. The full list of options can be found in [`abflow/tools/runner/design_for_pdb.py`](abflow/tools/runner/design_for_pdb.py).
-
+Install `mamba` into the base environment for faster dependency resolution:
 ```bash
-python design_pdb.py \
-	<path-to-pdb> \
-	--heavy <heavy-chain-id> \
-	--light <light-chain-id> \
-	--config <path-to-config-file>
+conda install conda-forge::mamba
 ```
 
-The `--heavy` and  `--light` options can be omitted as the script can automatically identify them with AbNumber and ANARCI.
-
-The below example designs the six CDRs separately for the `7DK2_AB_C` antibody-antigen complex.
-
+Create the vitual environment with dependencies using:
 ```bash
-python design_pdb.py ./data/examples/7DK2_AB_C.pdb \
-	--config ./config/test/codesign_single.yml
+mamba env create -f environment.yml
+```
+
+Then `pip install` abflow package after activating the environment:
+```bash
+mamba activate abflow
+pip install ./
 ```
 
 ## Train
 
-```bash
-python train.py ./configs/train/<config-file-name>
-```
+## Design
 
 ## Contact
 
-Please contact hz362@cam.ac.uk to report any issues.
+Please contact hz362@cam.ac.uk or ucabtuc@gmail.com to report any issues.
 
 ## Reference

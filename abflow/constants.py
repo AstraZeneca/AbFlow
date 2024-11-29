@@ -348,7 +348,7 @@ HEAVY_ATOM_COORDS = {
         ["CB", 0, (-0.546, -0.611, -1.293)],
         ["O", 0, (0.621, 1.066, 0.000)],
         ["CG", 1, (0.382, 1.445, 0.0)],
-        # ['CD', 5, (0.427, 1.440, 0.0)],
+        # ['CD', 2, (0.427, 1.440, 0.0)],
         ["CD", 2, (0.477, 1.424, 0.0)],  # manually made angle 2 degrees larger
     ],
     AminoAcid3.SER: [
@@ -412,8 +412,8 @@ HEAVY_ATOM_COORDS = {
 
 PREVIOUS_SIDECHAIN_ATOM_ROTATIONS = torch.zeros([20, 5, 3, 3])
 PREVIOUS_SIDECHAIN_ATOM_TRANSLATIONS = torch.zeros([20, 5, 3])
-HEAVY_ATOM_TORSION_INDEX = torch.zeros([20, 14], dtype=torch.int64)
-HEAYY_ATOM_POSITIONS = torch.zeros([20, 14, 3])
+HEAVY_ATOM_TORSION_INDEX = torch.zeros([20, 15], dtype=torch.int64)
+HEAYY_ATOM_POSITIONS = torch.zeros([20, 15, 3])
 
 
 def _init_heavy_atom_constants():
@@ -424,7 +424,7 @@ def _init_heavy_atom_constants():
             name: torch.FloatTensor(pos) for name, _, pos in HEAVY_ATOM_COORDS[aa]
         }
 
-        # heavy atom 14 positions
+        # heavy atom 15 positions
         for atom_idx, atom_name in enumerate(restype_to_heavyatom_names[aa]):
             if (atom_name == "") or (atom_name not in atom_groups):
                 continue
@@ -466,12 +466,23 @@ def get_heavy_atom_constants(
         res_type
     ].reshape(N_batch, N_res, 5, 3)
     torsion_index = HEAVY_ATOM_TORSION_INDEX.to(res_type.device)[res_type].reshape(
-        N_batch, N_res, 14
+        N_batch, N_res, 15
     )
     atom14_position = HEAYY_ATOM_POSITIONS.to(res_type.device)[res_type].reshape(
-        N_batch, N_res, 14, 3
+        N_batch, N_res, 15, 3
     )
     return prev_rotation, prev_translation, torsion_index, atom14_position
+
+
+def get_dihedral_mask(res_type: torch.Tensor) -> torch.Tensor:
+    N_batch, N_res = res_type.size()
+    res_type = res_type.flatten()
+    mask = torch.tensor(
+        [chi_angles_mask[aa] for aa in res_type.cpu().numpy()],
+        dtype=torch.bool,
+        device=res_type.device,
+    ).reshape(N_batch, N_res, 4)
+    return mask
 
 
 # ---------------------------------------------- some new constants ----------------------------------------------

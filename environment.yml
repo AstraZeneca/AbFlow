@@ -1,0 +1,23 @@
+name: abflow
+channels:
+  - pytorch
+  - conda-forge
+  - anaconda
+  - defaults
+  - bioconda
+dependencies:
+  - python=3.12
+  - pip
+  - biopython=1.84
+  - pandas=2.2.2
+  - numpy=2.1.2
+  - pytorch>=2.4
+  - pytorch-lightning=2.4.0
+  - wandb=0.18.5
+  - ipykernel
+  - jupyter
+  - notebook
+  - pip:
+      - lmdb
+      - texttable
+      - easydict

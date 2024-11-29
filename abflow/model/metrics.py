@@ -17,6 +17,7 @@ from ..constants import (
     Liability,
     AminoAcid1,
     region_to_index,
+    get_dihedral_mask,
 )
 
 
@@ -776,15 +777,12 @@ class AbFlowMetrics(nn.Module):
             )
 
         # sidechain metrics
-        pred_sidechain_dihedrals, _ = get_sidechain_dihedrals(
-            pred_data_dict["pos_heavyatom"]
-        )
-        true_sidechain_dihedrals, true_sidechain_dihedral_mask = (
-            get_sidechain_dihedrals(true_data_dict["pos_heavyatom"])
-        )
+        pred_sidechain_dihedrals = pred_data_dict["sidechain_dihedrals"]
+        true_sidechain_dihedrals = true_data_dict["sidechain_dihedrals"]
+        true_sidechain_dihedral_mask = get_dihedral_mask(true_data_dict["res_type"])
         metrics["sidechain_mae/redesign"] = get_sidechain_mae(
-            pred_sidechain_dihedrals,
-            true_sidechain_dihedrals,
+            pred_data_dict["sidechain_dihedrals"],
+            true_data_dict["sidechain_dihedrals"],
             masks=[
                 true_data_dict["redesign_mask"],
                 true_data_dict["valid_mask"],

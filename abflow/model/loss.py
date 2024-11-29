@@ -6,6 +6,11 @@ import torch
 import torch.nn as nn
 from typing import List, Dict
 
+from .metrics import (
+    get_bb_clash_violation,
+    get_bb_bond_angle_violation,
+    get_bb_bond_length_violation,
+)
 from ..utils.utils import average_data
 
 
@@ -48,13 +53,6 @@ def get_ce_loss(
     neg_log_probs = -torch.sum(true * torch.log(pred + 1e-9), dim=-1)
     ce_loss = average_data(neg_log_probs, masks=masks, eps=1e-9)
     return ce_loss
-
-
-from .metrics import (
-    get_bb_clash_violation,
-    get_bb_bond_angle_violation,
-    get_bb_bond_length_violation,
-)
 
 
 class AbFlowLoss(nn.Module):
@@ -122,36 +120,43 @@ class AbFlowLoss(nn.Module):
                 true_data_dict["valid_mask"][:, :, None],
             ],
         )
-        loss_dict["bb_clash_loss"], _ = get_bb_clash_violation(
-            N_coords=pred_data_dict["pos_heavyatom"][:, :, 0, :],
-            CA_coords=pred_data_dict["pos_heavyatom"][:, :, 1, :],
-            C_coords=pred_data_dict["pos_heavyatom"][:, :, 2, :],
-            masks_dim_1=[true_data_dict["redesign_mask"], true_data_dict["valid_mask"]],
-            masks_dim_2=[true_data_dict["valid_mask"]],
-        )
-        loss_dict["bb_bond_angle_loss"], _ = get_bb_bond_angle_violation(
-            N_coords=pred_data_dict["pos_heavyatom"][:, :, 0, :],
-            CA_coords=pred_data_dict["pos_heavyatom"][:, :, 1, :],
-            C_coords=pred_data_dict["pos_heavyatom"][:, :, 2, :],
-            masks=[true_data_dict["redesign_mask"], true_data_dict["valid_mask"]],
-        )
-        loss_dict["bb_bond_length_loss"], _ = get_bb_bond_length_violation(
-            N_coords=pred_data_dict["pos_heavyatom"][:, :, 0, :],
-            CA_coords=pred_data_dict["pos_heavyatom"][:, :, 1, :],
-            C_coords=pred_data_dict["pos_heavyatom"][:, :, 2, :],
-            masks=[true_data_dict["redesign_mask"], true_data_dict["valid_mask"]],
-        )
+        if "backbone" in self.design_mode:
+            loss_dict["bb_clash_loss"], _ = get_bb_clash_violation(
+                N_coords=pred_data_dict["pos_heavyatom"][:, :, 0, :],
+                CA_coords=pred_data_dict["pos_heavyatom"][:, :, 1, :],
+                C_coords=pred_data_dict["pos_heavyatom"][:, :, 2, :],
+                masks_dim_1=[
+                    true_data_dict["redesign_mask"],
+                    true_data_dict["valid_mask"],
+                ],
+                masks_dim_2=[true_data_dict["valid_mask"]],
+            )
+            loss_dict["bb_bond_angle_loss"], _ = get_bb_bond_angle_violation(
+                N_coords=pred_data_dict["pos_heavyatom"][:, :, 0, :],
+                CA_coords=pred_data_dict["pos_heavyatom"][:, :, 1, :],
+                C_coords=pred_data_dict["pos_heavyatom"][:, :, 2, :],
+                masks=[true_data_dict["redesign_mask"], true_data_dict["valid_mask"]],
+            )
+            loss_dict["bb_bond_length_loss"], _ = get_bb_bond_length_violation(
+                N_coords=pred_data_dict["pos_heavyatom"][:, :, 0, :],
+                CA_coords=pred_data_dict["pos_heavyatom"][:, :, 1, :],
+                C_coords=pred_data_dict["pos_heavyatom"][:, :, 2, :],
+                masks=[true_data_dict["redesign_mask"], true_data_dict["valid_mask"]],
+            )
 
         # confidence estimations
-        loss_dict["lddt_loss"] = get_ce_loss(
-            pred_value_dict["lddt"],
-            true_value_dict["lddt"],
-            masks=[true_data_dict["redesign_mask"], true_data_dict["valid_mask"]],
-        )
-        # loss_dict["tm_loss"]
-        # loss_dict["pae_loss"]
+        if "backbone" in self.design_mode:
+            loss_dict["lddt_loss"] = get_ce_loss(
+                pred_value_dict["lddt"],
+                true_value_dict["lddt"],
+                masks=[true_data_dict["redesign_mask"], true_data_dict["valid_mask"]],
+            )
+            # loss_dict["tm_loss"]
+            # loss_dict["pae_loss"]
+            # interface residues metrics
+            # loglikelihood method
 
-        # for loop
+        # weighting and summing the losses
         for loss_name, loss_value in loss_dict.items():
             weight = self.loss_weights[loss_name]
             weighted_loss = weight * loss_value
