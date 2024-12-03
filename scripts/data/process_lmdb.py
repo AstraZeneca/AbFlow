@@ -5,8 +5,8 @@ A saved LMDB database contains the following files:
 - entries_list.pkl: A list of dictionaries containing the entry ID for each complex.
 - structures.lmdb: The LMDB database containing the structure data for each complex.
 
-To use this script, run: python abflow/data/process_lmdb.py --path <path_to_data_folder>
-Example command to process sabdab data: python abflow/data/process_lmdb.py --path /scratch/hz362/datavol/data/sabdab
+To use this script, run: python abflow/scripts/process_lmdb.py --path <path_to_data_folder>
+Example command to process sabdab data: python abflow/scripts/process_lmdb.py --path /scratch/hz362/datavol/data/sabdab
 """
 
 import lmdb
