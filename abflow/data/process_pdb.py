@@ -1,0 +1,366 @@
+"""
+PDB Processing Pipeline for AbFlow
+
+This script processes PDB files for use in AbFlow, including filling missing atoms, extracting chain data, and outputting processed PDB files.
+
+### Example Usage:
+```python
+from abflow.data.process_pdb import fill_missing_atoms, process_pdb_to_lmdb, process_lmdb_chain, output_to_pdb
+
+# pdb file to input data dict
+pdb_file = "9c44.pdb"
+sabdab_summary_file = "9c44.tsv"
+
+## Step 1: Fix PDB file to ensure missing atoms and residues are filled
+fill_missing_atoms(pdb_file)
+
+## Step 2: Extract raw ab-ag data from PDB file and SAbDab summary file
+data = process_pdb_to_lmdb(pdb_file, sabdab_summary_file, id=0)
+
+## Step 3: Process data for AbFlow input
+processed_data = process_lmdb_chain(data)
+
+# Input data dict to PDB file
+output_to_pdb(processed_data, "9c44_output.pdb")
+```
+
+"""
+
+import torch
+import pandas as pd
+import numpy as np
+
+from typing import Dict
+from Bio.PDB import PDBParser, PDBIO, Structure, Model, Atom
+from Bio.PDB.Residue import Residue
+from Bio.PDB.Polypeptide import protein_letters_3to1
+from Bio.PDB import Chain as BiopythonChain
+from collections import defaultdict
+from abnumber import Chain as AbnumberChain
+from pdbfixer import PDBFixer
+from openmm.app import PDBFile
+
+from abflow.constants import (
+    region_to_index,
+    restype_to_heavyatom_names,
+    aa3_name_to_index,
+    chain_id_to_index,
+    antibody_index,
+    antigen_index,
+    aa3_index_to_name,
+    restype_to_heavyatom_names,
+)
+
+from pdbfixer import PDBFixer
+from openmm.app import PDBFile
+
+
+def fill_missing_atoms(input_pdb: str):
+    """
+    Use PDBFixer to fill in missing atoms in a PDB file.
+
+    :param input_pdb: Path to the input PDB file.
+    """
+
+    fixer = PDBFixer(filename=input_pdb)
+
+    # Identify and fix issues
+    fixer.findMissingResidues()  # Identify missing residues
+    fixer.findNonstandardResidues()  # Identify nonstandard residues
+    fixer.replaceNonstandardResidues()  # Replace nonstandard residues with standard ones
+    fixer.removeHeterogens(True)  # Remove heterogens but keep water
+    fixer.findMissingAtoms()  # Identify missing heavy atoms
+    fixer.addMissingAtoms()  # Add missing heavy atoms
+    fixer.addMissingHydrogens(7.0)  # Add hydrogens at pH 7.0 (adjust as needed)
+
+    # Save the fixed PDB file
+    with open(input_pdb, "w") as f:
+        PDBFile.writeFile(fixer.topology, fixer.positions, f, keepIds=True)
+
+    print(f"Fixed PDB saved to: {input_pdb}")
+
+
+def extract_sequence_from_chain(chain) -> str:
+    """
+    Extract the amino acid sequence from a PDB chain.
+
+    :param chain: Biopython chain object.
+    :return: Amino acid sequence as a string.
+    """
+    sequence = []
+    for residue in chain:
+        if not isinstance(residue, Residue):
+            continue
+        res_name_aa3 = residue.get_resname()
+        res_name_aa1 = protein_letters_3to1.get(res_name_aa3, None)
+        if res_name_aa1:
+            sequence.append(res_name_aa1)
+    return "".join(sequence)
+
+
+def extract_chain_data(chain, data, chain_name, ab_chain=None):
+    """
+    Extract relevant data for a single chain and assign CDR regions using AbNumber.
+
+    :param chain: Biopython chain object.
+    :param data: Dictionary to store extracted data.
+    :param chain_name: Name of the chain ('heavy' or 'light').
+    :param ab_chain: AbNumber Chain object for the sequence.
+    """
+
+    for residue in chain:
+        if not isinstance(residue, Residue):
+            continue
+        res_name = residue.get_resname()
+        aa_index = aa3_name_to_index.get(res_name, None)
+        if aa_index is None:
+            continue
+
+        res_position = residue.id[1]
+
+        data[chain_name]["aa"].append(aa_index)
+        data[chain_name]["res_nb"].append(res_position)
+        atom_positions = [
+            residue[atom].get_coord() if atom in residue else [0.0, 0.0, 0.0]
+            for atom in restype_to_heavyatom_names[aa_index]
+        ]
+        data[chain_name]["pos_heavyatom"].append(atom_positions)
+
+    if chain_name == "antigen":
+        region_index = region_to_index["antigen"]
+        data[chain_name]["cdr_locations"] = [region_index] * len(data[chain_name]["aa"])
+    else:
+        for pos, aa in ab_chain:
+
+            if chain_name == "heavy":
+                if pos in ab_chain.cdr1_dict:
+                    cdr_region = "hcdr1"
+                elif pos in ab_chain.cdr2_dict:
+                    cdr_region = "hcdr2"
+                elif pos in ab_chain.cdr3_dict:
+                    cdr_region = "hcdr3"
+                else:
+                    cdr_region = "framework"
+            elif chain_name == "light":
+                if pos in ab_chain.cdr1_dict:
+                    cdr_region = "lcdr1"
+                elif pos in ab_chain.cdr2_dict:
+                    cdr_region = "lcdr2"
+                elif pos in ab_chain.cdr3_dict:
+                    cdr_region = "lcdr3"
+                else:
+                    cdr_region = "framework"
+
+            region_index = region_to_index.get(cdr_region, region_to_index["framework"])
+
+            data[chain_name]["cdr_locations"].append(region_index)
+
+
+def process_pdb_to_lmdb(
+    pdb_path: str, sabdab_summary_path: str, id: int = 0, scheme: str = "chothia"
+) -> Dict[str, Dict]:
+    """
+    Process a PDB file and a SAbDab summary TSV file into a format compatible with process_lmdb_chain.
+
+        pdb	Hchain	Lchain	model	antigen_chain	antigen_type	antigen_het_name	antigen_name	short_header	date	compound	organism	heavy_species	light_species	antigen_species	authors	resolution	method	r_free	r_factor	scfv	engineered	heavy_subclass	light_subclass	light_ctype	affinity	delta_g	affinity_method	temperature	pmid
+        9bu8	C	D	0	B | A	protein | protein	NA | NA	hemagglutinin ha2 | hemagglutinin ha1	VIRAL PROTEIN/IMMUNE SYSTEM	11/27/24	Vaccine elicited Fab c115.131 with influenza H10 JD13 HA trimer	Homo sapiens; Influenza A virus	homo sapiens	homo sapiens	influenza a virus | influenza a virus	Gorman, J., Kwong, P.D.	3.96	ELECTRON MICROSCOPY	NA	NA	False	True	IGHV3	IGKV3	Kappa	None	None	None	None	None
+        9bu8	F	H	0	L | J	protein | protein	NA | NA	hemagglutinin ha2 | hemagglutinin ha1	VIRAL PROTEIN/IMMUNE SYSTEM	11/27/24	Vaccine elicited Fab c115.131 with influenza H10 JD13 HA trimer	Homo sapiens; Influenza A virus	homo sapiens	homo sapiens	influenza a virus | influenza a virus	Gorman, J., Kwong, P.D.	3.96	ELECTRON MICROSCOPY	NA	NA	False	True	IGHV3	IGKV3	Kappa	None	None	None	None	None
+        9bu8	I	K	0	G | E	protein | protein	NA | NA	hemagglutinin ha2 | hemagglutinin ha1	VIRAL PROTEIN/IMMUNE SYSTEM	11/27/24	Vaccine elicited Fab c115.131 with influenza H10 JD13 HA trimer	Homo sapiens; Influenza A virus	homo sapiens	homo sapiens	influenza a virus | influenza a virus	Gorman, J., Kwong, P.D.	3.96	ELECTRON MICROSCOPY	NA	NA	False	True	IGHV3	IGKV3	Kappa	None	None	None	None	None
+
+
+    :param pdb_path: Path to the PDB file.
+    :param sabdab_summary_path: Path to the SAbDab summary TSV file.
+    :param id: Index of the entry in the summary file to process.
+    :param scheme: CDR scheme.
+    :return: A dictionary containing the data for heavy, light, and antigen chains.
+    """
+    parser = PDBParser(QUIET=True)
+    structure = parser.get_structure(None, pdb_path)
+
+    sabdab_summary = pd.read_csv(sabdab_summary_path, sep="\t")
+    entry = sabdab_summary.iloc[id]
+
+    model_id = entry["model"]
+    heavy_chain_id = entry["Hchain"]
+    light_chain_id = entry["Lchain"]
+    antigen_chains = entry["antigen_chain"].split(" | ")
+
+    chain_map = {
+        "heavy": heavy_chain_id,
+        "light": light_chain_id,
+        "antigen": antigen_chains,
+    }
+
+    data = defaultdict(
+        lambda: {"aa": [], "res_nb": [], "cdr_locations": [], "pos_heavyatom": []}
+    )
+
+    model = structure[model_id]
+    for chain_name, chain_id in chain_map.items():
+        if chain_name == "antigen":
+            for antigen_chain_id in chain_id:
+                extract_chain_data(model[antigen_chain_id], data, "antigen")
+        else:
+            pdb_chain_seq = extract_sequence_from_chain(model[chain_id])
+            ab_chain = AbnumberChain(pdb_chain_seq, scheme=scheme)
+            extract_chain_data(model[chain_id], data, chain_name, ab_chain)
+
+            # record heavy_ctype and light_ctype
+            if chain_name == "heavy":
+                data["heavy_ctype"] = ab_chain.chain_type
+            elif chain_name == "light":
+                data["light_ctype"] = ab_chain.chain_type
+
+    for chain_name in ["heavy", "light", "antigen"]:
+        data[chain_name]["aa"] = torch.tensor(
+            np.array(data[chain_name]["aa"]), dtype=torch.long
+        )
+        data[chain_name]["res_nb"] = torch.tensor(
+            np.array(data[chain_name]["res_nb"]), dtype=torch.long
+        )
+        data[chain_name]["cdr_locations"] = torch.tensor(
+            np.array(data[chain_name]["cdr_locations"]), dtype=torch.long
+        )
+        data[chain_name]["pos_heavyatom"] = torch.tensor(
+            np.array(data[chain_name]["pos_heavyatom"]), dtype=torch.float32
+        )
+
+    return data
+
+
+def process_lmdb_chain(data: dict) -> dict:
+    """
+    Concatenate chains and create `res_type`, `chain_type`, `res_index`, `region_index`, `pos_heavyatom`, `antibody_mask`, and `antigen_mask`.
+
+    :param data: Dictionary containing the original lmdb data for a single complex.
+
+    :return: Dictionary with the following keys
+        - res_type: A tensor of shape (N_res,) containing the amino acid type index for each residue.
+        - chain_type: A tensor of shape (N_res,) containing the chain type index for each residue.
+        - res_index: A tensor of shape (N_res,) containing the residue index for each residue, offset 500 for each chain.
+        This offset is fine since we use relative position encoding in abflow and heavy/light chains are typically < 500 residues.
+        - region_index: A tensor of shape (N_res,) containing the antibody CDR/framework or antigen index for each residue.
+        - pos_heavyatom: A tensor of shape (N_res, 15, 3) containing the position of the heavy atoms for each residue.
+        - antibody_mask: A tensor of shape (N_res,) indicating which residues are part of the antibody (True) and otherwise (False).
+        - antigen_mask: A tensor of shape (N_res,) indicating which residues are part of the antigen (True) and otherwise (False).
+    """
+
+    res_type_list = []
+    chain_type_list = []
+    res_index_list = []
+    region_index_list = []
+    pos_heavyatom_list = []
+
+    chain_names = ["heavy", "light", "antigen"]
+    offset = 0
+
+    for chain_name in chain_names:
+        chain_data = data.get(chain_name)
+
+        if chain_data is not None:
+            res_type_list.append(chain_data["aa"])
+            if chain_name == "light" and data["light_ctype"] == "K":
+                chain_type_list.append(
+                    torch.full_like(chain_data["aa"], chain_id_to_index["light_kappa"])
+                )
+            elif chain_name == "light" and data["light_ctype"] == "L":
+                chain_type_list.append(
+                    torch.full_like(chain_data["aa"], chain_id_to_index["light_lambda"])
+                )
+            else:
+                chain_type_list.append(
+                    torch.full_like(chain_data["aa"], chain_id_to_index[chain_name])
+                )
+            res_index_list.append(chain_data["res_nb"] + offset)
+            offset += 500
+            if chain_name == "antigen":
+                region_index_list.append(
+                    torch.full_like(chain_data["aa"], region_to_index["antigen"])
+                )
+            else:
+                region_index_list.append(chain_data["cdr_locations"])
+            pos_heavyatom_list.append(chain_data["pos_heavyatom"])
+
+    res_type = torch.cat(res_type_list)
+    chain_type = torch.cat(chain_type_list)
+    res_index = torch.cat(res_index_list)
+    region_index = torch.cat(region_index_list)
+    pos_heavyatom = torch.cat(pos_heavyatom_list)
+    antibody_mask = torch.isin(chain_type, torch.tensor(antibody_index))
+    antigen_mask = torch.isin(chain_type, torch.tensor(antigen_index))
+
+    return {
+        "res_type": res_type,
+        "chain_type": chain_type,
+        "res_index": res_index,
+        "region_index": region_index,
+        "pos_heavyatom": pos_heavyatom,
+        "antibody_mask": antibody_mask,
+        "antigen_mask": antigen_mask,
+    }
+
+
+def output_to_pdb(data: Dict[str, torch.Tensor], path: str):
+    """
+    Output the processed data to a PDB file with all heavy atoms.
+
+    :param data: Processed data dictionary with tensors for residue and atom information.
+    :param path: Path to save the output PDB file.
+    """
+    structure = Structure.Structure("output_structure")
+    model = Model.Model(0)
+    structure.add(model)
+
+    chain_mapping = {
+        0: "A",  # Antigen
+        1: "H",  # Heavy chain
+        2: "K",  # Kappa light chain
+        3: "L",  # Lambda light chain
+    }
+
+    chain_ids = torch.unique(data["chain_type"]).tolist()
+    chains = {
+        chain_id: BiopythonChain.Chain(chain_mapping[chain_id])
+        for chain_id in chain_ids
+    }
+
+    for chain in chains.values():
+        model.add(chain)
+
+    res_type = data["res_type"]
+    chain_type = data["chain_type"]
+    res_index = data["res_index"]
+    pos_heavyatom = data["pos_heavyatom"]
+
+    for i in range(res_type.size(0)):
+        chain_id = chain_type[i].item()
+        residue_index = res_index[i].item()
+        residue_type = res_type[i].item()
+
+        chain = chains[chain_id]
+        residue_name = list(aa3_index_to_name.values())[residue_type]
+        residue = Residue((" ", residue_index, " "), residue_name, 0)
+        chain.add(residue)
+
+        heavy_atoms = restype_to_heavyatom_names[residue_type]
+        for atom_index, atom_name in enumerate(heavy_atoms):
+            if atom_name == "" or atom_name == "OXT":
+                continue
+            element = atom_name[0]
+            atom_coords = pos_heavyatom[i, atom_index].tolist()
+            if any(c != 0.0 for c in atom_coords):
+                atom = Atom.Atom(
+                    atom_name,
+                    atom_coords,
+                    1.0,
+                    1.0,
+                    " ",
+                    atom_name,
+                    atom_index,
+                    element=element,
+                )
+                residue.add(atom)
+
+    io = PDBIO()
+    io.set_structure(structure)
+    io.save(path)

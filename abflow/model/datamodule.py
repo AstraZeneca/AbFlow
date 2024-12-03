@@ -225,6 +225,13 @@ class AntibodyAntigenDataModule(LightningDataModule):
         Combines a list of dictionaries into a single dictionary with an additional batch dimension.
         """
 
+        # NEED TO IMPLEMENT THIS FUNCTION
+        # 1. redesign mask
+        # 2. crop mask
+        # 3. center complex
+        # 4. pad complex
+        # 5. batch complex
+
         # check default collate from torch.utils.data
         data_dict = batch_dict(data_dict)
         return data_dict
