@@ -57,15 +57,16 @@ from openmm.app import PDBFile
 
 def fill_missing_atoms(input_pdb: str):
     """
-    Use PDBFixer to fill in missing atoms in a PDB file.
+    Use PDBFixer to fill in missing atoms in a PDB file, but do not add missing residues,
+    as linearization of the missing residues can lead to incorrect backbone frame construction.
 
     :param input_pdb: Path to the input PDB file.
     """
 
     fixer = PDBFixer(filename=input_pdb)
 
-    # Identify and fix issues
     fixer.findMissingResidues()  # Identify missing residues
+    fixer.missingResidues = {} # Remove missing residues
     fixer.findNonstandardResidues()  # Identify nonstandard residues
     fixer.replaceNonstandardResidues()  # Replace nonstandard residues with standard ones
     fixer.removeHeterogens(True)  # Remove heterogens but keep water
@@ -73,11 +74,10 @@ def fill_missing_atoms(input_pdb: str):
     fixer.addMissingAtoms()  # Add missing heavy atoms
     fixer.addMissingHydrogens(7.0)  # Add hydrogens at pH 7.0 (adjust as needed)
 
-    # Save the fixed PDB file
     with open(input_pdb, "w") as f:
         PDBFile.writeFile(fixer.topology, fixer.positions, f, keepIds=True)
 
-    print(f"Fixed PDB saved to: {input_pdb}")
+    print(f"Fixed PDB file with missing atoms filled but no missing residues added saved to: {input_pdb}")
 
 
 def extract_sequence_from_chain(chain) -> str:

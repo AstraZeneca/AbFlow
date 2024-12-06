@@ -1,13 +1,9 @@
-"""
-Auxiliary heads for confidence estimation and auxiliary loss.
-"""
-
 import torch.nn as nn
 import torch
 import torch.nn.functional as F
 
-from .feature_embedder import one_hot
-from ..nn.pairformer import PairformerStack
+from .modules.feature_embedder import BinnedOneHotEmbedding
+from .modules.pairformer import PairformerStack
 
 
 class ConfidenceHead(nn.Module):
@@ -27,7 +23,13 @@ class ConfidenceHead(nn.Module):
         self.linear_no_bias_s_i = nn.Linear(c_s, c_z, bias=False)
         self.linear_no_bias_s_j = nn.Linear(c_s, c_z, bias=False)
         self.linear_no_bias_z = nn.Linear(c_z, c_z, bias=False)
-        self.linear_no_bias_d = nn.Linear(11, c_z, bias=False)
+
+        ca_num_bins = 11
+        ca_min = 3.375
+        ca_max = 21.375
+        ca_bins = torch.linspace(ca_min, ca_max, ca_num_bins - 1)
+        self.ca_binned_one_hot = BinnedOneHotEmbedding(ca_bins)
+        self.linear_no_bias_d = nn.Linear(ca_num_bins, c_z, bias=False)
 
         self.pairformer_stack = PairformerStack(
             c_s,
@@ -58,8 +60,8 @@ class ConfidenceHead(nn.Module):
         # Embed pair distances of C-alpha atoms
         d_ij = torch.norm(x_pred_i[:, :, None, :] - x_pred_i[:, None, :, :], dim=-1)
 
-        v_bins = torch.linspace(3.375, 21.375, 10, device=d_ij.device)
-        z_ij = z_ij + self.linear_no_bias_d(one_hot(d_ij, v_bins))
+        ca_binned_one_hot = self.ca_binned_one_hot(d_ij)
+        z_ij = z_ij + self.linear_no_bias_d(ca_binned_one_hot)
 
         s_post_i, z_post_ij = self.pairformer_stack(s_i, z_ij)
         s_i = s_i + s_post_i
@@ -68,23 +70,3 @@ class ConfidenceHead(nn.Module):
         p_plddt_i = F.softmax(self.linear_no_bias_plddt(s_i), dim=-1)
 
         return p_plddt_i
-
-
-class DistogramHead(nn.Module):
-    """
-    Distogram head to predict the distogram from the pair representations (from condition module) and used to calculate the auxiliary loss between
-    and the true distogram (CB-CB distance).
-    """
-
-    def __init__(self, c_z: int):
-
-        super().__init__()
-
-        self.linear_no_bias_d = nn.Linear(c_z, 66, bias=False)
-
-    def forward(self, z_ij: torch.Tensor) -> torch.Tensor:
-
-        p_distogram_ij = self.linear_no_bias_d(z_ij + torch.einsum("bijd->bjid", z_ij))
-        p_distogram_ij = F.softmax(p_distogram_ij, dim=-1)
-
-        return p_distogram_ij

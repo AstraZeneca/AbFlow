@@ -77,28 +77,26 @@ def compose_chain(Ts):
 
 
 def create_chi_rotation(
-    sidechain_dihedrals: torch.Tensor,
+    dihedrals: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Converting dihedral angles to rotation matrices around the x-axis.
     See Alphafold2 Supplementary Algorithm 25.
 
-    :param sidechain_dihedrals: Sidechain dihedrals of shape (N_batch, N_res, 4)
+    :param dihedrals: Dihedrals of shape (N_batch, N_res, 5)
     """
-    angle_sin, angle_cos = torch.sin(sidechain_dihedrals), torch.cos(
-        sidechain_dihedrals
-    )
-    angle_sin = angle_sin[..., None, None]  # (N_batch, N_res, 4, 1, 1)
-    angle_cos = angle_cos[..., None, None]  # (N_batch, N_res, 4, 1, 1)
+    angle_sin, angle_cos = torch.sin(dihedrals), torch.cos(dihedrals)
+    angle_sin = angle_sin[..., None, None]  # (N_batch, N_res, 5, 1, 1)
+    angle_cos = angle_cos[..., None, None]  # (N_batch, N_res, 5, 1, 1)
     zero = torch.zeros_like(angle_sin)
     one = torch.ones_like(angle_sin)
 
-    row1 = torch.cat([one, zero, zero], dim=-1)  # (N_batch, N_res, 4, 1, 3)
-    row2 = torch.cat([zero, angle_cos, -angle_sin], dim=-1)  # (N_batch, N_res, 4, 1, 3)
-    row3 = torch.cat([zero, angle_sin, angle_cos], dim=-1)  # (N_batch, N_res, 4, 1, 3)
-    chi_rotations = torch.cat([row1, row2, row3], dim=-2)  # (N_batch, N_res, 4, 3, 3)
+    row1 = torch.cat([one, zero, zero], dim=-1)  # (N_batch, N_res, 5, 1, 3)
+    row2 = torch.cat([zero, angle_cos, -angle_sin], dim=-1)  # (N_batch, N_res, 5, 1, 3)
+    row3 = torch.cat([zero, angle_sin, angle_cos], dim=-1)  # (N_batch, N_res, 5, 1, 3)
+    chi_rotations = torch.cat([row1, row2, row3], dim=-2)  # (N_batch, N_res, 5, 3, 3)
 
-    chi1_rotations, chi2_rotations, chi3_rotations, chi4_rotations = (
+    chi1_rotations, chi2_rotations, chi3_rotations, chi4_rotations, psi_rotations = (
         chi_rotations.unbind(dim=-3)
     )  # (N_batch, N_res, 3, 3)
-    return chi1_rotations, chi2_rotations, chi3_rotations, chi4_rotations
+    return chi1_rotations, chi2_rotations, chi3_rotations, chi4_rotations, psi_rotations

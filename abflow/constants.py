@@ -8,7 +8,6 @@ from Bio.PDB.Polypeptide import protein_letters_3to1
 
 from .geometry import create_rotation_matrix
 
-# ---------------------------------------------- some new constants ----------------------------------------------
 chain_id_to_index = {
     "antigen": 0,
     "heavy": 1,
@@ -31,8 +30,6 @@ region_to_index = {
     "antigen": 7,
 }
 
-backbone_atoms_names_to_index = {"N": 0, "CA": 1, "C": 2, "O": 3}
-backbone_atoms_index_to_names = {0: "N", 1: "CA", 2: "C", 3: "O"}
 
 # Conversion scales between nanometers and angstroms
 NM_TO_ANG_SCALE = 10.0
@@ -196,6 +193,7 @@ class Torsion(IntEnum):
     CHI2 = 2
     CHI3 = 3
     CHI4 = 4
+    PSI = 5 # for oxygen imputation
 
 
 HEAVY_ATOM_COORDS = {
@@ -204,14 +202,14 @@ HEAVY_ATOM_COORDS = {
         ["CA", 0, (0.000, 0.000, 0.000)],
         ["C", 0, (1.526, -0.000, -0.000)],
         ["CB", 0, (-0.529, -0.774, -1.205)],
-        ["O", 0, (0.627, 1.062, 0.000)],
+        ["O", 5, (0.627, 1.062, 0.000)],
     ],
     AminoAcid3.ARG: [
         ["N", 0, (-0.524, 1.362, -0.000)],
         ["CA", 0, (0.000, 0.000, 0.000)],
         ["C", 0, (1.525, -0.000, -0.000)],
         ["CB", 0, (-0.524, -0.778, -1.209)],
-        ["O", 0, (0.626, 1.062, 0.000)],
+        ["O", 5, (0.626, 1.062, 0.000)],
         ["CG", 1, (0.616, 1.390, -0.000)],
         ["CD", 2, (0.564, 1.414, 0.000)],
         ["NE", 3, (0.539, 1.357, -0.000)],
@@ -224,7 +222,7 @@ HEAVY_ATOM_COORDS = {
         ["CA", 0, (0.000, 0.000, 0.000)],
         ["C", 0, (1.526, -0.000, -0.000)],
         ["CB", 0, (-0.531, -0.787, -1.200)],
-        ["O", 0, (0.625, 1.062, 0.000)],
+        ["O", 5, (0.625, 1.062, 0.000)],
         ["CG", 1, (0.584, 1.399, 0.000)],
         ["ND2", 2, (0.593, -1.188, 0.001)],
         ["OD1", 2, (0.633, 1.059, 0.000)],
@@ -234,7 +232,7 @@ HEAVY_ATOM_COORDS = {
         ["CA", 0, (0.000, 0.000, 0.000)],
         ["C", 0, (1.527, 0.000, -0.000)],
         ["CB", 0, (-0.526, -0.778, -1.208)],
-        ["O", 0, (0.626, 1.062, -0.000)],
+        ["O", 5, (0.626, 1.062, -0.000)],
         ["CG", 1, (0.593, 1.398, -0.000)],
         ["OD1", 2, (0.610, 1.091, 0.000)],
         ["OD2", 2, (0.592, -1.101, -0.003)],
@@ -244,7 +242,7 @@ HEAVY_ATOM_COORDS = {
         ["CA", 0, (0.000, 0.000, 0.000)],
         ["C", 0, (1.524, 0.000, 0.000)],
         ["CB", 0, (-0.519, -0.773, -1.212)],
-        ["O", 0, (0.625, 1.062, -0.000)],
+        ["O", 5, (0.625, 1.062, -0.000)],
         ["SG", 1, (0.728, 1.653, 0.000)],
     ],
     AminoAcid3.GLN: [
@@ -252,7 +250,7 @@ HEAVY_ATOM_COORDS = {
         ["CA", 0, (0.000, 0.000, 0.000)],
         ["C", 0, (1.526, 0.000, 0.000)],
         ["CB", 0, (-0.525, -0.779, -1.207)],
-        ["O", 0, (0.626, 1.062, -0.000)],
+        ["O", 5, (0.626, 1.062, -0.000)],
         ["CG", 1, (0.615, 1.393, 0.000)],
         ["CD", 2, (0.587, 1.399, -0.000)],
         ["NE2", 3, (0.593, -1.189, -0.001)],
@@ -263,7 +261,7 @@ HEAVY_ATOM_COORDS = {
         ["CA", 0, (0.000, 0.000, 0.000)],
         ["C", 0, (1.526, -0.000, -0.000)],
         ["CB", 0, (-0.526, -0.781, -1.207)],
-        ["O", 0, (0.626, 1.062, 0.000)],
+        ["O", 5, (0.626, 1.062, 0.000)],
         ["CG", 1, (0.615, 1.392, 0.000)],
         ["CD", 2, (0.600, 1.397, 0.000)],
         ["OE1", 3, (0.607, 1.095, -0.000)],
@@ -273,14 +271,14 @@ HEAVY_ATOM_COORDS = {
         ["N", 0, (-0.572, 1.337, 0.000)],
         ["CA", 0, (0.000, 0.000, 0.000)],
         ["C", 0, (1.517, -0.000, -0.000)],
-        ["O", 0, (0.626, 1.062, -0.000)],
+        ["O", 5, (0.626, 1.062, -0.000)],
     ],
     AminoAcid3.HIS: [
         ["N", 0, (-0.527, 1.360, 0.000)],
         ["CA", 0, (0.000, 0.000, 0.000)],
         ["C", 0, (1.525, 0.000, 0.000)],
         ["CB", 0, (-0.525, -0.778, -1.208)],
-        ["O", 0, (0.625, 1.063, 0.000)],
+        ["O", 5, (0.625, 1.063, 0.000)],
         ["CG", 1, (0.600, 1.370, -0.000)],
         ["CD2", 2, (0.889, -1.021, 0.003)],
         ["ND1", 2, (0.744, 1.160, -0.000)],
@@ -292,17 +290,17 @@ HEAVY_ATOM_COORDS = {
         ["CA", 0, (0.000, 0.000, 0.000)],
         ["C", 0, (1.527, -0.000, -0.000)],
         ["CB", 0, (-0.536, -0.793, -1.213)],
-        ["O", 0, (0.627, 1.062, -0.000)],
+        ["O", 5, (0.627, 1.062, -0.000)],
         ["CG1", 1, (0.534, 1.437, -0.000)],
-        ["CG2", 2, (0.540, -0.785, -1.199)],
-        ["CD1", 3, (0.619, 1.391, 0.000)],
+        ["CG2", 1, (0.540, -0.785, -1.199)],
+        ["CD1", 2, (0.619, 1.391, 0.000)],
     ],
     AminoAcid3.LEU: [
         ["N", 0, (-0.520, 1.363, 0.000)],
         ["CA", 0, (0.000, 0.000, 0.000)],
         ["C", 0, (1.525, -0.000, -0.000)],
         ["CB", 0, (-0.522, -0.773, -1.214)],
-        ["O", 0, (0.625, 1.063, -0.000)],
+        ["O", 5, (0.625, 1.063, -0.000)],
         ["CG", 1, (0.678, 1.371, 0.000)],
         ["CD1", 2, (0.530, 1.430, -0.000)],
         ["CD2", 2, (0.535, -0.774, 1.200)],
@@ -312,7 +310,7 @@ HEAVY_ATOM_COORDS = {
         ["CA", 0, (0.000, 0.000, 0.000)],
         ["C", 0, (1.526, 0.000, 0.000)],
         ["CB", 0, (-0.524, -0.778, -1.208)],
-        ["O", 0, (0.626, 1.062, -0.000)],
+        ["O", 5, (0.626, 1.062, -0.000)],
         ["CG", 1, (0.619, 1.390, 0.000)],
         ["CD", 2, (0.559, 1.417, 0.000)],
         ["CE", 3, (0.560, 1.416, 0.000)],
@@ -323,7 +321,7 @@ HEAVY_ATOM_COORDS = {
         ["CA", 0, (0.000, 0.000, 0.000)],
         ["C", 0, (1.525, 0.000, 0.000)],
         ["CB", 0, (-0.523, -0.776, -1.210)],
-        ["O", 0, (0.625, 1.062, -0.000)],
+        ["O", 5, (0.625, 1.062, -0.000)],
         ["CG", 1, (0.613, 1.391, -0.000)],
         ["SD", 2, (0.703, 1.695, 0.000)],
         ["CE", 3, (0.320, 1.786, -0.000)],
@@ -333,7 +331,7 @@ HEAVY_ATOM_COORDS = {
         ["CA", 0, (0.000, 0.000, 0.000)],
         ["C", 0, (1.524, 0.000, -0.000)],
         ["CB", 0, (-0.525, -0.776, -1.212)],
-        ["O", 0, (0.626, 1.062, -0.000)],
+        ["O", 5, (0.626, 1.062, -0.000)],
         ["CG", 1, (0.607, 1.377, 0.000)],
         ["CD1", 2, (0.709, 1.195, -0.000)],
         ["CD2", 2, (0.706, -1.196, 0.000)],
@@ -346,7 +344,7 @@ HEAVY_ATOM_COORDS = {
         ["CA", 0, (0.000, 0.000, 0.000)],
         ["C", 0, (1.527, -0.000, 0.000)],
         ["CB", 0, (-0.546, -0.611, -1.293)],
-        ["O", 0, (0.621, 1.066, 0.000)],
+        ["O", 5, (0.621, 1.066, 0.000)],
         ["CG", 1, (0.382, 1.445, 0.0)],
         # ['CD', 2, (0.427, 1.440, 0.0)],
         ["CD", 2, (0.477, 1.424, 0.0)],  # manually made angle 2 degrees larger
@@ -356,7 +354,7 @@ HEAVY_ATOM_COORDS = {
         ["CA", 0, (0.000, 0.000, 0.000)],
         ["C", 0, (1.525, -0.000, -0.000)],
         ["CB", 0, (-0.518, -0.777, -1.211)],
-        ["O", 0, (0.626, 1.062, -0.000)],
+        ["O", 5, (0.626, 1.062, -0.000)],
         ["OG", 1, (0.503, 1.325, 0.000)],
     ],
     AminoAcid3.THR: [
@@ -364,7 +362,7 @@ HEAVY_ATOM_COORDS = {
         ["CA", 0, (0.000, 0.000, 0.000)],
         ["C", 0, (1.526, 0.000, -0.000)],
         ["CB", 0, (-0.516, -0.793, -1.215)],
-        ["O", 0, (0.626, 1.062, 0.000)],
+        ["O", 5, (0.626, 1.062, 0.000)],
         ["CG2", 1, (0.550, -0.718, -1.228)],
         ["OG1", 1, (0.472, 1.353, 0.000)],
     ],
@@ -373,7 +371,7 @@ HEAVY_ATOM_COORDS = {
         ["CA", 0, (0.000, 0.000, 0.000)],
         ["C", 0, (1.525, -0.000, 0.000)],
         ["CB", 0, (-0.523, -0.776, -1.212)],
-        ["O", 0, (0.627, 1.062, 0.000)],
+        ["O", 5, (0.627, 1.062, 0.000)],
         ["CG", 1, (0.609, 1.370, -0.000)],
         ["CD1", 2, (0.824, 1.091, 0.000)],
         ["CD2", 2, (0.854, -1.148, -0.005)],
@@ -389,7 +387,7 @@ HEAVY_ATOM_COORDS = {
         ["CA", 0, (0.000, 0.000, 0.000)],
         ["C", 0, (1.524, -0.000, -0.000)],
         ["CB", 0, (-0.522, -0.776, -1.213)],
-        ["O", 0, (0.627, 1.062, -0.000)],
+        ["O", 5, (0.627, 1.062, -0.000)],
         ["CG", 1, (0.607, 1.382, -0.000)],
         ["CD1", 2, (0.716, 1.195, -0.000)],
         ["CD2", 2, (0.713, -1.194, -0.001)],
@@ -403,15 +401,15 @@ HEAVY_ATOM_COORDS = {
         ["CA", 0, (0.000, 0.000, 0.000)],
         ["C", 0, (1.527, -0.000, -0.000)],
         ["CB", 0, (-0.533, -0.795, -1.213)],
-        ["O", 0, (0.627, 1.062, -0.000)],
+        ["O", 5, (0.627, 1.062, -0.000)],
         ["CG1", 1, (0.540, 1.429, -0.000)],
         ["CG2", 1, (0.533, -0.776, 1.203)],
     ],
 }
 
 
-PREVIOUS_SIDECHAIN_ATOM_ROTATIONS = torch.zeros([20, 5, 3, 3])
-PREVIOUS_SIDECHAIN_ATOM_TRANSLATIONS = torch.zeros([20, 5, 3])
+PREVIOUS_SIDECHAIN_ATOM_ROTATIONS = torch.zeros([20, 6, 3, 3])
+PREVIOUS_SIDECHAIN_ATOM_TRANSLATIONS = torch.zeros([20, 6, 3])
 HEAVY_ATOM_TORSION_INDEX = torch.zeros([20, 15], dtype=torch.int64)
 HEAYY_ATOM_POSITIONS = torch.zeros([20, 15, 3])
 
@@ -435,18 +433,38 @@ def _init_heavy_atom_constants():
         PREVIOUS_SIDECHAIN_ATOM_ROTATIONS[aa, Torsion.BACKBONE] = torch.eye(3)
         PREVIOUS_SIDECHAIN_ATOM_TRANSLATIONS[aa, Torsion.BACKBONE] = torch.zeros(3)
 
+        # psi torsion for oxygen imputation
+        PREVIOUS_SIDECHAIN_ATOM_ROTATIONS[aa, Torsion.PSI] = create_rotation_matrix(
+            v1=atom_positions["C"] - atom_positions["CA"],
+            v2=atom_positions["N"] - atom_positions["CA"],
+        )
+        PREVIOUS_SIDECHAIN_ATOM_TRANSLATIONS[aa, Torsion.PSI] = atom_positions["C"]
+
         # previous sidechain atom rotations and translations
-        # for chi1, chi2, chi3, chi4
-        for chi_idx in range(4):
+        # for chi1
+        if chi_angles_mask[aa][0]:
+            base_atom_name = chi_angles_atoms[aa][0]
+            base_atom_position = [atom_positions[name] for name in base_atom_name]
+            PREVIOUS_SIDECHAIN_ATOM_ROTATIONS[aa, Torsion.CHI1, :, :] = (
+                create_rotation_matrix(
+                    v1=base_atom_position[2] - base_atom_position[1],
+                    v2=base_atom_position[0] - base_atom_position[1],
+            )
+            )
+            PREVIOUS_SIDECHAIN_ATOM_TRANSLATIONS[aa, Torsion.CHI1, :] = base_atom_position[2]
+
+
+        # for chi2, chi3, chi4
+        for chi_idx in range(1, 4):
             if chi_angles_mask[aa][chi_idx]:
                 previous_end_atom_name = chi_angles_atoms[aa][chi_idx][2]
                 previous_end_atom_position = atom_positions[previous_end_atom_name]
-                PREVIOUS_SIDECHAIN_ATOM_ROTATIONS[aa, chi_idx + 1, :, :] = (
+                PREVIOUS_SIDECHAIN_ATOM_ROTATIONS[aa, chi_idx + Torsion.CHI1, :, :] = (
                     create_rotation_matrix(
                         v1=previous_end_atom_position, v2=torch.FloatTensor([-1, 0, 0])
                     )
                 )
-                PREVIOUS_SIDECHAIN_ATOM_TRANSLATIONS[aa, chi_idx + 1, :] = (
+                PREVIOUS_SIDECHAIN_ATOM_TRANSLATIONS[aa, chi_idx + Torsion.CHI1, :] = (
                     previous_end_atom_position
                 )
 
@@ -461,10 +479,10 @@ def get_heavy_atom_constants(
     res_type = res_type.flatten()
     prev_rotation = PREVIOUS_SIDECHAIN_ATOM_ROTATIONS.to(res_type.device)[
         res_type
-    ].reshape(N_batch, N_res, 5, 3, 3)
+    ].reshape(N_batch, N_res, 6, 3, 3)
     prev_translation = PREVIOUS_SIDECHAIN_ATOM_TRANSLATIONS.to(res_type.device)[
         res_type
-    ].reshape(N_batch, N_res, 5, 3)
+    ].reshape(N_batch, N_res, 6, 3)
     torsion_index = HEAVY_ATOM_TORSION_INDEX.to(res_type.device)[res_type].reshape(
         N_batch, N_res, 15
     )
@@ -483,28 +501,6 @@ def get_dihedral_mask(res_type: torch.Tensor) -> torch.Tensor:
         device=res_type.device,
     ).reshape(N_batch, N_res, 4)
     return mask
-
-
-# ---------------------------------------------- some new constants ----------------------------------------------
-
-
-class CDRName(IntEnum):
-    """
-    Enumeration for Complementarity-Determining Regions (CDRs) in antibodies.
-    """
-
-    NONCDR = 0
-    HCDR1 = 1
-    HCDR2 = 2
-    HCDR3 = 3
-    LCDR1 = 4
-    LCDR2 = 5
-    LCDR3 = 6
-
-
-# Mappings between CDR indices and their names
-cdr_index_to_name = {cdr: cdr.name for cdr in CDRName}
-cdr_name_to_index = {cdr.name: cdr for cdr in CDRName}
 
 
 class BackboneBondLengths(Enum):
