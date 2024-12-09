@@ -1,4 +1,6 @@
 import torch
+import torch.nn.functional as F
+
 from torch import nn
 from einops import rearrange
 
@@ -32,6 +34,23 @@ class OneHotEmbedding(nn.Module):
         return s_i
 
 
+class DihedralEmbedding(nn.Module):
+    """
+    Converts dihedral angles into their cosine and sine representations.
+    """
+
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, dihedrals: torch.Tensor) -> torch.Tensor:
+
+        cos_angles = torch.cos(dihedrals)
+        sin_angles = torch.sin(dihedrals)
+        embeddings = torch.cat([cos_angles, sin_angles], dim=-1)
+
+        return embeddings
+
+
 class BinnedOneHotEmbedding(nn.Module):
     """
     Converts input sequences to binned one-hot encoded format.
@@ -55,7 +74,6 @@ class BinnedOneHotEmbedding(nn.Module):
 
     def __init__(self, v_bins: torch.Tensor, concat_inf: bool = True):
         """
-
         :param v_bins: A tensor containing bin boundaries.
         :param concat_inf: If True, includes -inf and inf as boundaries for the bins.
         """
@@ -89,6 +107,39 @@ class BinnedOneHotEmbedding(nn.Module):
         return p
 
 
+class CBDistogramEmbedding(nn.Module):
+    """
+    A one-hot pairwise feature indicating the distance between CB atoms (or CA for glycine).
+    Pairwise distances are discretized into 40 bins. 38 bins are of equal width between 3.25 Ang and
+    50.75 Ang; two more bins contain any smaller and larger distances.
+    """
+
+    def __init__(
+        self, num_bins: int = 40, min_dist: float = 3.25, max_dist: float = 50.75
+    ):
+        """
+        :param num_bins: Number of bins to discretize distances.
+        :param min_dist: Minimum distance for binning.
+        :param max_dist: Maximum distance for binning.
+        """
+
+        super().__init__()
+        bins = torch.linspace(min_dist, max_dist, num_bins - 1)
+        self.binned_one_hot = BinnedOneHotEmbedding(bins)
+
+    def forward(self, CB_coords: torch.Tensor) -> torch.Tensor:
+        """
+        Convert pairwise CB atom distances to a one-hot encoded distance matrix.
+
+        :param CB_coords: Input tensor of CB atom coordinates with shape (..., N_res, 3).
+        :return: CB_distogram: A one-hot encoded distance matrix, shape (..., N_res, N_res, num_bins).
+        """
+
+        dist_matrix = torch.cdist(CB_coords, CB_coords, p=-1)
+        CB_distogram = self.binned_one_hot(dist_matrix)
+        return CB_distogram
+
+
 class CAUnitVectorEmbedding(nn.Module):
     """
     Converts CA atom coordinates to unit vectors in the local frame of each residue.
@@ -120,33 +171,36 @@ class CAUnitVectorEmbedding(nn.Module):
         return CA_unit_vectors
 
 
-class CBDistogramEmbedding(nn.Module):
-    """
-    A one-hot pairwise feature indicating the distance between CB atoms (or CA for glycine).
-    Pairwise distances are discretized into 40 bins. 38 bins are of equal width between 3.25 Ang and
-    50.75 Ang; two more bins contain any smaller and larger distances.
-    """
+class RelativePositionEncoding(nn.Module):
 
-    def __init__(
-        self, num_bins: int = 40, min_dist: float = 3.25, max_dist: float = 50.75
-    ):
+    def __init__(self, rmax: int):
         """
-        :param num_bins: Number of bins to discretize distances.
-        :param min_dist: Minimum distance for binning.
-        :param max_dist: Maximum distance for binning.
+        :param rmax: Maximum relative position to encode.
         """
 
         super().__init__()
-        bins = torch.linspace(min_dist, max_dist, num_bins - 1)
-        self.binned_one_hot = BinnedOneHotEmbedding(bins)
+        self.rmax = rmax
+        v_bins_pos = torch.linspace(0, 2 * rmax + 1, 2 * rmax + 2)
+        self.rel_pos_binned_one_hot = BinnedOneHotEmbedding(
+            v_bins_pos, concat_inf=False
+        )
 
-    def forward(self, CB_coords: torch.Tensor) -> torch.Tensor:
+    def forward(self, res_index: torch.Tensor, chain_id: torch.Tensor) -> torch.Tensor:
         """
-        Convert pairwise CB atom distances to a one-hot encoded distance matrix.
-        :param CB_coords: Input tensor of CB atom coordinates with shape (..., N_res, 3).
-        :return: CB_distogram: A one-hot encoded distance matrix, shape (..., N_res, N_res, num_bins).
+        :param res_index: Residue index tensor of shape (..., N_res).
+        :param chain_id: Chain ID tensor of shape (..., N_res).
+        :return: a_rel_pol_ij: One-hot encoded relative position tensor of shape (..., N_res, N_res, 2 * rmax + 1).
         """
 
-        dist_matrix = torch.cdist(CB_coords, CB_coords, p=-1)
-        CB_distogram = self.binned_one_hot(dist_matrix)
-        return CB_distogram
+        b_same_chain_ij = torch.eq(chain_id[:, :, None], chain_id[:, None, :])
+        d_res_ij = torch.where(
+            b_same_chain_ij,
+            torch.clamp(
+                res_index[:, :, None] - res_index[:, None, :] + self.rmax,
+                0,
+                2 * self.rmax,
+            ),
+            torch.tensor(2 * self.rmax + 1, device=res_index.device),
+        )
+        a_rel_pol_ij = self.rel_pos_binned_one_hot(d_res_ij)
+        return a_rel_pol_ij

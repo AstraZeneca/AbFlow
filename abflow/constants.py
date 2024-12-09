@@ -14,6 +14,7 @@ chain_id_to_index = {
     "light_kappa": 2,
     "light_lambda": 3,
 }
+
 antibody_chain_names = ["heavy", "light_kappa", "light_lambda"]
 antigen_chain_name = ["antigen"]
 antibody_index = [chain_id_to_index[chain] for chain in antibody_chain_names]
@@ -34,14 +35,6 @@ region_to_index = {
 # Conversion scales between nanometers and angstroms
 NM_TO_ANG_SCALE = 10.0
 ANG_TO_NM_SCALE = 1 / NM_TO_ANG_SCALE
-
-# Residue types
-RES_TYPE_NUMBER = 22
-MASK_TOKEN = 20
-PAD_TOKEN = 21
-
-# Chain types
-CHAIN_TYPE_NUMBER = 5
 
 
 # stores indices under the 3-letter code of each AA
@@ -67,6 +60,10 @@ class AminoAcid3(IntEnum):
     TRP = 18
     TYR = 19
 
+
+# Additional residue types
+MASK_TOKEN = 20
+PAD_TOKEN = 21
 
 AminoAcid3Index = {aa: index for index, aa in AminoAcid3.__members__.items()}
 
@@ -193,7 +190,7 @@ class Torsion(IntEnum):
     CHI2 = 2
     CHI3 = 3
     CHI4 = 4
-    PSI = 5 # for oxygen imputation
+    PSI = 5  # for oxygen imputation
 
 
 HEAVY_ATOM_COORDS = {
@@ -449,10 +446,11 @@ def _init_heavy_atom_constants():
                 create_rotation_matrix(
                     v1=base_atom_position[2] - base_atom_position[1],
                     v2=base_atom_position[0] - base_atom_position[1],
+                )
             )
+            PREVIOUS_SIDECHAIN_ATOM_TRANSLATIONS[aa, Torsion.CHI1, :] = (
+                base_atom_position[2]
             )
-            PREVIOUS_SIDECHAIN_ATOM_TRANSLATIONS[aa, Torsion.CHI1, :] = base_atom_position[2]
-
 
         # for chi2, chi3, chi4
         for chi_idx in range(1, 4):

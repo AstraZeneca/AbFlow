@@ -53,6 +53,7 @@ model:
 
 # abflow network settings
 network:
+    design_mode: ["sequence", "backbone", "sidechain"]
     c_s: 96 # default: 384
     c_z: 32 # default: 128
     n_condition_module_blocks: 8 # default: 48
@@ -64,23 +65,28 @@ network:
     self_condition_rate: 0.0
     self_condition_steps: 0
     label_smoothing: 0.0
-    network_params: # hidden dim is c_hidden * N_head. The principle is to keep hidden dim same as feature dim c_s or c_z
-        Pairformer:
-            TriangleMultiplicationOutgoing:
-                c_hidden: 32 # 128
-            TriangleMultiplicationIncoming:
-                c_hidden: 32 # 128
-            TriangleAttentionStartingNode:
-                c_hidden: 8 # 32
-                N_head: 4
-            TriangleAttentionEndingNode:
-                c_hidden: 8 # 32
-                N_head: 4
-            AttentionPairBias:
-                c_hidden: 16 # 24
-                N_head: 6 # 16
-        InvariantPointAttention:
-            c_hidden: 16
-            N_head: 6 # 12
-            N_query_points: 4
-            N_point_values: 8
+
+
+
+
+# additional parameters - consider removing or adding them
+network_params: # hidden dim is c_hidden * N_head. The principle is to keep hidden dim same as feature dim c_s or c_z
+    Pairformer:
+        TriangleMultiplicationOutgoing:
+            c_hidden: 32 # 128
+        TriangleMultiplicationIncoming:
+            c_hidden: 32 # 128
+        TriangleAttentionStartingNode:
+            c_hidden: 8 # 32
+            N_head: 4
+        TriangleAttentionEndingNode:
+            c_hidden: 8 # 32
+            N_head: 4
+        AttentionPairBias:
+            c_hidden: 16 # 24
+            N_head: 6 # 16
+    InvariantPointAttention:
+        c_hidden: 16
+        N_head: 6 # 12
+        N_query_points: 4
+        N_point_values: 8

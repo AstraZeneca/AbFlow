@@ -2,13 +2,14 @@ import torch.nn as nn
 import torch
 import torch.nn.functional as F
 
-from .modules.feature_embedder import BinnedOneHotEmbedding
+from .modules.features import BinnedOneHotEmbedding
 from .modules.pairformer import PairformerStack
+from ..model.metrics import get_lddt, average_plddt
 
 
-class ConfidenceHead(nn.Module):
+class ConfidenceModule(nn.Module):
     """
-    Confidence head to predict the plddt score for each residue.
+    Confidence module to predict the plddt score for each residue.
     """
 
     def __init__(
@@ -30,13 +31,17 @@ class ConfidenceHead(nn.Module):
         ca_bins = torch.linspace(ca_min, ca_max, ca_num_bins - 1)
         self.ca_binned_one_hot = BinnedOneHotEmbedding(ca_bins)
         self.linear_no_bias_d = nn.Linear(ca_num_bins, c_z, bias=False)
+        lddt_num_bins = 50
+        lddt_min = 0
+        lddt_max = 100
+        lddt_bins = torch.linspace(lddt_min, lddt_max, lddt_num_bins + 1)
+        self.lddt_binned_one_hot = BinnedOneHotEmbedding(lddt_bins, concat_inf=False)
 
         self.pairformer_stack = PairformerStack(
             c_s,
             c_z,
             n_block=n_block,
         )
-
         self.linear_no_bias_plddt = nn.Linear(c_s, 50, bias=False)
 
     def forward(
@@ -70,3 +75,32 @@ class ConfidenceHead(nn.Module):
         p_plddt_i = F.softmax(self.linear_no_bias_plddt(s_i), dim=-1)
 
         return p_plddt_i
+
+    def get_loss_terms(
+        self,
+        s_inputs_i: torch.Tensor,
+        z_inputs_ij: torch.Tensor,
+        s_i: torch.Tensor,
+        z_ij: torch.Tensor,
+        x_pred_i: torch.Tensor,
+        x_true_i: torch.Tensor,
+    ):
+
+        p_plddt_i = self.forward(s_inputs_i, z_inputs_ij, s_i, z_ij, x_pred_i)
+        lddt_per_residue = get_lddt(x_true_i)
+        p_lddt_i = self.lddt_binned_one_hot(lddt_per_residue)
+
+        return {"lddt_one_hot": p_plddt_i}, {"lddt_one_hot": p_lddt_i}
+
+    def predict(
+        self,
+        s_inputs_i: torch.Tensor,
+        z_inputs_ij: torch.Tensor,
+        s_i: torch.Tensor,
+        z_ij: torch.Tensor,
+        x_pred_i: torch.Tensor,
+    ):
+        p_plddt_i = self.forward(s_inputs_i, z_inputs_ij, s_i, z_ij, x_pred_i)
+        plddt_per_residue = average_plddt(p_plddt_i)
+
+        return {"lddt_per_residue": plddt_per_residue}

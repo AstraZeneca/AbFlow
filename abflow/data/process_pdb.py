@@ -66,7 +66,7 @@ def fill_missing_atoms(input_pdb: str):
     fixer = PDBFixer(filename=input_pdb)
 
     fixer.findMissingResidues()  # Identify missing residues
-    fixer.missingResidues = {} # Remove missing residues
+    fixer.missingResidues = {}  # Remove missing residues
     fixer.findNonstandardResidues()  # Identify nonstandard residues
     fixer.replaceNonstandardResidues()  # Replace nonstandard residues with standard ones
     fixer.removeHeterogens(True)  # Remove heterogens but keep water
@@ -77,7 +77,9 @@ def fill_missing_atoms(input_pdb: str):
     with open(input_pdb, "w") as f:
         PDBFile.writeFile(fixer.topology, fixer.positions, f, keepIds=True)
 
-    print(f"Fixed PDB file with missing atoms filled but no missing residues added saved to: {input_pdb}")
+    print(
+        f"Fixed PDB file with missing atoms filled but no missing residues added saved to: {input_pdb}"
+    )
 
 
 def extract_sequence_from_chain(chain) -> str:
@@ -157,38 +159,31 @@ def extract_chain_data(chain, data, chain_name, ab_chain=None):
 
 
 def process_pdb_to_lmdb(
-    pdb_path: str, sabdab_summary_path: str, id: int = 0, scheme: str = "chothia"
+    pdb_path: str,
+    model_id: int = 0,
+    heavy_chain_id: str = "H",
+    light_chain_id: str = "L",
+    antigen_chain_ids: list = ["A"],
+    scheme: str = "chothia",
 ) -> Dict[str, Dict]:
     """
-    Process a PDB file and a SAbDab summary TSV file into a format compatible with process_lmdb_chain.
-
-        pdb	Hchain	Lchain	model	antigen_chain	antigen_type	antigen_het_name	antigen_name	short_header	date	compound	organism	heavy_species	light_species	antigen_species	authors	resolution	method	r_free	r_factor	scfv	engineered	heavy_subclass	light_subclass	light_ctype	affinity	delta_g	affinity_method	temperature	pmid
-        9bu8	C	D	0	B | A	protein | protein	NA | NA	hemagglutinin ha2 | hemagglutinin ha1	VIRAL PROTEIN/IMMUNE SYSTEM	11/27/24	Vaccine elicited Fab c115.131 with influenza H10 JD13 HA trimer	Homo sapiens; Influenza A virus	homo sapiens	homo sapiens	influenza a virus | influenza a virus	Gorman, J., Kwong, P.D.	3.96	ELECTRON MICROSCOPY	NA	NA	False	True	IGHV3	IGKV3	Kappa	None	None	None	None	None
-        9bu8	F	H	0	L | J	protein | protein	NA | NA	hemagglutinin ha2 | hemagglutinin ha1	VIRAL PROTEIN/IMMUNE SYSTEM	11/27/24	Vaccine elicited Fab c115.131 with influenza H10 JD13 HA trimer	Homo sapiens; Influenza A virus	homo sapiens	homo sapiens	influenza a virus | influenza a virus	Gorman, J., Kwong, P.D.	3.96	ELECTRON MICROSCOPY	NA	NA	False	True	IGHV3	IGKV3	Kappa	None	None	None	None	None
-        9bu8	I	K	0	G | E	protein | protein	NA | NA	hemagglutinin ha2 | hemagglutinin ha1	VIRAL PROTEIN/IMMUNE SYSTEM	11/27/24	Vaccine elicited Fab c115.131 with influenza H10 JD13 HA trimer	Homo sapiens; Influenza A virus	homo sapiens	homo sapiens	influenza a virus | influenza a virus	Gorman, J., Kwong, P.D.	3.96	ELECTRON MICROSCOPY	NA	NA	False	True	IGHV3	IGKV3	Kappa	None	None	None	None	None
-
+    Process a PDB file into a format compatible with process_lmdb_chain.
 
     :param pdb_path: Path to the PDB file.
-    :param sabdab_summary_path: Path to the SAbDab summary TSV file.
-    :param id: Index of the entry in the summary file to process.
-    :param scheme: CDR scheme.
+    :param model_id: Index of the model in the PDB file to process.
+    :param heavy_chain_id: Chain ID for the heavy chain.
+    :param light_chain_id: Chain ID for the light chain.
+    :param antigen_chain_ids: List of chain IDs for the antigen.
+    :param scheme: CDR scheme to use for AbNumber.
     :return: A dictionary containing the data for heavy, light, and antigen chains.
     """
     parser = PDBParser(QUIET=True)
     structure = parser.get_structure(None, pdb_path)
 
-    sabdab_summary = pd.read_csv(sabdab_summary_path, sep="\t")
-    entry = sabdab_summary.iloc[id]
-
-    model_id = entry["model"]
-    heavy_chain_id = entry["Hchain"]
-    light_chain_id = entry["Lchain"]
-    antigen_chains = entry["antigen_chain"].split(" | ")
-
     chain_map = {
         "heavy": heavy_chain_id,
         "light": light_chain_id,
-        "antigen": antigen_chains,
+        "antigen": antigen_chain_ids,
     }
 
     data = defaultdict(
@@ -234,7 +229,7 @@ def process_lmdb_chain(data: dict) -> dict:
 
     :param data: Dictionary containing the original lmdb data for a single complex.
 
-    :return: Dictionary with the following keys
+    :return: Dictionary with the following information:
         - res_type: A tensor of shape (N_res,) containing the amino acid type index for each residue.
         - chain_type: A tensor of shape (N_res,) containing the chain type index for each residue.
         - res_index: A tensor of shape (N_res,) containing the residue index for each residue, offset 500 for each chain.

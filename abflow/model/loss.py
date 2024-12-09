@@ -68,20 +68,10 @@ class AbFlowLoss(nn.Module):
         self.design_mode = design_mode
         self.loss_weights = loss_weights
 
-    def get_pred_values(self, true_data_dict: Dict[str, torch.Tensor]):
-
-        pass
-
-    def get_true_values(self, true_data_dict: Dict[str, torch.Tensor]):
-
-        pass
-
     def forward(
         self,
-        pred_value_dict: Dict[str, torch.Tensor],
-        true_value_dict: Dict[str, torch.Tensor],
-        pred_data_dict: Dict[str, torch.Tensor],
-        true_data_dict: Dict[str, torch.Tensor],
+        pred_loss_dict: Dict[str, torch.Tensor],
+        true_loss_dict: Dict[str, torch.Tensor],
     ):
         cumulative_loss = 0
         loss_dict = {}
@@ -153,7 +143,7 @@ class AbFlowLoss(nn.Module):
             )
             # loss_dict["tm_loss"]
             # loss_dict["pae_loss"]
-            # interface residues metrics
+            # interface residues metrics, ipae, iLDDT, iTM etc.
             # loglikelihood method
 
         # weighting and summing the losses

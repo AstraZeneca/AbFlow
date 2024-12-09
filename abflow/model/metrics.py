@@ -531,12 +531,6 @@ def get_sidechain_mae(
     return sidechain_mae
 
 
-# --------------------------------------- some old code ---------------------------------------
-
-from ..utils.utils import combine_masks, average_data
-from ..nn.feature_embedder import one_hot
-
-
 def get_lddt(
     pred_coord: torch.Tensor,
     true_coord: torch.Tensor,
@@ -607,45 +601,9 @@ def get_lddt(
     return lddt_scores
 
 
-def get_lddt_onehot(lddt_scores: torch.Tensor) -> torch.Tensor:
+def average_plddt(p_plddt_i: torch.Tensor) -> torch.Tensor:
     """
-    Convert lDDT scores to one-hot encoding.
-    The scores are equally binned into 50 bins from 0 to 100.
-
-    Args:
-        lddt_scores: lDDT scores, shape (N_batch, N_res).
-
-    Returns:
-        torch.Tensor: One-hot encoding of lDDT scores, shape (N_batch, N_res, 50).
-    """
-    bin_edges = torch.linspace(0, 100, steps=51, device=lddt_scores.device)
-    p_lddt = one_hot(lddt_scores, bin_edges, concat_inf=False)
-    return p_lddt
-
-
-def get_CB_distogram(CB_coords: torch.Tensor) -> torch.Tensor:
-    """
-    A one-hot pairwise feature indicating the distance between CB atoms (CA for glycine).
-    Pairwise distances are discretized into 66 bins: 64 bins between 2.0 and 22.0 Angstroms,
-    and two bins for any larger and smaller distances. Ground truth CB distogram is used in auxilary loss.
-
-    Args:
-        CB_coords: CB atom coordinates, shape (N_batch, N_res, 3).
-
-    Returns:
-        torch.Tensor: Pairwise distance feature, shape (N_batch, N_res, N_res, 66).
-    """
-
-    dist_matrix = torch.cdist(CB_coords, CB_coords, p=2)
-    bins = torch.linspace(2.0, 22.0, 65, device=CB_coords.device)
-
-    CB_distogram = one_hot(dist_matrix, bins)
-    return CB_distogram
-
-
-def get_res_lddt(p_i: torch.Tensor) -> torch.Tensor:
-    """
-    Compute the LDDT/pLDDT score during inference as the weighted average of the bin centers (1, 3, etc).
+    Compute the pLDDT score during inference as the weighted average of the bin centers (1, 3, etc).
 
     \[
     \text{plddt}_{i} = \sum_{b=1}^{50} c_b p_{i}^{b}
@@ -653,35 +611,16 @@ def get_res_lddt(p_i: torch.Tensor) -> torch.Tensor:
 
     where:
     - \( c_b \) are the center values of the bins.
-    - \( p_{i}^{b} \) is the probability for bin \( b \) for atom \( i \).
+    - \( p_{i}^{b} \) is the probability for bin \( b \) for residue \( i \).
 
-    :param p_i: One hot / predicted probabilities for each bin, shape (N_batch, N_res, 50).
-    :return: LDDT / pLDDT scores for each atom, shape (N_batch, N_res).
+    :param p_plddt_i: Predicted probabilities for each bin, shape (N_batch, N_res, 50).
+    :return: pLDDT scores for each residue, shape (N_batch, N_res).
     """
-    bins = torch.linspace(0, 100, steps=51, device=p_i.device)
+    bins = torch.linspace(0, 100, steps=51, device=p_plddt_i.device)
     bin_centers = (bins[1:] + bins[:-1]) / 2
-    lddt_scores = torch.sum(p_i * bin_centers[None, None, :], dim=-1)
+    lddt_per_residue = torch.sum(p_plddt_i * bin_centers[None, None, :], dim=-1)
 
-    return lddt_scores
-
-
-def get_batch_lddt(
-    lddt: torch.Tensor, masks: List[torch.Tensor] = None
-) -> torch.Tensor:
-    """
-    Compute the mean lddt/pLDDT score per protein complex.
-
-    :param lddt: LDDT scores per residue, shape (N_batch, N_res).
-    :param masks: List of masks to apply, each shape (N_batch, N_res).
-
-    :return: Mean LDDT scores for each complex, shape (N_batch,).
-    """
-    mean_lddt_scores = average_data(lddt, masks=masks)
-
-    return mean_lddt_scores
-
-
-# --------------------------------------- some old code ---------------------------------------
+    return lddt_per_residue
 
 
 class AbFlowMetrics(nn.Module):
@@ -717,6 +656,9 @@ class AbFlowMetrics(nn.Module):
             )
 
         # backbone N, CA, C metrics
+        # add TM=score
+        # add lddt
+        # add plddt - or do this in a separate confidence section - maybe we do not confidence at all
         metrics["rmsd/redesign"] = get_rmsd(
             [
                 pred_data_dict["pos_heavyatom"][:, :, 0, :],
