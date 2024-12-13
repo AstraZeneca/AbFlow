@@ -77,71 +77,71 @@ class AbFlowLoss(nn.Module):
         loss_dict = {}
 
         # main flow matching conditional vector fields
-        if "backbone" in self.design_mode:
-            loss_dict["translation_vf_loss"] = get_mse_loss(
-                pred_value_dict["translation_vf"],
-                true_value_dict["translation_vf"],
-                masks=[true_data_dict["redesign_mask"], true_data_dict["valid_mask"]],
-            )
-            loss_dict["rotation_vf_loss"] = get_mse_loss(
-                pred_value_dict["rotation_vf"],
-                true_value_dict["rotation_vf"],
-                masks=[true_data_dict["redesign_mask"], true_data_dict["valid_mask"]],
-            )
         if "sequence" in self.design_mode:
             loss_dict["sequence_vf_loss"] = get_mse_loss(
-                pred_value_dict["sequence_vf"],
-                true_value_dict["sequence_vf"],
-                masks=[true_data_dict["redesign_mask"], true_data_dict["valid_mask"]],
+                pred_loss_dict["sequence_vf"],
+                true_loss_dict["sequence_vf"],
+                masks=[true_loss_dict["redesign_mask"], true_loss_dict["valid_mask"]],
+            )
+        if "backbone" in self.design_mode:
+            loss_dict["translation_vf_loss"] = get_mse_loss(
+                pred_loss_dict["translation_vf"],
+                true_loss_dict["translation_vf"],
+                masks=[true_loss_dict["redesign_mask"], true_loss_dict["valid_mask"]],
+            )
+            loss_dict["rotation_vf_loss"] = get_mse_loss(
+                pred_loss_dict["rotation_vf"],
+                true_loss_dict["rotation_vf"],
+                masks=[true_loss_dict["redesign_mask"], true_loss_dict["valid_mask"]],
             )
         if "sidechain" in self.design_mode:
-            loss_dict["sidechain_vf_loss"] = get_mse_loss(
-                pred_value_dict["sidechain_vf"],
-                true_value_dict["sidechain_vf"],
-                masks=[true_data_dict["redesign_mask"], true_data_dict["valid_mask"]],
+            loss_dict["dihedral_vf_loss"] = get_mse_loss(
+                pred_loss_dict["dihedral_vf"],
+                true_loss_dict["dihedral_vf"],
+                masks=[true_loss_dict["redesign_mask"], true_loss_dict["valid_mask"]],
             )
 
         # auxiliary predictions
         loss_dict["distogram_loss"] = get_ce_loss(
-            pred_value_dict["distogram"],
-            true_value_dict["distogram"],
+            pred_loss_dict["distogram"],
+            true_loss_dict["distogram"],
             masks=[
-                true_data_dict["valid_mask"][:, None, :],
-                true_data_dict["valid_mask"][:, :, None],
+                true_loss_dict["valid_mask"][:, None, :],
+                true_loss_dict["valid_mask"][:, :, None],
             ],
         )
         if "backbone" in self.design_mode:
             loss_dict["bb_clash_loss"], _ = get_bb_clash_violation(
-                N_coords=pred_data_dict["pos_heavyatom"][:, :, 0, :],
-                CA_coords=pred_data_dict["pos_heavyatom"][:, :, 1, :],
-                C_coords=pred_data_dict["pos_heavyatom"][:, :, 2, :],
+                N_coords=pred_loss_dict["pos_heavyatom"][:, :, 0, :],
+                CA_coords=pred_loss_dict["pos_heavyatom"][:, :, 1, :],
+                C_coords=pred_loss_dict["pos_heavyatom"][:, :, 2, :],
                 masks_dim_1=[
-                    true_data_dict["redesign_mask"],
-                    true_data_dict["valid_mask"],
+                    pred_loss_dict["redesign_mask"],
+                    pred_loss_dict["valid_mask"],
                 ],
-                masks_dim_2=[true_data_dict["valid_mask"]],
+                masks_dim_2=[pred_loss_dict["valid_mask"]],
             )
             loss_dict["bb_bond_angle_loss"], _ = get_bb_bond_angle_violation(
-                N_coords=pred_data_dict["pos_heavyatom"][:, :, 0, :],
-                CA_coords=pred_data_dict["pos_heavyatom"][:, :, 1, :],
-                C_coords=pred_data_dict["pos_heavyatom"][:, :, 2, :],
-                masks=[true_data_dict["redesign_mask"], true_data_dict["valid_mask"]],
+                N_coords=pred_loss_dict["pos_heavyatom"][:, :, 0, :],
+                CA_coords=pred_loss_dict["pos_heavyatom"][:, :, 1, :],
+                C_coords=pred_loss_dict["pos_heavyatom"][:, :, 2, :],
+                masks=[true_loss_dict["redesign_mask"], true_loss_dict["valid_mask"]],
             )
             loss_dict["bb_bond_length_loss"], _ = get_bb_bond_length_violation(
-                N_coords=pred_data_dict["pos_heavyatom"][:, :, 0, :],
-                CA_coords=pred_data_dict["pos_heavyatom"][:, :, 1, :],
-                C_coords=pred_data_dict["pos_heavyatom"][:, :, 2, :],
-                masks=[true_data_dict["redesign_mask"], true_data_dict["valid_mask"]],
+                N_coords=pred_loss_dict["pos_heavyatom"][:, :, 0, :],
+                CA_coords=pred_loss_dict["pos_heavyatom"][:, :, 1, :],
+                C_coords=pred_loss_dict["pos_heavyatom"][:, :, 2, :],
+                masks=[true_loss_dict["redesign_mask"], true_loss_dict["valid_mask"]],
             )
 
         # confidence estimations
         if "backbone" in self.design_mode:
-            loss_dict["lddt_loss"] = get_ce_loss(
-                pred_value_dict["lddt"],
-                true_value_dict["lddt"],
-                masks=[true_data_dict["redesign_mask"], true_data_dict["valid_mask"]],
+            loss_dict["confidence_lddt_loss"] = get_ce_loss(
+                pred_loss_dict["lddt_one_hot"],
+                true_loss_dict["lddt_one_hot"],
+                masks=[true_loss_dict["redesign_mask"], true_loss_dict["valid_mask"]],
             )
-            # loss_dict["tm_loss"]
+            # loss_dict["ptm_loss"]
             # loss_dict["pae_loss"]
             # interface residues metrics, ipae, iLDDT, iTM etc.
             # loglikelihood method

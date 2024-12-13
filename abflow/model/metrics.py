@@ -7,6 +7,8 @@ from torch import nn
 import torch.nn.functional as F
 from typing import List
 
+from ..structure import get_frames_and_dihedrals
+
 from ..utils.utils import combine_coords, combine_masks, mask_data, average_data
 from ..constants import (
     AtomVanDerWaalRadii,
@@ -210,8 +212,8 @@ def get_rmsd(
 
 
 def get_tm_score(
-    pred_coord: List[torch.Tensor],
-    true_coord: List[torch.Tensor],
+    pred_coord: torch.Tensor,
+    true_coord: torch.Tensor,
     masks: List[torch.Tensor] = None,
     alignment_masks: List[torch.Tensor] = None,
 ) -> torch.Tensor:
@@ -229,8 +231,8 @@ def get_tm_score(
     \( d_0(L) = 1.24 \sqrt[3]{\text{max}(L, 19)  - 15 } - 1.8 \). In the scaling factor, we clamp the length of
     the target protein to 19 to avoid negative or undefined values for very short proteins.
 
-    :param pred_coords: Predicted coordinates, shape (N_batch, N_res, 3).
-    :param true_coords: True coordinates, shape (N_batch, N_res, 3).
+    :param pred_coord: Predicted coordinates, shape (N_batch, N_res, 3).
+    :param true_coord: True coordinates, shape (N_batch, N_res, 3).
     :param masks: List of masks to apply, each shape (N_batch, N_res).
     :param alignment_masks: List of masks to apply for alignment, each shape (N_batch, N_res).
 
@@ -656,9 +658,6 @@ class AbFlowMetrics(nn.Module):
             )
 
         # backbone N, CA, C metrics
-        # add TM=score
-        # add lddt
-        # add plddt - or do this in a separate confidence section - maybe we do not confidence at all
         metrics["rmsd/redesign"] = get_rmsd(
             [
                 pred_data_dict["pos_heavyatom"][:, :, 0, :],
@@ -717,14 +716,26 @@ class AbFlowMetrics(nn.Module):
                 ],
                 alignment_masks=None,
             )
+        metrics["tm_score/antibody"] = get_tm_score(
+            pred_data_dict["pos_heavyatom"][:, :, 1, :],
+            true_data_dict["pos_heavyatom"][:, :, 1, :],
+            masks=[true_data_dict["antibody_mask"], true_data_dict["valid_mask"]],
+            alignment_masks=None,
+        )
 
-        # sidechain metrics
-        pred_sidechain_dihedrals = pred_data_dict["sidechain_dihedrals"]
-        true_sidechain_dihedrals = true_data_dict["sidechain_dihedrals"]
+        # sidechain dihedrals metrics - add or remove the oxygen dihedral
+        _, _, pred_dihedrals = get_frames_and_dihedrals(
+            pred_data_dict["pos_heavyatoms"], pred_data_dict["res_type"]
+        )
+        _, _, true_dihedrals = get_frames_and_dihedrals(
+            true_data_dict["pos_heavyatoms"], true_data_dict["res_type"]
+        )
+        pred_sidechain_dihedrals = pred_dihedrals[:, :, :4]
+        true_sidechain_dihedrals = true_dihedrals[:, :, :4]
         true_sidechain_dihedral_mask = get_dihedral_mask(true_data_dict["res_type"])
         metrics["sidechain_mae/redesign"] = get_sidechain_mae(
-            pred_data_dict["sidechain_dihedrals"],
-            true_data_dict["sidechain_dihedrals"],
+            pred_sidechain_dihedrals,
+            true_sidechain_dihedrals,
             masks=[
                 true_data_dict["redesign_mask"],
                 true_data_dict["valid_mask"],
@@ -786,6 +797,15 @@ class AbFlowMetrics(nn.Module):
                     chi4_mask,
                 ],
             )
+        )
+
+        # averaged confidence scores
+        # average plddt
+        # average (ae?)
+        # average (tm?)
+        metrics["confidence_plddt/redesign"] = average_data(
+            pred_data_dict["lddt_per_residue"],
+            masks=[pred_data_dict["redesign_mask"], pred_data_dict["valid_mask"]],
         )
 
         # remove nans

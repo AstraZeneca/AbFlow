@@ -132,6 +132,9 @@ class FlowPrediction(nn.Module):
         pred_loss_dict.update(pred_loss_update)
         true_loss_dict.update(true_loss_update)
 
+        true_loss_dict["redesign_mask"] = true_data_dict["redesign_mask"]
+        true_loss_dict["valid_mask"] = true_data_dict["valid_mask"]
+
         return pred_loss_dict, true_loss_dict
 
     @torch.no_grad()

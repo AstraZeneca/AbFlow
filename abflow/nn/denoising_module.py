@@ -46,9 +46,9 @@ class DenoisingModule(nn.Module):
         self.self_condition_rate = self_condition_rate
         self.self_condition_steps = self_condition_steps
 
-        self.res_type_prob = OneHotEmbedding(22, label_smoothing=label_smoothing)
-        self.linear_no_bias_s = nn.Linear(22 + 5 + 1, c_s, bias=False)
-        self.output_proj = nn.Linear(c_s, 22 + 3 + 3 + 5, bias=False)
+        self.res_type_prob = OneHotEmbedding(21, label_smoothing=label_smoothing)
+        self.linear_no_bias_s = nn.Linear(21 + 5 + 1, c_s, bias=False)
+        self.output_proj = nn.Linear(c_s, 21 + 3 + 3 + 5, bias=False)
 
         self._translation_flow = OptimalTransportEuclideanFlow(
             dim=3,
@@ -60,7 +60,7 @@ class DenoisingModule(nn.Module):
             schedule_params={},
         )
         self._sequence_flow = LinearSimplexFlow(
-            dim=22,
+            dim=21,
             schedule_type="linear",
             schedule_params={},
         )
@@ -326,10 +326,10 @@ class DenoisingModule(nn.Module):
 
         pred_x = self.output_proj(s_i)
 
-        res_type_prob_update = pred_x[..., :22]
-        frame_rotations_update = pred_x[..., 22:25]
-        frame_translations_update = pred_x[..., 25:28]
-        dihedrals_update = pred_x[..., 28:]
+        res_type_prob_update = pred_x[..., :21]
+        frame_rotations_update = pred_x[..., 21:24]
+        frame_translations_update = pred_x[..., 24:27]
+        dihedrals_update = pred_x[..., 27:]
 
         # make updates to get the final predicted values
         res_type_prob = noised_feature_dict["res_type_prob"] + res_type_prob_update
