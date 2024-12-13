@@ -112,13 +112,13 @@ class FlowPrediction(nn.Module):
         true_loss_dict.update(true_loss_update)
         # denoising module one forward pass with multi-step self-conditioning
         pred_loss_update, true_loss_update = self.denoising_module.get_loss_terms(
-            true_data_dict
+            true_data_dict, s_i, z_ij
         )
         pred_loss_dict.update(pred_loss_update)
         true_loss_dict.update(true_loss_update)
         # denoising module mini rollout
         pred_data_dict = self.denoising_module.rollout(
-            true_data_dict, num_steps=self.mini_rollout_steps
+            true_data_dict, s_i, z_ij, num_steps=self.mini_rollout_steps
         )
         # confidence module - binned plddt, pae, ptm
         pred_loss_update, true_loss_update = self.confidence_module.get_loss_terms(
@@ -134,6 +134,7 @@ class FlowPrediction(nn.Module):
 
         return pred_loss_dict, true_loss_dict
 
+    @torch.no_grad()
     def inference(
         self,
         true_data_dict: dict[str, torch.Tensor],
@@ -143,7 +144,7 @@ class FlowPrediction(nn.Module):
 
         # denoising module full  with multi-step self-conditioning
         pred_data_dict = self.denoising_module.rollout(
-            true_data_dict, num_steps=self.full_rollout_steps
+            true_data_dict, s_i, z_ij, num_steps=self.full_rollout_steps
         )
         # confidence module - per residue level confidence scores
         pred_data_update = self.confidence_module.predict(

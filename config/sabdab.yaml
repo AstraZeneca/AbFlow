@@ -58,10 +58,10 @@ network:
     c_z: 32 # default: 128
     n_condition_module_blocks: 8 # default: 48
     n_denoising_module_blocks: 4 # default: 24
-    n_confidence_head_blocks: 1 # default: 4
+    n_confidence_module_blocks: 1 # default: 4
     n_cycle: 4
     mini_rollout_steps: 20
-    num_time_steps: 500
+    full_rollout_steps: 500
     self_condition_rate: 0.0
     self_condition_steps: 0
     label_smoothing: 0.0

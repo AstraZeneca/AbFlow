@@ -10,6 +10,7 @@ import torch.nn.functional as F
 from einops import rearrange
 
 from ...rigid import Rigid
+from .pairformer import Transition
 
 
 class InvariantPointAttention(nn.Module):
@@ -132,3 +133,44 @@ class InvariantPointAttention(nn.Module):
         )
 
         return s_hat_i
+
+
+class IPAStack(nn.Module):
+    """
+    Invariant Point Attention (IPA) stack.
+    """
+
+    def __init__(self, c_s: int, c_z: int, n_block: int):
+
+        super().__init__()
+
+        self.n_block = n_block
+        self.dropout = nn.Dropout(p=0.1)
+
+        self.trunk = nn.ModuleDict()
+        for b in range(n_block):
+            self.trunk[f"invariant_point_attention_{b}"] = InvariantPointAttention(
+                c_s,
+                c_z,
+                c_hidden=16,
+                N_head=12,
+                N_query_points=4,
+                N_point_values=8,
+            )
+            self.trunk[f"layer_norm_1_{b}"] = nn.LayerNorm(c_s)
+            self.trunk[f"transition_{b}"] = Transition(c_s)
+            self.trunk[f"layer_norm_2_{b}"] = nn.LayerNorm(c_s)
+
+    def forward(self, s_i: torch.Tensor, z_ij: torch.Tensor, r_i: Rigid):
+
+        for b in range(self.n_block):
+
+            # IPA
+            s_i = self.trunk[f"invariant_point_attention_{b}"](s_i, z_ij, r_i)
+            s_i = self.trunk[f"layer_norm_1_{b}"](self.dropout(s_i))
+
+            # Transition
+            s_i = s_i + self.trunk[f"transition_{b}"](s_i)
+            s_i = self.trunk[f"layer_norm_2_{b}"](self.dropout(s_i))
+
+        return s_i

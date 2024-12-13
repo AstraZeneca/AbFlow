@@ -169,8 +169,6 @@ class ConditionModule(nn.Module):
                     self.layer_norm_z_hat(z_ij)
                 )
                 s_i = s_init_i + self.linear_no_bias_s_hat(self.layer_norm_s_hat(s_i))
-                s_i, z_ij = self(s_i, z_ij)
-
-        s_i, z_ij = self.pairformer_stack(s_i, z_ij)
+                s_i, z_ij = self.pairformer_stack(s_i, z_ij)
 
         return s_inputs_i, z_inputs_ij, s_i, z_ij
