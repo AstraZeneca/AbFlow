@@ -808,6 +808,8 @@ class AbFlowMetrics(nn.Module):
             masks=[pred_data_dict["redesign_mask"], pred_data_dict["valid_mask"]],
         )
 
+        # get likelihoods
+
         # remove nans
         for key in metrics:
             if isinstance(metrics[key], torch.Tensor):

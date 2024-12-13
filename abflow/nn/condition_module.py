@@ -5,7 +5,7 @@ AbFlow condition module.
 import torch
 import torch.nn as nn
 
-from ..nn.modules.pairformer import PairformerStack
+from .modules.pairformer import PairformerStack
 from .modules.features import (
     OneHotEmbedding,
     DihedralEmbedding,

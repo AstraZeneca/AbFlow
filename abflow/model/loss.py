@@ -144,7 +144,7 @@ class AbFlowLoss(nn.Module):
             # loss_dict["ptm_loss"]
             # loss_dict["pae_loss"]
             # interface residues metrics, ipae, iLDDT, iTM etc.
-            # loglikelihood method
+            # loglikelihood (native sequence), per data
 
         # weighting and summing the losses
         for loss_name, loss_value in loss_dict.items():

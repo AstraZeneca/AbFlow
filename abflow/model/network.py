@@ -8,6 +8,7 @@ from typing import List
 
 from ..nn.condition_module import ConditionModule
 from ..nn.distogram_head import DistogramHead
+from ..nn.denoising_module import DenoisingModule
 from ..nn.confidence_module import ConfidenceModule
 
 
@@ -83,7 +84,7 @@ class FlowPrediction(nn.Module):
             n_block=n_confidence_module_blocks,
         )
 
-    def train(
+    def get_loss_terms(
         self,
         true_data_dict: dict[str, torch.Tensor],
     ):
