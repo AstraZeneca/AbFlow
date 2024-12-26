@@ -55,8 +55,8 @@ def get_frames_and_dihedrals(
                 sidechain_dihedrals[b, r, i] = dihedrals
 
     # get psi dihedral
-    psi_dihedrals = get_dihedrals(pos_heavyatom[:, :, :4, :]) # (N_batch, N_res)
-    
+    psi_dihedrals = get_dihedrals(pos_heavyatom[:, :, :4, :])  # (N_batch, N_res)
+
     dihedrals = torch.cat([sidechain_dihedrals, psi_dihedrals.unsqueeze(-1)], dim=-1)
     return frame_rotations, frame_translations, dihedrals
 

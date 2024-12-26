@@ -243,13 +243,13 @@ def get_tm_score(
             pred_coord, true_coord, alignment_masks
         )
 
-    combined_mask = combine_masks(masks, pred_coord)
+    combined_mask = combine_masks(masks, pred_coord[:, :, 0])
 
-    L_target = combined_mask.sum(dim=-1)
+    L_target = combined_mask
     d0 = 1.24 * torch.pow(torch.clamp(L_target.float(), min=19) - 15, 1 / 3) - 1.8
 
     dist = torch.sqrt(torch.sum((pred_coord - true_coord) ** 2, dim=-1))
-    tm_score_res = 1 / (1 + (dist / d0.unsqueeze(-1)) ** 2)
+    tm_score_res = 1 / (1 + (dist / d0) ** 2)
 
     tm_score = average_data(tm_score_res, masks=masks)
 
@@ -559,7 +559,7 @@ def get_lddt(
     :param distance_cutoff: Distance cutoff for local region.
     :return: torch.Tensor: lDDT scores for each atom, shape (N_batch, N_res).
     """
-    mask = combine_masks(masks, pred_coord)
+    mask = combine_masks(masks, pred_coord[:, :, 0])
 
     # calculate the distance matrix of shape (N_batch, N_res, N_res)
     d_dist = torch.cdist(pred_coord, true_coord, p=2)
@@ -583,7 +583,7 @@ def get_lddt(
             mask_i = mask[batch]
 
             R_i = (
-                ((d_dist_gt[batch, i] < distance_cutoff) & (mask_i.bool()))
+                ((d_dist_gt[batch, i] < distance_cutoff) & (mask_i))
                 .nonzero(as_tuple=False)
                 .squeeze(1)
             )
@@ -593,10 +593,10 @@ def get_lddt(
 
             lddt_i = 0
             for j in R_i:
-                d_dist_jj = d_dist[batch, j, j]
+                d_dist_ij = d_dist[batch, i, j]
 
-                lddt_jj = (d_dist_jj < thresholds).float().mean()
-                lddt_i = lddt_i + lddt_jj
+                lddt_ij = (d_dist_ij < thresholds).float().mean()
+                lddt_i = lddt_i + lddt_ij
 
             lddt_scores[batch, i] = lddt_i / len(R_i) * 100
 
@@ -725,10 +725,10 @@ class AbFlowMetrics(nn.Module):
 
         # sidechain dihedrals metrics - add or remove the oxygen dihedral
         _, _, pred_dihedrals = get_frames_and_dihedrals(
-            pred_data_dict["pos_heavyatoms"], pred_data_dict["res_type"]
+            pred_data_dict["pos_heavyatom"], pred_data_dict["res_type"]
         )
         _, _, true_dihedrals = get_frames_and_dihedrals(
-            true_data_dict["pos_heavyatoms"], true_data_dict["res_type"]
+            true_data_dict["pos_heavyatom"], true_data_dict["res_type"]
         )
         pred_sidechain_dihedrals = pred_dihedrals[:, :, :4]
         true_sidechain_dihedrals = true_dihedrals[:, :, :4]

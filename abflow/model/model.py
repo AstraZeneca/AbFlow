@@ -4,7 +4,7 @@ import numpy as np
 
 from typing import Optional, Tuple, Dict
 from torch import nn
-from lightning.pytorch import LightningModule
+from pytorch_lightning import LightningModule
 
 from .loss import AbFlowLoss
 from .metrics import AbFlowMetrics
@@ -62,15 +62,17 @@ class AbFlow(LightningModule):
         pred_loss_dict, true_loss_dict = self._network.get_loss_terms(true_data_dict)
         cumulative_loss, loss_dict = self._loss(pred_loss_dict, true_loss_dict)
 
-        self.log_dict(
-            loss_dict,
-            on_step=False,
-            on_epoch=True,
-            prog_bar=False,
-            logger=True,
-            sync_dist=True,
-            batch_size=batch_size,
-        )
+        for key, value in loss_dict.items():
+            self.log(
+                f"train/{key}",
+                value.mean().item(),
+                on_step=True,
+                on_epoch=True,
+                prog_bar=False,
+                logger=True,
+                sync_dist=True,
+                batch_size=batch_size,
+            )
 
         return cumulative_loss
 
@@ -85,24 +87,29 @@ class AbFlow(LightningModule):
         _, loss_dict = self._loss(pred_loss_dict, true_loss_dict)
         metrics_dict = self._metrics(pred_data_dict, true_data_dict)
 
-        self.log_dict(
-            loss_dict,
-            on_step=False,
-            on_epoch=True,
-            prog_bar=False,
-            logger=True,
-            sync_dist=True,
-            batch_size=batch_size,
-        )
-        self.log_dict(
-            metrics_dict,
-            on_step=False,
-            on_epoch=True,
-            prog_bar=False,
-            logger=True,
-            sync_dist=True,
-            batch_size=batch_size,
-        )
+        for key, value in loss_dict.items():
+            self.log(
+                f"val/{key}",
+                value.mean().item(),
+                on_step=False,
+                on_epoch=True,
+                prog_bar=False,
+                logger=True,
+                sync_dist=True,
+                batch_size=batch_size,
+            )
+
+        for key, value in metrics_dict.items():
+            self.log(
+                f"val/{key}",
+                value.mean().item(),
+                on_step=False,
+                on_epoch=True,
+                prog_bar=False,
+                logger=True,
+                sync_dist=True,
+                batch_size=batch_size,
+            )
 
     def test_step(self, batch, batch_idx):
         """Perform a single test step."""
@@ -115,24 +122,29 @@ class AbFlow(LightningModule):
         _, loss_dict = self._loss(pred_loss_dict, true_loss_dict)
         metrics_dict = self._metrics(pred_data_dict, true_data_dict)
 
-        self.log_dict(
-            loss_dict,
-            on_step=False,
-            on_epoch=True,
-            prog_bar=False,
-            logger=True,
-            sync_dist=True,
-            batch_size=batch_size,
-        )
-        self.log_dict(
-            metrics_dict,
-            on_step=False,
-            on_epoch=True,
-            prog_bar=False,
-            logger=True,
-            sync_dist=True,
-            batch_size=batch_size,
-        )
+        for key, value in loss_dict.items():
+            self.log(
+                f"test/{key}",
+                value.mean().item(),
+                on_step=False,
+                on_epoch=True,
+                prog_bar=False,
+                logger=True,
+                sync_dist=True,
+                batch_size=batch_size,
+            )
+
+        for key, value in metrics_dict.items():
+            self.log(
+                f"test/{key}",
+                value.mean().item(),
+                on_step=False,
+                on_epoch=True,
+                prog_bar=False,
+                logger=True,
+                sync_dist=True,
+                batch_size=batch_size,
+            )
 
     @torch.no_grad()
     def _generate_complexes(

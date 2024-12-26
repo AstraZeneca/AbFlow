@@ -87,7 +87,7 @@ class ConfidenceModule(nn.Module):
     ):
 
         p_plddt_i = self.forward(s_inputs_i, z_inputs_ij, s_i, z_ij, x_pred_i)
-        lddt_per_residue = get_lddt(x_true_i)
+        lddt_per_residue = get_lddt(x_pred_i, x_true_i)
         p_lddt_i = self.lddt_binned_one_hot(lddt_per_residue)
 
         return {"lddt_one_hot": p_plddt_i}, {"lddt_one_hot": p_lddt_i}

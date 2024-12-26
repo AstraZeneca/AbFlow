@@ -9,7 +9,14 @@ from torch.utils.data import Dataset
 from pytorch_lightning import LightningDataModule
 from itertools import chain
 
-from .utils import rm_duplicates, batch_dict
+from .utils import (
+    rm_duplicates,
+    batch_dict,
+    get_redesign_mask,
+    crop_data,
+    center_complex,
+    pad_data,
+)
 
 
 class AntibodyAntigenDataset(Dataset):
@@ -195,6 +202,7 @@ class AntibodyAntigenDataset(Dataset):
 
         # Load the structure (dictionary) using its ID
         with self.db_connection.begin() as txn:
+
             return pickle.loads(txn.get(db_id.encode()))
 
 
@@ -214,6 +222,8 @@ class AntibodyAntigenDataModule(LightningDataModule):
 
         self._num_workers = config["num_workers"]
         self._batch_size = config["batch_size"]
+        self._redesign = config["redesign"]
+        self._crop = config["crop"]
 
     def __repr__(self):
         return f"{self.__class__.__name__}(batch_size={self._batch_size})"
@@ -226,11 +236,11 @@ class AntibodyAntigenDataModule(LightningDataModule):
         """
 
         # NEED TO IMPLEMENT THIS FUNCTION
-        # 1. redesign mask
-        # 2. crop mask
-        # 3. center complex
-        # 4. pad complex
-        # 5. batch complex
+        for data in data_dict:
+            data.update(get_redesign_mask(data, self._redesign))
+            data.update(crop_data(data, self._crop))
+            data.update(center_complex(data["pos_heavyatom"], data["redesign_mask"]))
+            data.update(pad_data(data, self._crop["max_crop_size"]))
 
         # check default collate from torch.utils.data
         data_dict = batch_dict(data_dict)

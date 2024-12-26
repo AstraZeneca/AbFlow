@@ -23,7 +23,6 @@ processed_data = process_lmdb_chain(data)
 # Input data dict to PDB file
 output_to_pdb(processed_data, "9c44_output.pdb")
 ```
-
 """
 
 import torch
@@ -232,8 +231,8 @@ def process_lmdb_chain(data: dict) -> dict:
     :return: Dictionary with the following information:
         - res_type: A tensor of shape (N_res,) containing the amino acid type index for each residue.
         - chain_type: A tensor of shape (N_res,) containing the chain type index for each residue.
-        - res_index: A tensor of shape (N_res,) containing the residue index for each residue, offset 500 for each chain.
-        This offset is fine since we use relative position encoding in abflow and heavy/light chains are typically < 500 residues.
+        - chain id: A tensor of shape (N_res,) containing the chain id for each residue.
+        - res_index: A tensor of shape (N_res,) containing the residue index for each residue.
         - region_index: A tensor of shape (N_res,) containing the antibody CDR/framework or antigen index for each residue.
         - pos_heavyatom: A tensor of shape (N_res, 15, 3) containing the position of the heavy atoms for each residue.
         - antibody_mask: A tensor of shape (N_res,) indicating which residues are part of the antibody (True) and otherwise (False).
@@ -242,12 +241,13 @@ def process_lmdb_chain(data: dict) -> dict:
 
     res_type_list = []
     chain_type_list = []
+    chain_id_list = []
     res_index_list = []
     region_index_list = []
     pos_heavyatom_list = []
 
     chain_names = ["heavy", "light", "antigen"]
-    offset = 0
+    chain_id = 0
 
     for chain_name in chain_names:
         chain_data = data.get(chain_name)
@@ -266,8 +266,9 @@ def process_lmdb_chain(data: dict) -> dict:
                 chain_type_list.append(
                     torch.full_like(chain_data["aa"], chain_id_to_index[chain_name])
                 )
-            res_index_list.append(chain_data["res_nb"] + offset)
-            offset += 500
+            chain_id_list.append(torch.full_like(chain_data["aa"], chain_id))
+            chain_id += 1
+            res_index_list.append(chain_data["res_nb"])
             if chain_name == "antigen":
                 region_index_list.append(
                     torch.full_like(chain_data["aa"], region_to_index["antigen"])
@@ -278,6 +279,7 @@ def process_lmdb_chain(data: dict) -> dict:
 
     res_type = torch.cat(res_type_list)
     chain_type = torch.cat(chain_type_list)
+    chain_id = torch.cat(chain_id_list)
     res_index = torch.cat(res_index_list)
     region_index = torch.cat(region_index_list)
     pos_heavyatom = torch.cat(pos_heavyatom_list)
@@ -287,6 +289,7 @@ def process_lmdb_chain(data: dict) -> dict:
     return {
         "res_type": res_type,
         "chain_type": chain_type,
+        "chain_id": chain_id,
         "res_index": res_index,
         "region_index": region_index,
         "pos_heavyatom": pos_heavyatom,

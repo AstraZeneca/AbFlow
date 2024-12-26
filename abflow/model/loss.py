@@ -110,29 +110,30 @@ class AbFlowLoss(nn.Module):
                 true_loss_dict["valid_mask"][:, :, None],
             ],
         )
-        if "backbone" in self.design_mode:
-            loss_dict["bb_clash_loss"], _ = get_bb_clash_violation(
-                N_coords=pred_loss_dict["pos_heavyatom"][:, :, 0, :],
-                CA_coords=pred_loss_dict["pos_heavyatom"][:, :, 1, :],
-                C_coords=pred_loss_dict["pos_heavyatom"][:, :, 2, :],
-                masks_dim_1=[
-                    pred_loss_dict["redesign_mask"],
-                    pred_loss_dict["valid_mask"],
-                ],
-                masks_dim_2=[pred_loss_dict["valid_mask"]],
-            )
-            loss_dict["bb_bond_angle_loss"], _ = get_bb_bond_angle_violation(
-                N_coords=pred_loss_dict["pos_heavyatom"][:, :, 0, :],
-                CA_coords=pred_loss_dict["pos_heavyatom"][:, :, 1, :],
-                C_coords=pred_loss_dict["pos_heavyatom"][:, :, 2, :],
-                masks=[true_loss_dict["redesign_mask"], true_loss_dict["valid_mask"]],
-            )
-            loss_dict["bb_bond_length_loss"], _ = get_bb_bond_length_violation(
-                N_coords=pred_loss_dict["pos_heavyatom"][:, :, 0, :],
-                CA_coords=pred_loss_dict["pos_heavyatom"][:, :, 1, :],
-                C_coords=pred_loss_dict["pos_heavyatom"][:, :, 2, :],
-                masks=[true_loss_dict["redesign_mask"], true_loss_dict["valid_mask"]],
-            )
+
+        # if "backbone" in self.design_mode:
+        #     loss_dict["bb_clash_loss"], _ = get_bb_clash_violation(
+        #         N_coords=pred_loss_dict["pos_heavyatom"][:, :, 0, :],
+        #         CA_coords=pred_loss_dict["pos_heavyatom"][:, :, 1, :],
+        #         C_coords=pred_loss_dict["pos_heavyatom"][:, :, 2, :],
+        #         masks_dim_1=[
+        #             true_loss_dict["redesign_mask"],
+        #             true_loss_dict["valid_mask"],
+        #         ],
+        #         masks_dim_2=[true_loss_dict["valid_mask"]],
+        #     )
+        #     loss_dict["bb_bond_angle_loss"], _ = get_bb_bond_angle_violation(
+        #         N_coords=pred_loss_dict["pos_heavyatom"][:, :, 0, :],
+        #         CA_coords=pred_loss_dict["pos_heavyatom"][:, :, 1, :],
+        #         C_coords=pred_loss_dict["pos_heavyatom"][:, :, 2, :],
+        #         masks=[true_loss_dict["redesign_mask"], true_loss_dict["valid_mask"]],
+        #     )
+        #     loss_dict["bb_bond_length_loss"], _ = get_bb_bond_length_violation(
+        #         N_coords=pred_loss_dict["pos_heavyatom"][:, :, 0, :],
+        #         CA_coords=pred_loss_dict["pos_heavyatom"][:, :, 1, :],
+        #         C_coords=pred_loss_dict["pos_heavyatom"][:, :, 2, :],
+        #         masks=[true_loss_dict["redesign_mask"], true_loss_dict["valid_mask"]],
+        #     )
 
         # confidence estimations
         if "backbone" in self.design_mode:
@@ -150,8 +151,10 @@ class AbFlowLoss(nn.Module):
         for loss_name, loss_value in loss_dict.items():
             weight = self.loss_weights[loss_name]
             weighted_loss = weight * loss_value
-            cumulative_loss = cumulative_loss + weighted_loss
+            cumulative_loss = cumulative_loss + weighted_loss.mean()
             loss_dict[loss_name] = weighted_loss.detach().clone()
+
+            # print(f"{loss_name}: {weighted_loss.mean().item()}")
         loss_dict["total_loss"] = cumulative_loss.detach().clone()
 
         return cumulative_loss, loss_dict

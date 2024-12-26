@@ -13,10 +13,10 @@ import torch
 import yaml
 import traceback
 
-from lightning.pytorch.strategies import DDPStrategy
-from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
-from lightning.pytorch.loggers import WandbLogger
-from lightning.pytorch.trainer import Trainer
+from pytorch_lightning.strategies import DDPStrategy
+from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
+from pytorch_lightning.loggers import WandbLogger
+from pytorch_lightning.trainer import Trainer
 from datetime import timedelta
 
 from abflow.utils.training import setup_model

@@ -3,6 +3,7 @@ AbFlow condition module.
 """
 
 import torch
+import copy
 import torch.nn as nn
 
 from .modules.pairformer import PairformerStack
@@ -14,7 +15,7 @@ from .modules.features import (
     RelativePositionEncoding,
 )
 
-from ..constants import MASK_TOKEN
+from ..constants import MASK_TOKEN, PAD_TOKEN
 from ..structure import get_frames_and_dihedrals
 from ..utils.utils import mask_data
 
@@ -67,11 +68,15 @@ class ConditionModule(nn.Module):
         """
         Mask the redesigned regions.
         """
+        # mask sequence with a PAD token
+        data_dict["res_type"] = mask_data(
+            data_dict["res_type"], PAD_TOKEN, ~data_dict["valid_mask"]
+        )
 
         # mask sequence with a MASK token
         if "sequence" in self.design_mode:
             data_dict["res_type"] = mask_data(
-                data_dict["res_type"], MASK_TOKEN, data_dict["redesigned_mask"]
+                data_dict["res_type"], MASK_TOKEN, data_dict["redesign_mask"]
             )
 
         # mask backbone coordinates with 0.0
@@ -79,7 +84,7 @@ class ConditionModule(nn.Module):
             data_dict["pos_heavyatom"][:, :, :4, :] = mask_data(
                 data_dict["pos_heavyatom"][:, :, :4, :],
                 0.0,
-                data_dict["redesigned_mask"],
+                data_dict["redesign_mask"],
             )
 
         # mask sidechain coordinates with 0.0
@@ -87,7 +92,7 @@ class ConditionModule(nn.Module):
             data_dict["pos_heavyatom"][:, :, 4:, :] = mask_data(
                 data_dict["pos_heavyatom"][:, :, 4:, :],
                 0.0,
-                data_dict["redesigned_mask"],
+                data_dict["redesign_mask"],
             )
 
         return data_dict
@@ -105,14 +110,30 @@ class ConditionModule(nn.Module):
         # chain type to one-hot
         chain_type_one_hot = self.chain_type_one_hot(data_dict["chain_type"])
         # pos heavyatom to frames and dihedrals
+        ## set indices in data_dict["res_type"] to glycine if the index is not in standard amino acids
+        non_standard_aa_mask = data_dict["res_type"] > 19
+        modified_res_type = mask_data(data_dict["res_type"], 5, non_standard_aa_mask)
         frame_rotations, frame_translations, dihedrals = get_frames_and_dihedrals(
-            data_dict["pos_heavyatoms"], data_dict["res_type"]
+            data_dict["pos_heavyatom"], modified_res_type
         )
+        # mask the dihedrals - psi where it is nan (for glycine) with 0.0
+        is_nan = torch.isnan(dihedrals)
+        dihedrals = torch.where(is_nan, torch.zeros_like(dihedrals), dihedrals)
         # dihedrals to cosine and sine
         dihedral_trig = self.dihedral_trig(dihedrals)
 
         # pos heavyatom to CB distogram
-        CB_distogram = self.cb_distogram(data_dict["pos_heavyatom"][:, :, 4, :])
+        ## set cb coordinates of glycine to the same as ca
+        modified_pos_heavyatom = data_dict["pos_heavyatom"].clone()
+        glycine_mask = data_dict["res_type"] == 5  # Assuming glycine is encoded as 5
+        modified_pos_heavyatom[:, :, 4, :] = torch.where(
+            glycine_mask.unsqueeze(-1),  # Broadcast mask to coordinate dimensions
+            data_dict["pos_heavyatom"][:, :, 1, :],  # Use CA coordinates for glycine
+            data_dict["pos_heavyatom"][
+                :, :, 4, :
+            ],  # Retain original CB coordinates for others
+        )
+        CB_distogram = self.cb_distogram(modified_pos_heavyatom[:, :, 4, :])
         # pos heavyatom to CA_unit_vectors
         ca_unit_vectors = self.ca_unit_vector(
             data_dict["pos_heavyatom"][:, :, 1, :], frame_rotations
@@ -150,11 +171,11 @@ class ConditionModule(nn.Module):
         """
         Forward pass with recycling.
         """
-
+        data_dict = copy.deepcopy(data_dict)
         data_dict = self._mask(data_dict)
         s_inputs_i, z_inputs_ij = self._embed(data_dict)
         s_init_i = s_inputs_i.clone()
-        z_init_ij = z_inputs_ij + torch.einsum(
+        z_init_ij = z_inputs_ij.clone() + torch.einsum(
             "bid,bjd->bijd",
             self.linear_no_bias_s_i(s_inputs_i),
             self.linear_no_bias_s_j(s_inputs_i),

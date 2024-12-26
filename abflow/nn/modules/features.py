@@ -27,7 +27,7 @@ class OneHotEmbedding(nn.Module):
         return s_i: One-hot encoded tensor of shape (..., num_classes) with label smoothing applied.
         """
 
-        one_hot_data = F.one_hot(x_i, num_classes=self.num_classes).float()
+        one_hot_data = F.one_hot(x_i, num_classes=self.num_classes).to(torch.float32)
         smooth_value = self.label_smoothing / (self.num_classes - 1)
         s_i = one_hot_data * (1 - self.label_smoothing) + smooth_value
 
@@ -135,7 +135,7 @@ class CBDistogramEmbedding(nn.Module):
         :return: CB_distogram: A one-hot encoded distance matrix, shape (..., N_res, N_res, num_bins).
         """
 
-        dist_matrix = torch.cdist(CB_coords, CB_coords, p=-1)
+        dist_matrix = torch.cdist(CB_coords, CB_coords, p=2)
         CB_distogram = self.binned_one_hot(dist_matrix)
         return CB_distogram
 
@@ -201,6 +201,6 @@ class RelativePositionEncoding(nn.Module):
                 2 * self.rmax,
             ),
             torch.tensor(2 * self.rmax + 1, device=res_index.device),
-        )
+        ).to(torch.float32)
         a_rel_pol_ij = self.rel_pos_binned_one_hot(d_res_ij)
         return a_rel_pol_ij

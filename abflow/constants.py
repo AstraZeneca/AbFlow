@@ -32,11 +32,6 @@ region_to_index = {
 }
 
 
-# Conversion scales between nanometers and angstroms
-NM_TO_ANG_SCALE = 10.0
-ANG_TO_NM_SCALE = 1 / NM_TO_ANG_SCALE
-
-
 # stores indices under the 3-letter code of each AA
 class AminoAcid3(IntEnum):
     ALA = 0

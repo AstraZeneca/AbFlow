@@ -141,6 +141,7 @@ if __name__ == "__main__":
 
     # ----- Run Training
     try:
+
         main(config)
     except Exception as e:
         print(traceback.format_exc())

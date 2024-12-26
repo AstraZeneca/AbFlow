@@ -56,7 +56,7 @@ def get_redesign_mask(data: dict, redesign: dict) -> torch.Tensor:
         [1 if res in redesign_index else 0 for res in data["region_index"]],
         dtype=torch.bool,
     )
-    return redesign_mask
+    return {"redesign_mask": redesign_mask}
 
 
 def crop_complex(
@@ -88,7 +88,7 @@ def crop_complex(
         & (region_index != region_to_index["framework"])
     )
     cdr_indices = torch.where(redesign_cdr_mask == True)[0]
-    coords = pos_heavyatom[:, backbone_atoms_names_to_index["CA"]]
+    coords = pos_heavyatom[:, 1]
     antigen_mask = region_index == region_to_index["antigen"]
 
     anchor_points = []
@@ -168,7 +168,7 @@ def crop_complex(
     return new_mask
 
 
-def crop_data(data: dict, config: dict) -> dict:
+def crop_data(data: dict, crop_config: dict) -> dict:
     """
     Crop the data dict based on the crop mask.
 
@@ -181,8 +181,8 @@ def crop_data(data: dict, config: dict) -> dict:
         data["region_index"],
         data["redesign_mask"],
         data["pos_heavyatom"],
-        config["crop"]["max_crop_size"],
-        config["crop"]["antigen_crop_size"],
+        crop_config["max_crop_size"],
+        crop_config["antigen_crop_size"],
     )
 
     cropped_data = {}
@@ -203,7 +203,7 @@ def center_complex(
     :return: A tensor of shape (N_res, 15, 3) containing the position of the heavy atoms for each residue after centering.
     """
     pos_redesign = pos_heavyatom[redesign_mask]
-    pos_redesign_ca = pos_redesign[:, backbone_atoms_names_to_index["CA"]]
+    pos_redesign_ca = pos_redesign[:, 1]
     centroid = pos_redesign_ca.mean(dim=0)
     centered_pos_heavyatom = pos_heavyatom - centroid[None, None, :]
     return {
@@ -218,8 +218,8 @@ def pad_data(data: dict, max_res: int) -> dict:
     :param data: Dictionary with value each of shape (N_res, ...).
     :param max_res: Maximum number of residues.
 
-    :return: Dictionary containing the padded data. One additional key is added:
-        - valid_mask: A tensor of shape (max_res,) indicating which residues are valid (True) and which are padded (False).
+    :return: Dictionary containing the padded data. One additional key is added "valid_mask" which
+    is a tensor of shape (max_res,) indicating which residues are valid (True) and which are padded (False).
     """
 
     padded_data = {}
@@ -234,6 +234,7 @@ def pad_data(data: dict, max_res: int) -> dict:
         if isinstance(value, torch.Tensor):
             padding = max_res - value.size(0)
             if padding > 0:
+                # default padding is 0
                 padded_value = torch.zeros(
                     (padding,) + value.size()[1:], dtype=value.dtype
                 )

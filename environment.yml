@@ -19,6 +19,7 @@ dependencies:
   - notebook
   - abnumber
   - pdbfixer
+  - einops
   - pip:
       - lmdb
       - texttable

@@ -6,7 +6,7 @@ A saved LMDB database contains the following files:
 - structures.lmdb: The LMDB database containing the structure data for each complex.
 
 To use this script, run: python abflow/scripts/process_lmdb.py --path <path_to_data_folder>
-Example command to process sabdab data: python abflow/scripts/process_lmdb.py --path /scratch/hz362/datavol/data/sabdab
+Example command to process sabdab data: python abflow/scripts/data/process_lmdb.py --path /scratch/hz362/datavol/data/sabdab
 """
 
 import lmdb
@@ -58,10 +58,6 @@ def process_lmdb(data_folder: str):
                 continue
             data = pickle.loads(structure_data)
 
-            # Filter data
-            if not filter_data(data):
-                continue
-
             # Process the data
             processed_data = process_lmdb_chain(data)
 
@@ -72,17 +68,6 @@ def process_lmdb(data_folder: str):
     source_db.close()
     output_db.close()
     print("Preprocessing complete. Data saved to:", output_db_path)
-
-
-def filter_data(data: dict) -> bool:
-    """
-    Filter the data to retain only entries with an antigen and at least one of the heavy or light chains.
-    """
-    if data.get("antigen") is None:
-        return False
-    if data.get("heavy") is None and data.get("light") is None:
-        return False
-    return True
 
 
 if __name__ == "__main__":
