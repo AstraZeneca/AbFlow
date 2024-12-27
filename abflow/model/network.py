@@ -89,15 +89,16 @@ class FlowPrediction(nn.Module):
         true_data_dict: dict[str, torch.Tensor],
     ):
         """
-        param true_data_dict: A dictionary containing the input data information:
-            - res_type: A tensor of shape (N_res,) containing the amino acid type index for each residue.
-            - chain_type: A tensor of shape (N_res,) containing the chain type index for each residue.
-            - res_index: A tensor of shape (N_res,) containing the residue index for each residue, offset 500 for each chain.
-            This offset is fine since we use relative position encoding in abflow and heavy/light chains are typically < 500 residues.
-            - region_index: A tensor of shape (N_res,) containing the antibody CDR/framework or antigen index for each residue.
-            - pos_heavyatom: A tensor of shape (N_res, 15, 3) containing the position of the heavy atoms for each residue.
-            - antibody_mask: A tensor of shape (N_res,) indicating which residues are part of the antibody (True) and otherwise (False).
-            - antigen_mask: A tensor of shape (N_res,) indicating which residues are part of the antigen (True) and otherwise (False).
+        param true_data_dict: A dictionary containing the input data information (cropped, centered, padded):
+        - res_type: A tensor of shape (N_res,) containing the amino acid type index for each residue.
+        - chain_type: A tensor of shape (N_res,) containing the chain type index for each residue.
+        - chain id: A tensor of shape (N_res,) containing the chain id for each residue.
+        - res_index: A tensor of shape (N_res,) containing the residue index for each residue.
+        - region_index: A tensor of shape (N_res,) containing the antibody CDR/framework or antigen index for each residue.
+        - pos_heavyatom: A tensor of shape (N_res, 15, 3) containing the position of the heavy atoms for each residue.
+        - redesign_mask: A tensor of shape (N_res,) indicating which residues are to be redesigned (True) and otherwise (False).
+        - antibody_mask: A tensor of shape (N_res,) indicating which residues are part of the antibody (True) and otherwise (False).
+        - antigen_mask: A tensor of shape (N_res,) indicating which residues are part of the antigen (True) and otherwise (False).
         """
         pred_loss_dict = {}
         true_loss_dict = {}

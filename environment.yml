@@ -10,7 +10,7 @@ dependencies:
   - pip
   - biopython=1.84
   - pandas=2.2.2
-  - numpy=2.1.2
+  - numpy=1.26.4
   - pytorch>=2.4
   - pytorch-lightning=2.4.0
   - wandb=0.18.5

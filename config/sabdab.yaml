@@ -66,8 +66,8 @@ network:
     n_cycle: 4
     mini_rollout_steps: 20
     full_rollout_steps: 500
-    self_condition_rate: 0.0
-    self_condition_steps: 0
+    self_condition_rate: 0.0 # not implemented
+    self_condition_steps: 0 # not implemented
     label_smoothing: 0.0
 
 
