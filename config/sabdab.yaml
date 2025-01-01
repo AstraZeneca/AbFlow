@@ -8,6 +8,7 @@ model_name: all_atom_de_novo
 trainer:
     devices: 1
     max_epochs: 200
+    precision: 32-true # please train the model with 32-bit precision as rotation flow is not stable with 16-bit precision
     val_check_interval: 0.5
     gradient_clip_val: 1.0
 checkpoint:
@@ -47,9 +48,6 @@ model:
         rotation_vf_loss: 1.0
         dihedral_vf_loss: 1.0
         distogram_loss: 1.0
-        bb_clash_loss: 1.0
-        bb_bond_angle_loss: 1.0
-        bb_bond_length_loss: 1.0
         confidence_lddt_loss: 1.0
     learning_rate: 0.0001
     design_mode: ["sequence", "backbone", "sidechain"] # ["sequence", "backbone", "sidechain"]

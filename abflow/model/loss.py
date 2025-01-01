@@ -6,11 +6,6 @@ import torch
 import torch.nn as nn
 from typing import List, Dict
 
-from .metrics import (
-    get_bb_clash_violation,
-    get_bb_bond_angle_violation,
-    get_bb_bond_length_violation,
-)
 from ..utils.utils import average_data
 
 
@@ -58,9 +53,9 @@ def get_ce_loss(
 class AbFlowLoss(nn.Module):
     """
     This class takes in the predicted and true values including main flow matching conditional
-    vector fields, auxiliary predictions (structural violations and distogram) and confidence scores
-    (e.g. pLDDT, pTM, pAE). It returns the cumulative loss and individual losses for logging. The
-    returned loss is dependent on the model design mode.
+    vector fields, auxiliary predictions (distogram) and confidence scores (e.g. pLDDT, pTM, pAE).
+    It returns the cumulative loss and individual losses for logging. The returned loss is dependent
+    on the model design mode.
     """
 
     def __init__(self, design_mode: List[str], loss_weights: Dict[str, float]):
@@ -110,30 +105,6 @@ class AbFlowLoss(nn.Module):
                 true_loss_dict["valid_mask"][:, :, None],
             ],
         )
-
-        # if "backbone" in self.design_mode:
-        #     loss_dict["bb_clash_loss"], _ = get_bb_clash_violation(
-        #         N_coords=pred_loss_dict["pos_heavyatom"][:, :, 0, :],
-        #         CA_coords=pred_loss_dict["pos_heavyatom"][:, :, 1, :],
-        #         C_coords=pred_loss_dict["pos_heavyatom"][:, :, 2, :],
-        #         masks_dim_1=[
-        #             true_loss_dict["redesign_mask"],
-        #             true_loss_dict["valid_mask"],
-        #         ],
-        #         masks_dim_2=[true_loss_dict["valid_mask"]],
-        #     )
-        #     loss_dict["bb_bond_angle_loss"], _ = get_bb_bond_angle_violation(
-        #         N_coords=pred_loss_dict["pos_heavyatom"][:, :, 0, :],
-        #         CA_coords=pred_loss_dict["pos_heavyatom"][:, :, 1, :],
-        #         C_coords=pred_loss_dict["pos_heavyatom"][:, :, 2, :],
-        #         masks=[true_loss_dict["redesign_mask"], true_loss_dict["valid_mask"]],
-        #     )
-        #     loss_dict["bb_bond_length_loss"], _ = get_bb_bond_length_violation(
-        #         N_coords=pred_loss_dict["pos_heavyatom"][:, :, 0, :],
-        #         CA_coords=pred_loss_dict["pos_heavyatom"][:, :, 1, :],
-        #         C_coords=pred_loss_dict["pos_heavyatom"][:, :, 2, :],
-        #         masks=[true_loss_dict["redesign_mask"], true_loss_dict["valid_mask"]],
-        #     )
 
         # confidence estimations
         if "backbone" in self.design_mode:

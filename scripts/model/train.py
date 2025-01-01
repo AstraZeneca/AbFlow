@@ -69,7 +69,7 @@ def train(config: dict):
         strategy=DDPStrategy(
             timeout=timedelta(seconds=15400), find_unused_parameters=True
         ),
-        precision="bf16",
+        precision=config["trainer"]["precision"],
         max_epochs=config["trainer"]["max_epochs"],
         logger=logger,
         callbacks=callbacks,

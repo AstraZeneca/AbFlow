@@ -300,7 +300,8 @@ def process_lmdb_chain(data: dict) -> dict:
 
 def output_to_pdb(data: Dict[str, torch.Tensor], path: str):
     """
-    Output the processed data to a PDB file with all heavy atoms.
+    Output the processed data to a PDB file with all heavy atoms. Antigen chains are labeled as 'A',
+    heavy chains as 'H', kappa light chains as 'K', and lambda light chains as 'L'.
 
     :param data: Processed data dictionary with tensors for residue and atom information.
     :param path: Path to save the output PDB file.

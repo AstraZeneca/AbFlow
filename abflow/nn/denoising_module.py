@@ -19,7 +19,7 @@ from ..flow.manifold_flow import (
     LinearToricFlow,
 )
 from ..flow.rotation import rotmat_to_rotvec, rotvec_to_rotmat, rotvecs_mul
-from ..utils.utils import apply_mask, create_rigid, mask_data
+from ..utils.utils import apply_mask, create_rigid
 
 # Conversion scales between nanometers and angstroms
 NM_TO_ANG_SCALE = 10.0
@@ -117,11 +117,11 @@ class DenoisingModule(nn.Module):
 
         N_batch, N_res, _ = true_feature_dict["res_type_prob"].shape
         device = true_feature_dict["res_type_prob"].device
-        redesign_mask = true_feature_dict["redesign_mask"].clone()
-        res_type_prob = true_feature_dict["res_type_prob"].clone()
-        frame_rotations = true_feature_dict["frame_rotations"].clone()
-        frame_translations = true_feature_dict["frame_translations"].clone()
-        dihedrals = true_feature_dict["dihedrals"].clone()
+        redesign_mask = true_feature_dict["redesign_mask"]
+        res_type_prob = true_feature_dict["res_type_prob"]
+        frame_rotations = true_feature_dict["frame_rotations"]
+        frame_translations = true_feature_dict["frame_translations"]
+        dihedrals = true_feature_dict["dihedrals"]
 
         if "sequence" in self.design_mode:
             init_res_type_prob = self._sequence_flow.prior_sample(
@@ -170,11 +170,11 @@ class DenoisingModule(nn.Module):
         self, true_feature_dict: dict[str, torch.Tensor], time: torch.Tensor
     ):
 
-        redesign_mask = true_feature_dict["redesign_mask"].clone()
-        res_type_prob = true_feature_dict["res_type_prob"].clone()
-        frame_rotations = true_feature_dict["frame_rotations"].clone()
-        frame_translations = true_feature_dict["frame_translations"].clone()
-        dihedrals = true_feature_dict["dihedrals"].clone()
+        redesign_mask = true_feature_dict["redesign_mask"]
+        res_type_prob = true_feature_dict["res_type_prob"]
+        frame_rotations = true_feature_dict["frame_rotations"]
+        frame_translations = true_feature_dict["frame_translations"]
+        dihedrals = true_feature_dict["dihedrals"]
 
         if "sequence" in self.design_mode:
             noised_res_type_prob = self._sequence_flow.interpolate_path(
@@ -250,14 +250,11 @@ class DenoisingModule(nn.Module):
             vf_dict["sequence_vf"] = sequence_vf
 
         if "backbone" in self.design_mode:
-            if "frame_rotations_update" in unnoised_feature_dict:
-                rotation_vf = unnoised_feature_dict["frame_rotations_update"]
-            else:
-                rotation_vf = self._rotation_flow.get_cond_vfs(
-                    noise_feature_dict["frame_rotations"],
-                    unnoised_feature_dict["frame_rotations"],
-                    noise_feature_dict["time"],
-                )
+            rotation_vf = self._rotation_flow.get_cond_vfs(
+                noise_feature_dict["frame_rotations"],
+                unnoised_feature_dict["frame_rotations"],
+                noise_feature_dict["time"],
+            )
             translation_vf = self._translation_flow.get_cond_vfs(
                 noise_feature_dict["frame_translations"],
                 unnoised_feature_dict["frame_translations"],
@@ -282,12 +279,12 @@ class DenoisingModule(nn.Module):
         pred_vf_dict: dict[str, torch.Tensor],
         d_t: float,
     ):
-        redesign_mask = noised_feature_dict["redesign_mask"].clone()
-        res_type_prob = noised_feature_dict["res_type_prob"].clone()
-        frame_rotations = noised_feature_dict["frame_rotations"].clone()
-        frame_translations = noised_feature_dict["frame_translations"].clone()
-        dihedrals = noised_feature_dict["dihedrals"].clone()
-        time = noised_feature_dict["time"].clone()
+        redesign_mask = noised_feature_dict["redesign_mask"]
+        res_type_prob = noised_feature_dict["res_type_prob"]
+        frame_rotations = noised_feature_dict["frame_rotations"]
+        frame_translations = noised_feature_dict["frame_translations"]
+        dihedrals = noised_feature_dict["dihedrals"]
+        time = noised_feature_dict["time"]
         time = time + d_t
 
         if "sequence" in self.design_mode:
@@ -346,6 +343,7 @@ class DenoisingModule(nn.Module):
         frame_rotations = rotvecs_mul(
             noised_feature_dict["frame_rotations"], frame_rotations_update
         )
+
         # transform the invariant translation outputs to equivalent translation vector fields
         frame_translations_update = r_i.get_rots().apply(frame_translations_update)
         frame_translations_update = frame_translations_update * NM_TO_ANG_SCALE
@@ -363,7 +361,6 @@ class DenoisingModule(nn.Module):
         return {
             "res_type_prob": res_type_prob,
             "frame_rotations": frame_rotations,
-            "frame_rotations_update": frame_rotations_update,
             "frame_translations": frame_translations,
             "dihedrals": dihedrals,
         }
@@ -443,22 +440,11 @@ class DenoisingModule(nn.Module):
             z_trunk_ij,
         )
         pred_feature_dict = self._predict(noised_feature_dict, s_i, r_i)
+
         pred_vf_dict = self._get_vector_fields(noised_feature_dict, pred_feature_dict)
         true_vf_dict = self._get_vector_fields(noised_feature_dict, true_feature_dict)
         pred_loss_update.update(pred_vf_dict)
         true_loss_update.update(true_vf_dict)
-        pred_data_update = self._reconstruct(true_data_dict, pred_feature_dict)
-        pred_data_dict.update(pred_data_update)
-        pred_loss_update.update(
-            {
-                "pos_heavyatom": pred_data_dict["pos_heavyatom"],
-            }
-        )
-        true_loss_update.update(
-            {
-                "pos_heavyatom": true_data_dict["pos_heavyatom"],
-            }
-        )
 
         return pred_loss_update, true_loss_update
 
