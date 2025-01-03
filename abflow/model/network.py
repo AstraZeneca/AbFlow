@@ -152,7 +152,7 @@ class FlowPrediction(nn.Module):
         # condition module with recycling
         s_inputs_i, z_inputs_ij, s_i, z_ij = self.condition_module(true_data_dict)
 
-        # denoising module full  with multi-step self-conditioning
+        # denoising module full with multi-step self-conditioning
         pred_data_dict = self.denoising_module.rollout(
             true_data_dict,
             s_inputs_i,

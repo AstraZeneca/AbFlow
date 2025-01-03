@@ -65,7 +65,7 @@ class AbFlow(LightningModule):
         for key, value in loss_dict.items():
             self.log(
                 f"train/{key}",
-                value.mean().item(),
+                value.mean(),
                 on_step=True,
                 on_epoch=True,
                 prog_bar=False,
@@ -90,7 +90,7 @@ class AbFlow(LightningModule):
         for key, value in loss_dict.items():
             self.log(
                 f"val/{key}",
-                value.mean().item(),
+                value.mean(),
                 on_step=False,
                 on_epoch=True,
                 prog_bar=False,
@@ -102,7 +102,7 @@ class AbFlow(LightningModule):
         for key, value in metrics_dict.items():
             self.log(
                 f"val/{key}",
-                value.mean().item(),
+                value.mean(),
                 on_step=False,
                 on_epoch=True,
                 prog_bar=False,
@@ -125,7 +125,7 @@ class AbFlow(LightningModule):
         for key, value in loss_dict.items():
             self.log(
                 f"test/{key}",
-                value.mean().item(),
+                value.mean(),
                 on_step=False,
                 on_epoch=True,
                 prog_bar=False,
@@ -137,7 +137,7 @@ class AbFlow(LightningModule):
         for key, value in metrics_dict.items():
             self.log(
                 f"test/{key}",
-                value.mean().item(),
+                value.mean(),
                 on_step=False,
                 on_epoch=True,
                 prog_bar=False,

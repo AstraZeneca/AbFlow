@@ -235,7 +235,6 @@ class AntibodyAntigenDataModule(LightningDataModule):
         Combines a list of dictionaries into a single dictionary with an additional batch dimension.
         """
 
-        # NEED TO IMPLEMENT THIS FUNCTION
         for data in data_dict:
             data.update(get_redesign_mask(data, self._redesign))
             data.update(crop_data(data, self._crop))

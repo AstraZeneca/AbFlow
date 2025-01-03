@@ -50,8 +50,14 @@ from abflow.constants import (
     restype_to_heavyatom_names,
 )
 
-from pdbfixer import PDBFixer
-from openmm.app import PDBFile
+from abflow.nn.modules.features import (
+    OneHotEmbedding,
+    DihedralEmbedding,
+    CBDistogramEmbedding,
+    CAUnitVectorEmbedding,
+    RelativePositionEncoding,
+)
+from abflow.structure import get_frames_and_dihedrals
 
 
 def fill_missing_atoms(input_pdb: str):
@@ -296,6 +302,55 @@ def process_lmdb_chain(data: dict) -> dict:
         "antibody_mask": antibody_mask,
         "antigen_mask": antigen_mask,
     }
+
+
+def add_features(data: Dict[str, torch.Tensor]):
+    """
+    Add additional preprocessed features to the processed data dictionary for input to AbFlow.
+    """
+    res_type_ont_hot_enc = OneHotEmbedding(20)
+    chain_type_one_hot_enc = OneHotEmbedding(5)
+    dihedral_trigometry_enc = DihedralEmbedding()
+    cb_distogram_enc = CBDistogramEmbedding(num_bins=40, min_dist=3.25, max_dist=50.75)
+    ca_unit_vector_enc = CAUnitVectorEmbedding()
+    rel_pos_enc = RelativePositionEncoding(rmax=32)
+
+    res_type_one_hot = res_type_ont_hot_enc(data["res_type"])
+    chain_type_one_hot = chain_type_one_hot_enc(data["chain_type"])
+    frame_rotations, frame_translations, dihedrals = get_frames_and_dihedrals(
+        data["pos_heavyatom"][None, ...], data["res_type"][None, ...]
+    )
+    frame_rotations = frame_rotations.squeeze(0)
+    frame_translations = frame_translations.squeeze(0)
+    dihedrals = dihedrals.squeeze(0)
+    dihedrals[torch.isnan(dihedrals)] = 0.0  # Replace NaN values with 0.0
+    dihedral_trigometry = dihedral_trigometry_enc(dihedrals)
+
+    modified_pos_heavyatom = data["pos_heavyatom"].clone()
+    glycine_mask = data["res_type"] == 5  # Assuming glycine is encoded as 5
+    modified_pos_heavyatom[:, 4, :] = torch.where(
+        glycine_mask.unsqueeze(-1),  # Broadcast mask to coordinate dimensions
+        data["pos_heavyatom"][:, 1, :],  # Use CA coordinates for glycine
+        data["pos_heavyatom"][:, 4, :],  # Retain original CB coordinates for others
+    )
+    cb_distogram = cb_distogram_enc(modified_pos_heavyatom[:, 4, :])
+    ca_unit_vectors = ca_unit_vector_enc(
+        data["pos_heavyatom"][:, 1, :], frame_rotations
+    )
+    rel_positions = rel_pos_enc(data["res_index"], data["chain_id"])
+
+    data["res_type_one_hot"] = res_type_one_hot
+    data["chain_type_one_hot"] = chain_type_one_hot
+    data["frame_rotations"] = frame_rotations
+    data["frame_translations"] = frame_translations
+    data["dihedrals"] = dihedrals
+    data["dihedral_trigometry"] = dihedral_trigometry
+
+    data["cb_distogram"] = cb_distogram
+    data["ca_unit_vectors"] = ca_unit_vectors
+    data["rel_positions"] = rel_positions
+
+    return data
 
 
 def output_to_pdb(data: Dict[str, torch.Tensor], path: str):

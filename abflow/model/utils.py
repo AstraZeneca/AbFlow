@@ -78,7 +78,6 @@ def crop_complex(
     :param pos_heavyatom: A tensor of shape (N_res, 15, 3) containing the position of the heavy atoms for each residue.
     :param max_crop_size: Maximum number of residues to be marked as True in the crop mask.
     :param antigen_crop_size: Number of antigen residues to be marked as True in the crop mask.
-
     :return: A tensor of shape (N_res,) representing the crop mask with selected residues marked as True.
     """
 
@@ -173,7 +172,6 @@ def crop_data(data: dict, crop_config: dict) -> dict:
     Crop the data dict based on the crop mask.
 
     :param data: Dictionary with value each of shape (N_res, ...).
-
     :return: Dictionary containing the cropped data.
     """
 
@@ -195,20 +193,26 @@ def center_complex(
     pos_heavyatom: torch.Tensor, redesign_mask: torch.Tensor
 ) -> torch.Tensor:
     """
-    Center the complex by the centroid of CA coordinates of redesigned residues.
+    Center the complex by the centroid of CA coordinates of non-redesigned residues.
+    If all residues are being redesigned, center by the centroid of the entire complex.
 
     :param pos_heavyatom: A tensor of shape (N_res, 15, 3) containing the position of the heavy atoms for each residue.
     :param redesign_mask: A tensor of shape (N_res,) indicating which residues to redesign (True) and which to fix (False).
-
     :return: A tensor of shape (N_res, 15, 3) containing the position of the heavy atoms for each residue after centering.
     """
-    pos_redesign = pos_heavyatom[redesign_mask]
-    pos_redesign_ca = pos_redesign[:, 1]
-    centroid = pos_redesign_ca.mean(dim=0)
+    non_redesign_mask = ~redesign_mask
+
+    if non_redesign_mask.any():
+        pos_non_redesign = pos_heavyatom[non_redesign_mask]
+        pos_non_redesign_ca = pos_non_redesign[:, 1]
+        centroid = pos_non_redesign_ca.mean(dim=0)
+    else:
+        pos_ca = pos_heavyatom[:, 1]
+        centroid = pos_ca.mean(dim=0)
+
     centered_pos_heavyatom = pos_heavyatom - centroid[None, None, :]
-    return {
-        "pos_heavyatom": centered_pos_heavyatom,
-    }
+
+    return {"pos_heavyatom": centered_pos_heavyatom}
 
 
 def pad_data(data: dict, max_res: int) -> dict:
@@ -217,7 +221,6 @@ def pad_data(data: dict, max_res: int) -> dict:
 
     :param data: Dictionary with value each of shape (N_res, ...).
     :param max_res: Maximum number of residues.
-
     :return: Dictionary containing the padded data. One additional key is added "valid_mask" which
     is a tensor of shape (max_res,) indicating which residues are valid (True) and which are padded (False).
     """

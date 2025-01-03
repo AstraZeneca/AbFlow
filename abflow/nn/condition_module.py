@@ -3,7 +3,6 @@ AbFlow condition module.
 """
 
 import torch
-import copy
 import torch.nn as nn
 
 from .modules.pairformer import PairformerStack
@@ -39,14 +38,14 @@ class ConditionModule(nn.Module):
         self.n_cycle = n_cycle
         self.design_mode = design_mode
 
-        self.res_type_ont_hot = OneHotEmbedding(22)
-        self.chain_type_one_hot = OneHotEmbedding(5)
-        self.dihedral_trig = DihedralEmbedding()
-        self.cb_distogram = CBDistogramEmbedding(
-            num_bins=40, min_dist=3.25, max_dist=50.75
-        )
-        self.ca_unit_vector = CAUnitVectorEmbedding()
-        self.rel_pos_enc = RelativePositionEncoding(rmax=32)
+        # self.res_type_ont_hot = OneHotEmbedding(22)
+        # self.chain_type_one_hot = OneHotEmbedding(5)
+        # self.dihedral_trig = DihedralEmbedding()
+        # self.cb_distogram = CBDistogramEmbedding(
+        #     num_bins=40, min_dist=3.25, max_dist=50.75
+        # )
+        # self.ca_unit_vector = CAUnitVectorEmbedding()
+        # self.rel_pos_enc = RelativePositionEncoding(rmax=32)
 
         self.linear_no_bias_s = nn.Linear(22 + 5 + 10, c_s, bias=False)
         self.linear_no_bias_z = nn.Linear(40 + 3 + 2 * 32 + 1, c_z, bias=False)
@@ -64,89 +63,51 @@ class ConditionModule(nn.Module):
             n_block=n_block,
         )
 
-    def _mask(self, data_dict: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-        """
-        Mask the redesigned regions.
-        """
-        # mask sequence with a PAD token
-        data_dict["res_type"] = mask_data(
-            data_dict["res_type"], PAD_TOKEN, ~data_dict["valid_mask"]
-        )
-
-        # mask sequence with a MASK token
-        if "sequence" in self.design_mode:
-            data_dict["res_type"] = mask_data(
-                data_dict["res_type"], MASK_TOKEN, data_dict["redesign_mask"]
-            )
-
-        # mask backbone coordinates with 0.0
-        if "backbone" in self.design_mode:
-            data_dict["pos_heavyatom"][:, :, :4, :] = mask_data(
-                data_dict["pos_heavyatom"][:, :, :4, :],
-                0.0,
-                data_dict["redesign_mask"],
-            )
-
-        # mask sidechain coordinates with 0.0
-        if "sidechain" in self.design_mode:
-            data_dict["pos_heavyatom"][:, :, 4:, :] = mask_data(
-                data_dict["pos_heavyatom"][:, :, 4:, :],
-                0.0,
-                data_dict["redesign_mask"],
-            )
-
-        return data_dict
-
     def _embed(
         self, data_dict: dict[str, torch.Tensor]
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
-        Embeds input data to node and edge embeddings.
-        The relative max position is defaulted to 32.
+        Mask and embeds input data to node and edge embeddings.
         """
 
-        # res type to one-hot
-        res_type_one_hot = self.res_type_ont_hot(data_dict["res_type"])
-        # chain type to one-hot
-        chain_type_one_hot = self.chain_type_one_hot(data_dict["chain_type"])
-        # pos heavyatom to frames and dihedrals
-        ## set indices in data_dict["res_type"] to glycine if the index is not in standard amino acids
-        non_standard_aa_mask = data_dict["res_type"] > 19
-        modified_res_type = mask_data(data_dict["res_type"], 5, non_standard_aa_mask)
-        frame_rotations, frame_translations, dihedrals = get_frames_and_dihedrals(
-            data_dict["pos_heavyatom"], modified_res_type
-        )
-        # mask the dihedrals - psi where it is nan (for glycine) with 0.0
-        is_nan = torch.isnan(dihedrals)
-        dihedrals = torch.where(is_nan, torch.zeros_like(dihedrals), dihedrals)
-        # dihedrals to cosine and sine
-        dihedral_trig = self.dihedral_trig(dihedrals)
+        res_type_one_hot = data_dict["res_type_one_hot"]
+        chain_type_one_hot = data_dict["chain_type_one_hot"]
+        dihedral_trigometry = data_dict["dihedral_trigometry"]
+        cb_distogram = data_dict["cb_distogram"]
+        ca_unit_vectors = data_dict["ca_unit_vectors"]
+        rel_positions = data_dict["rel_positions"]
 
-        # pos heavyatom to CB distogram
-        ## set cb coordinates of glycine to the same as ca
-        modified_pos_heavyatom = data_dict["pos_heavyatom"].clone()
-        glycine_mask = data_dict["res_type"] == 5  # Assuming glycine is encoded as 5
-        modified_pos_heavyatom[:, :, 4, :] = torch.where(
-            glycine_mask.unsqueeze(-1),  # Broadcast mask to coordinate dimensions
-            data_dict["pos_heavyatom"][:, :, 1, :],  # Use CA coordinates for glycine
-            data_dict["pos_heavyatom"][
-                :, :, 4, :
-            ],  # Retain original CB coordinates for others
-        )
-        CB_distogram = self.cb_distogram(modified_pos_heavyatom[:, :, 4, :])
-        # pos heavyatom to CA_unit_vectors
-        ca_unit_vectors = self.ca_unit_vector(
-            data_dict["pos_heavyatom"][:, :, 1, :], frame_rotations
-        )
-        # res index + chain id to relative position encoding
-        a_rel_pol_ij = self.rel_pos_enc(data_dict["res_index"], data_dict["chain_id"])
+        # mask redesigned regions
+        if "sequence" in self.design_mode:
+            res_type_one_hot = mask_data(
+                res_type_one_hot, 0.0, data_dict["redesign_mask"]
+            )
+
+        if "backbone" in self.design_mode:
+            cb_distogram = mask_data(
+                cb_distogram, 0.0, data_dict["redesign_mask"][:, None, :]
+            )
+            cb_distogram = mask_data(
+                cb_distogram, 0.0, data_dict["redesign_mask"][:, :, None]
+            )
+            ca_unit_vectors = mask_data(
+                ca_unit_vectors, 0.0, data_dict["redesign_mask"][:, None, :]
+            )
+            ca_unit_vectors = mask_data(
+                ca_unit_vectors, 0.0, data_dict["redesign_mask"][:, :, None]
+            )
+
+        if "sidechain" in self.design_mode:
+            dihedral_trigometry = mask_data(
+                dihedral_trigometry, 0.0, data_dict["redesign_mask"]
+            )
 
         # concatenate the per node features
         s_i = torch.cat(
             [
                 res_type_one_hot,
                 chain_type_one_hot,
-                dihedral_trig,
+                dihedral_trigometry,
             ],
             dim=-1,
         )
@@ -154,9 +115,9 @@ class ConditionModule(nn.Module):
         # concatenate the per edge features
         z_ij = torch.cat(
             [
-                CB_distogram,
+                cb_distogram,
                 ca_unit_vectors,
-                a_rel_pol_ij,
+                rel_positions,
             ],
             dim=-1,
         )
@@ -171,8 +132,6 @@ class ConditionModule(nn.Module):
         """
         Forward pass with recycling.
         """
-        data_dict = copy.deepcopy(data_dict)
-        data_dict = self._mask(data_dict)
         s_inputs_i, z_inputs_ij = self._embed(data_dict)
         s_init_i = s_inputs_i.clone()
         z_init_ij = z_inputs_ij.clone() + torch.einsum(

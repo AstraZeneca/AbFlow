@@ -49,7 +49,8 @@ class DenoisingModule(nn.Module):
         self.self_condition_rate = self_condition_rate
         self.self_condition_steps = self_condition_steps
 
-        self.res_type_prob = OneHotEmbedding(20, label_smoothing=label_smoothing)
+        # self.res_type_prob = OneHotEmbedding(20, label_smoothing=label_smoothing)
+
         self.linear_no_bias_s = nn.Linear(20 + 5 + 1, c_s, bias=False)
         self.output_proj = nn.Linear(c_s, 20 + 3 + 3 + 5, bias=False)
 
@@ -95,22 +96,12 @@ class DenoisingModule(nn.Module):
 
     def _add_features(self, data_dict: dict[str, torch.Tensor]):
 
-        res_type_prob = self.res_type_prob(data_dict["res_type"])
-        frame_rotations, frame_translations, dihedrals = get_frames_and_dihedrals(
-            data_dict["pos_heavyatom"], data_dict["res_type"]
-        )
-        frame_rotations = rotmat_to_rotvec(frame_rotations)
-        # mask the dihedrals - psi where it is nan (for glycine) with 0.0
-        is_nan = torch.isnan(dihedrals)
-        dihedrals = torch.where(is_nan, torch.zeros_like(dihedrals), dihedrals)
-        redesign_mask = data_dict["redesign_mask"]
-
         return {
-            "res_type_prob": res_type_prob,
-            "frame_rotations": frame_rotations,
-            "frame_translations": frame_translations,
-            "dihedrals": dihedrals,
-            "redesign_mask": redesign_mask,
+            "res_type_prob": data_dict["res_type_one_hot"],
+            "frame_rotations": data_dict["frame_rotations"],
+            "frame_translations": data_dict["frame_translations"],
+            "dihedrals": data_dict["dihedrals"],
+            "redesign_mask": data_dict["redesign_mask"],
         }
 
     def _init_features(self, true_feature_dict: dict[str, torch.Tensor]):
@@ -419,8 +410,6 @@ class DenoisingModule(nn.Module):
         """
         pred_loss_update = {}
         true_loss_update = {}
-        pred_data_dict = copy.deepcopy(true_data_dict)
-        true_data_dict = copy.deepcopy(true_data_dict)
 
         true_feature_dict = self._add_features(true_data_dict)
         num_batch = true_data_dict["res_type"].shape[0]
@@ -462,7 +451,6 @@ class DenoisingModule(nn.Module):
         Rollout the denoising module.
         """
         pred_data_dict = copy.deepcopy(true_data_dict)
-        true_data_dict = copy.deepcopy(true_data_dict)
 
         true_feature_dict = self._add_features(true_data_dict)
         noised_feature_dict = self._init_features(true_feature_dict)

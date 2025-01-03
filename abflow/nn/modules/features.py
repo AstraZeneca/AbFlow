@@ -94,12 +94,10 @@ class BinnedOneHotEmbedding(nn.Module):
         :return: One-hot encoded tensor where each value is binned according to self.v_bins.
         """
 
-        v_bins = self.v_bins.to(data.device)
+        bin_indices = torch.bucketize(data, self.v_bins) - 1
+        bin_indices[torch.isclose(data, self.v_bins[0])] = 0
 
-        bin_indices = torch.bucketize(data, v_bins) - 1
-        bin_indices[torch.isclose(data, v_bins[0])] = 0
-
-        p = torch.zeros((*data.size(), len(v_bins) - 1), device=data.device)
+        p = torch.zeros((*data.size(), len(self.v_bins) - 1), device=data.device)
         while len(bin_indices.shape) < len(p.shape):
             bin_indices = bin_indices.unsqueeze(-1)
         p.scatter_(dim=-1, index=bin_indices, value=1.0)
@@ -192,11 +190,11 @@ class RelativePositionEncoding(nn.Module):
         :return: a_rel_pol_ij: One-hot encoded relative position tensor of shape (..., N_res, N_res, 2 * rmax + 1).
         """
 
-        b_same_chain_ij = torch.eq(chain_id[:, :, None], chain_id[:, None, :])
+        b_same_chain_ij = torch.eq(chain_id[..., :, None], chain_id[..., None, :])
         d_res_ij = torch.where(
             b_same_chain_ij,
             torch.clamp(
-                res_index[:, :, None] - res_index[:, None, :] + self.rmax,
+                res_index[..., :, None] - res_index[..., None, :] + self.rmax,
                 0,
                 2 * self.rmax,
             ),

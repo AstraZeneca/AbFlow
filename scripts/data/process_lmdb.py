@@ -13,9 +13,10 @@ import lmdb
 import pickle
 import os
 import argparse
+import sys
 
 from tqdm import tqdm
-from abflow.data.process_pdb import process_lmdb_chain
+from abflow.data.process_pdb import process_lmdb_chain, add_features
 
 
 def process_lmdb(data_folder: str):
@@ -60,6 +61,9 @@ def process_lmdb(data_folder: str):
 
             # Process the data
             processed_data = process_lmdb_chain(data)
+
+            # add preprocessed features
+            processed_data = add_features(processed_data)
 
             # Serialize and store in the new LMDB
             processed_data = pickle.dumps(processed_data)
