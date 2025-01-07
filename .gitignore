@@ -10,7 +10,7 @@ __pycache__/
 # ignore all files ending with .job
 *.job
 
-# cloned packages
+# Ignore all unuseful files
 benchmarks/diffab/
 8gpu_cluster.yaml
 nohup.out
@@ -21,3 +21,7 @@ scripts/design/
 scripts/analysis/
 scripts/circe/
 scripts/hpc/
+
+notebooks/
+evaluation/
+pymol/
