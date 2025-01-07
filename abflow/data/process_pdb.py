@@ -326,7 +326,6 @@ def add_features(data: Dict[str, torch.Tensor]):
     frame_rotations, frame_translations, dihedrals = get_frames_and_dihedrals(
         data["pos_heavyatom"][None, ...], data["res_type"][None, ...]
     )
-    frame_rotations = rotmat_to_rotvec(frame_rotations)
     frame_rotations = frame_rotations.squeeze(0)
     frame_translations = frame_translations.squeeze(0)
     dihedrals = dihedrals.squeeze(0)
@@ -348,7 +347,7 @@ def add_features(data: Dict[str, torch.Tensor]):
 
     feature_dict["res_type_one_hot"] = res_type_one_hot
     feature_dict["chain_type_one_hot"] = chain_type_one_hot
-    feature_dict["frame_rotations"] = frame_rotations
+    feature_dict["frame_rotations"] = rotmat_to_rotvec(frame_rotations)
     feature_dict["frame_translations"] = frame_translations
     feature_dict["dihedrals"] = dihedrals
     feature_dict["dihedral_trigometry"] = dihedral_trigometry
