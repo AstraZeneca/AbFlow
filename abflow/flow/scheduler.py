@@ -24,13 +24,10 @@ class BaseSchedule(ABC):
         """
         Method to compute alpha_t, beta_t, and speed_t.
 
-        Args:
-            t: The time step as a tensor, clamped to avoid division by zero at t = 1.
-
-        Returns:
-            alpha_t: The interpolation coefficient for the prior x_0.
-            beta_t: The interpolation coefficient for the true x_1.
-            speed_t: The speed at time t, dictating the rate of change.
+        :param t: The time step as a tensor, clamped to avoid division by zero at t = 1.
+        :return: alpha_t, the interpolation coefficient for the prior x_0,
+                    beta_t, the interpolation coefficient for the true x_1,
+                    speed_t, the speed at time t, dictating the rate of change.
         """
         pass
 
@@ -68,13 +65,11 @@ def get_flow_schedule(
     """
     Factory method to return the appropriate schedule class based on type.
 
-    Args:
-        schedule_type: Type of the schedule ('linear').
-        schedule_params: A dictionary of parameters used for schedule initialization (if needed).
-
-    Returns:
-        An instance of a subclass of `BaseSchedule`.
+    :param schedule_type: Type of the schedule ('linear').
+    :param schedule_params: A dictionary of parameters used for schedule initialization (if needed).
+    :return: An instance of a subclass of `BaseSchedule`.
     """
+
     if schedule_type == "linear":
         return LinearSchedule()
 

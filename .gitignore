@@ -7,6 +7,9 @@ build/
 # Ignore all ending with __pycache__ directory
 __pycache__/
 
+# ignore all files ending with .job
+*.job
+
 # cloned packages
 benchmarks/diffab/
 8gpu_cluster.yaml

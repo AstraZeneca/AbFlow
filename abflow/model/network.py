@@ -30,9 +30,8 @@ class FlowPrediction(nn.Module):
         n_confidence_module_blocks: int = 4,
         mini_rollout_steps: int = 20,
         full_rollout_steps: int = 500,
-        self_condition_rate: float = 0.0,
-        self_condition_steps: int = 2,
         label_smoothing: float = 0.0,
+        network_params: dict = None,
     ):
         """
         Initialize the FlowPrediction network.
@@ -42,18 +41,16 @@ class FlowPrediction(nn.Module):
         :param c_z: The number of feature channels of edge embeddings.
         :param n_cycle: The number of cycles in the pairformer module.
         :param n_condition_module_blocks: The number of Pairformer blocks in condition module.
-        :param n_denoising_module_blocks: The number of Structure Module blocks (based on IPA).
+        :param n_denoising_module_blocks: The number of IPA blocks in denoising module.
         :param n_confidence_module_blocks: The number of Confidence Module blocks (based on Pairformer).
         :param mini_rollout_steps: The number of steps in the mini-rollout for confidence estimation.
         :param full_rollout_steps: The number of steps in the full-rollout for final structure prediction.
-        :param self_condition_rate: The rate of self-conditioning. If 0, no self-conditioning is applied.
-            If 0.5, self-conditioning is applied after time >= 0.5.
-        :param self_condition_steps: The number of multi-step self-conditioning features to keep.
         :param label_smoothing: A float in [0.0, 1.0]. Specifies the amount of smoothing for true category
             on probability simplex, where 0.0 means no smoothing. The targets become a
             mixture of the original ground truth and a uniform distribution as inspired by
             paper: Rethinking the Inception Architecture for Computer Vision.
             link: https://arxiv.org/abs/1512.00567. Default: 0.0.
+        :param network_params: A dictionary containing the neural network parameters.
         """
 
         super().__init__()
@@ -67,6 +64,7 @@ class FlowPrediction(nn.Module):
             n_block=n_condition_module_blocks,
             n_cycle=n_cycle,
             design_mode=design_mode,
+            network_params=network_params,
         )
         self.distogram_head = DistogramHead(c_z=c_z)
         self.denoising_module = DenoisingModule(
@@ -74,14 +72,14 @@ class FlowPrediction(nn.Module):
             c_z=c_z,
             n_block=n_denoising_module_blocks,
             design_mode=design_mode,
-            self_condition_rate=self_condition_rate,
-            self_condition_steps=self_condition_steps,
             label_smoothing=label_smoothing,
+            network_params=network_params,
         )
         self.confidence_module = ConfidenceModule(
             c_s=c_s,
             c_z=c_z,
             n_block=n_confidence_module_blocks,
+            network_params=network_params,
         )
 
     def get_loss_terms(
@@ -112,7 +110,7 @@ class FlowPrediction(nn.Module):
         )
         pred_loss_dict.update(pred_loss_update)
         true_loss_dict.update(true_loss_update)
-        # denoising module one forward pass with multi-step self-conditioning
+        # denoising module one forward pass
         pred_loss_update, true_loss_update = self.denoising_module.get_loss_terms(
             true_data_dict, s_inputs_i, z_inputs_ij, s_i, z_ij
         )
@@ -152,7 +150,7 @@ class FlowPrediction(nn.Module):
         # condition module with recycling
         s_inputs_i, z_inputs_ij, s_i, z_ij = self.condition_module(true_data_dict)
 
-        # denoising module full with multi-step self-conditioning
+        # denoising module full rollout
         pred_data_dict = self.denoising_module.rollout(
             true_data_dict,
             s_inputs_i,

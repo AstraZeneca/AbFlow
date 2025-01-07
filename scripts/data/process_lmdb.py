@@ -14,6 +14,7 @@ import pickle
 import os
 import argparse
 import sys
+import zlib
 
 from tqdm import tqdm
 from abflow.data.process_pdb import process_lmdb_chain, add_features
@@ -34,7 +35,7 @@ def process_lmdb(data_folder: str):
     with open(entries_path, "rb") as f:
         all_entries = pickle.load(f)
 
-    map_size = 250 * 1024**3
+    map_size = 100 * 1024**3
     source_db = lmdb.open(
         source_db_path,
         map_size=map_size,
@@ -47,27 +48,27 @@ def process_lmdb(data_folder: str):
     )
     output_db = lmdb.open(output_db_path, map_size=map_size, subdir=False)
 
-    with source_db.begin() as source_txn, output_db.begin(write=True) as output_txn:
+    with source_db.begin() as source_txn:
+        output_txn = output_db.begin(write=True)
         for entry in tqdm(all_entries, desc="Processing entries"):
-
-            # Load the structure data from the source LMDB using the entry ID
             if entry is None or "id" not in entry:
                 continue
             db_id = entry["id"]
             structure_data = source_txn.get(db_id.encode())
             if structure_data is None:
                 continue
-            data = pickle.loads(structure_data)
 
             # Process the data
+            data = pickle.loads(structure_data)
             processed_data = process_lmdb_chain(data)
+            processed_data.update(add_features(processed_data))
 
-            # add preprocessed features
-            processed_data = add_features(processed_data)
-
-            # Serialize and store in the new LMDB
+            # Serialize and store in LMDB
             processed_data = pickle.dumps(processed_data)
-            output_txn.put(db_id.encode(), processed_data)
+            compressed_data = zlib.compress(processed_data)
+            output_txn.put(db_id.encode(), compressed_data)
+
+        output_txn.commit()
 
     source_db.close()
     output_db.close()

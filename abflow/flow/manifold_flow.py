@@ -68,11 +68,9 @@ class ManifoldFlow(ABC):
         """
         Sample from the prior distribution.
 
-        Args:
-            size: The batch shape of the tensors to sample.
-
-        Returns:
-            x_0: The sampled point from the prior distribution.
+        :param size: The batch shape of the tensors to sample.
+        :param device: The device to put the sampled tensor on.
+        :return: The sampled point from the prior distribution.
         """
 
         return self._prior.sample(size, device)
@@ -82,12 +80,9 @@ class ManifoldFlow(ABC):
         Interpolate between prior x_0 and true x_1 on the manifold over the time
         interval [0, 1].
 
-        Args:
-            x_1: The ending point.
-            t: The interpolation time.
-
-        Returns:
-            x_t: The interpolated point.
+        :param x_1: The ending point.
+        :param t: The interpolation time.
+        :return: The interpolated point.
         """
         x_0 = self.prior_sample(x_1.size()[:-1], x_1.device)
         alpha_t, beta_t, _ = self._schedule(t)
@@ -102,13 +97,10 @@ class ManifoldFlow(ABC):
         Conditional vector fields (defined directly on manifold or on transformed space)
         at time t.
 
-        Args:
-            x_t: The current point on the manifold.
-            x_1: The ending point.
-            t: The interpolation time.
-
-        Returns:
-            v_t: The conditional vector field at time t.
+        :param x_t: The current point on the manifold.
+        :param x_1: The ending point.
+        :param t: The interpolation time.
+        :return: The conditional vector field at time t.
         """
         _, _, speed_t = self._schedule(t)
         v_t = speed_t * self.log_map(x_t, x_1)
@@ -128,13 +120,10 @@ class ManifoldFlow(ABC):
         Formula:
             x_t = exp_map(x_t, v_t * dt)
 
-        Args:
-            x_t: Current point on the manifold at time t.
-            v_t: Vector field at time t, which lies in the tangent space at x_t.
-            dt: Time step for the update.
-
-        Returns:
-            Updated point on the manifold after time step dt.
+        :param x_t: The current point on the manifold.
+        :param v_t: The vector field at time t.
+        :param dt: The time step for the update.
+        :return: The updated point on the manifold after time step dt.
         """
         x_updated = self.exp_map(x_t, v_t * dt)
         return x_updated
@@ -188,9 +177,8 @@ class OptimalTransportEuclideanFlow(EuclideanFlow):
         """
         Initialize the flow with a given schedule type.
 
-        Args:
-            dim: The data dimensionality.
-            schedule_type: The type of flow schedule to use (linear, exp_decay, inv_exp_growth).
+        :param dim: The data dimensionality.
+        :param schedule_type: The type of flow schedule to use (linear, exp_decay, inv_exp_growth).
         """
 
         super().__init__()

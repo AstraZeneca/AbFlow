@@ -8,13 +8,13 @@ from Bio.PDB.Polypeptide import protein_letters_3to1
 
 from .geometry import create_rotation_matrix
 
+# Chain and region mappings
 chain_id_to_index = {
     "antigen": 0,
     "heavy": 1,
     "light_kappa": 2,
     "light_lambda": 3,
 }
-
 antibody_chain_names = ["heavy", "light_kappa", "light_lambda"]
 antigen_chain_name = ["antigen"]
 antibody_index = [chain_id_to_index[chain] for chain in antibody_chain_names]
@@ -32,7 +32,7 @@ region_to_index = {
 }
 
 
-# stores indices under the 3-letter code of each AA
+# Stores indices under the 3-letter code of each AA
 class AminoAcid3(IntEnum):
     ALA = 0
     CYS = 1
@@ -62,7 +62,7 @@ PAD_TOKEN = 21
 
 AminoAcid3Index = {aa: index for index, aa in AminoAcid3.__members__.items()}
 
-# stores indices under the 1-letter code of each AA
+# Stores indices under the 1-letter code of each AA
 AminoAcid1 = IntEnum(
     "AminoAcid1",
     {protein_letters_3to1[aa]: index for aa, index in AminoAcid3.__members__.items()},

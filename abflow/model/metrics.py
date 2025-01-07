@@ -625,6 +625,29 @@ def average_plddt(p_plddt_i: torch.Tensor) -> torch.Tensor:
     return lddt_per_residue
 
 
+def get_likelihood(
+    pred_res_type_prob: torch.Tensor,
+    true_res_type: torch.Tensor,
+    masks: List[torch.Tensor] = None,
+) -> torch.Tensor:
+    """
+    Compute the average log-likelihood score of the true residue types for each batch.
+
+    :param pred_res_type_prob: Predicted residue type probabilities, shape (N_batch, N_res, N_res_type).
+    :param true_res_type: True residue type, shape (N_batch, N_res).
+    :param masks: List of masks to apply, each shape (N_batch, N_res).
+    :return: Average log-likelihood score for each batch, shape (N_batch,).
+    """
+    likelihood = torch.gather(
+        pred_res_type_prob, -1, true_res_type.unsqueeze(-1)
+    ).squeeze(-1)
+    log_likelihood = torch.log(likelihood)
+
+    average_log_likelihood = average_data(log_likelihood, masks=masks)
+
+    return average_log_likelihood
+
+
 class AbFlowMetrics(nn.Module):
     """
     This class takes in the antibody and antigen structures and computes the metrics for each data in a batch.
@@ -809,6 +832,14 @@ class AbFlowMetrics(nn.Module):
         )
 
         # get likelihoods
+        metrics["likelihood/redesign"] = get_likelihood(
+            pred_data_dict["res_type_prob"],
+            true_data_dict["res_type"],
+            masks=[
+                true_data_dict["redesign_mask"],
+                true_data_dict["valid_mask"],
+            ],
+        )
 
         # remove nans
         for key in metrics:

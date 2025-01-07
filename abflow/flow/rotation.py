@@ -58,11 +58,8 @@ def rotmat_inv(rotmat: torch.Tensor) -> torch.Tensor:
     Formula:
         R^(-1) = R^T s.t. R * R^T = I
 
-    Args:
-        rotmat: Input rotation matrix of shape [..., 3, 3].
-
-    Returns:
-        rotmat_inv: Inverted rotation matrix of shape [..., 3, 3].
+    :param rotmat: Input rotation matrix of shape [..., 3, 3].
+    :return: Inverted rotation matrix of shape [..., 3, 3].
     """
     rotmat_inv = rearrange(rotmat, "... i j -> ... j i")
     return rotmat_inv
@@ -75,11 +72,8 @@ def rotquat_inv(rotquat: torch.Tensor) -> torch.Tensor:
     Formula:
         q^(-1) = [r, -i, -j, -k]
 
-    Args:
-        rotquat: Input quaternion of shape [..., 4].
-
-    Returns:
-        rotquat_inv: Inverted quaternion of shape [..., 4].
+    :param rotquat: Input quaternion of shape [..., 4].
+    :return: Inverted quaternion of shape [..., 4].
     """
     rotquat_inv = rotquat.clone()
     rotquat_inv[..., 1:] = -rotquat_inv[..., 1:]
@@ -94,11 +88,8 @@ def rotvec_inv(rotvec: torch.Tensor) -> torch.Tensor:
     Formula:
         r^(-1) = -r
 
-    Args:
-        rotvec: Input rotation vector of shape [..., 3].
-
-    Returns:
-        rotvec_inv: Inverted rotation vector of shape [..., 3].
+    :param rotvec: Input rotation vector of shape [..., 3].
+    :return: Inverted rotation vector of shape [..., 3].
     """
     rotvec_inv = -rotvec
     return rotvec_inv
@@ -113,11 +104,9 @@ def rotmats_mul(rotmat1: torch.Tensor, rotmat2: torch.Tensor) -> torch.Tensor:
         R = R1 * R2
         [R]_ij = sum_k R1_ik * R2_kj
 
-    Args:
-        rotmat1: [..., 3, 3] left multiplicand
-        rotmat2: [..., 3, 3] right multiplicand
-    Returns:
-        rotmats: [..., 3, 3] product
+    :param rotmat1: First rotation matrix tensor of shape [..., 3, 3].
+    :param rotmat2: Second rotation matrix tensor of shape [..., 3, 3].
+    :return: Resultant rotation matrix tensor of shape [..., 3, 3].
     """
 
     def row_mul(i):
@@ -157,12 +146,9 @@ def rotvecs_mul(rotvec1: torch.Tensor, rotvec2: torch.Tensor) -> torch.Tensor:
     Rotation vectors represent rotations as an axis and an angle, but the composition
     (multiplication) of two rotations cannot be done directly in this representation.
 
-    Args:
-        rotvec1: First rotation vector tensor [..., 3].
-        rotvec2: Second rotation vector tensor [..., 3].
-
-    Returns:
-        rotvecs: Resultant rotation vector tensor [..., 3].
+    :param rotvec1: First rotation vector tensor of shape [..., 3].
+    :param rotvec2: Second rotation vector tensor of shape [..., 3].
+    :return: Resultant rotation vector tensor of shape [..., 3].
     """
 
     rotmat1 = rotvec_to_rotmat(rotvec1)
@@ -191,12 +177,9 @@ def rotquats_mul(rotquat1: torch.Tensor, rotquat2: torch.Tensor) -> torch.Tensor
     Formula:
         q = q1 * q2 = [r1 * r2 - dot(v1, v2), r1 * v2 + r2 * v1 + cross(v1, v2)]
 
-    Args:
-        rotquat1: First quaternion tensor [..., 4].
-        rotquat2: Second quaternion tensor [..., 4].
-
-    Returns:
-        rotquats: Resultant quaternion tensor [..., 4].
+    :param rotquat1: First quaternion tensor of shape [..., 4].
+    :param rotquat2: Second quaternion tensor of shape [..., 4].
+    :return: Resultant quaternion tensor of shape [..., 4].
     """
     r1, v1 = rotquat1[..., 0:1], rotquat1[..., 1:]
     r2, v2 = rotquat2[..., 0:1], rotquat2[..., 1:]
@@ -217,11 +200,9 @@ def rotmat_mul_vec(rotmat: torch.Tensor, vec: torch.Tensor) -> torch.Tensor:
         v' = R * v
         v'_i = sum_j R_ij * v_j
 
-    Args:
-        rotmat: [..., 3, 3] rotation matrices
-        vec: [..., 3] coordinate tensors
-    Returns:
-        rotated_vec: [..., 3] rotated coordinates
+    :param rotmat: Rotation matrix tensor of shape [..., 3, 3].
+    :param vec: Vector tensor of shape [..., 3].
+    :return: Rotated vector tensor of shape [..., 3].
     """
     x, y, z = torch.unbind(vec, dim=-1)
     rotated_vec = torch.stack(
@@ -257,12 +238,9 @@ def rotvec_mul_vec(
 
     For small angles < tol, the rotation vector is approximated as the identity.
 
-    Args:
-        rotvec: Rotation vector of shape [..., 3].
-        vec: Input vector to be rotated of shape [..., 3].
-
-    Returns:
-        rotated_vec: Rotated vector of shape [..., 3].
+    :param rotvec: Rotation vector of shape [..., 3].
+    :param vec: Input vector to be rotated of shape [..., 3].
+    :return: Rotated vector of shape [..., 3].
     """
 
     theta = torch.norm(rotvec, dim=-1, keepdim=True)
@@ -287,12 +265,9 @@ def rotquat_mul_vec(rotquat: torch.Tensor, vec: torch.Tensor) -> torch.Tensor:
     Rotate a vector using a quaternion by performing q * v * q^-1 as in:
     https://en.wikipedia.org/wiki/Quaternions_and_spatial_rotation#cite_note-8
 
-    Args:
-        rotquat: Rotation quaternion [..., 4].
-        vec: Vector to be rotated [..., 3].
-
-    Returns:
-        rotated_vec: Rotated vector [..., 3].
+    :param rotquat: Rotation quaternion of shape [..., 4].
+    :param vec: Vector to be rotated of shape [..., 3].
+    :return: Rotated vector of shape [..., 3].
     """
 
     vec_quat = torch.cat([torch.zeros_like(vec[..., :1]), vec], dim=-1)
@@ -399,10 +374,8 @@ def rotquat_to_rotmat(rotquat: torch.Tensor) -> torch.Tensor:
     """
     Converts a quaternion to a rotation matrix.
 
-    Args:
-        rotquat: [..., 4] quaternions
-    Returns:
-        rotmat: [..., 3, 3] rotation matrices
+    :param rotquat: [..., 4] quaternions
+    :return: [..., 3, 3] rotation matrices
     """
     # [*, 4, 4]
     rotquat = rotquat[..., None] * rotquat[..., None, :]
@@ -422,11 +395,8 @@ def _broadcast_identity(target: torch.Tensor) -> torch.Tensor:
     """
     Generate a 3 by 3 identity matrix and broadcast it to a batch of target matrices.
 
-    Args:
-        target (torch.Tensor): Batch of target 3 by 3 matrices.
-
-    Returns:
-        torch.Tensor: 3 by 3 identity matrices in the shapes of the target.
+    :param target: Batch of target 3 by 3 matrices.
+    :return: 3 by 3 identity matrices in the shapes of the target.
     """
     id3 = torch.eye(3, device=target.device, dtype=target.dtype)
     id3 = torch.broadcast_to(id3, target.shape)
@@ -442,11 +412,8 @@ def rotvec_to_skewmat(rotvec: torch.Tensor) -> torch.Tensor:
         [x,y,z] ->  [  z  0 -x]
                     [ -y  x  0]
 
-    Args:
-        rotvec: The rotations vector.
-
-    Returns:
-        skew_mat: The skew-symmetric matrix.
+    :param rotvec: Rotation vector tensor of shape [..., 3].
+    :return: Skew-symmetric matrix tensor of shape [..., 3, 3].
     """
 
     # Generate empty skew matrices.
@@ -489,12 +456,8 @@ def angle_from_rotmat(
     Compute rotation angles (as well as their sines and cosines) encoded by rotation matrices.
     Uses atan2 for better numerical stability for small angles.
 
-    Args:
-        rotation_matrices (torch.Tensor): Batch of rotation matrices.
-
-    Returns:
-        Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: Batch of computed angles, sines of the
-          angles and cosines of angles.
+    :param rotation_matrices: Batch of rotation matrices.
+    :return: Tuple of rotation angles, sines of angles, and cosines of angles.
     """
     # Compute sine of angles (uses the relation that the unnormalized skew vector generated by a
     # rotation matrix has the length 2*sin(theta))
@@ -528,12 +491,10 @@ def skewmat_exponential_map(
         sin(theta) / theta = 1 - theta^2 / 6
         (1 - cos(theta)) / theta^2 = 1 / 2 - theta^2 / 24
 
-    Args:
-        angles: Batch of rotation angles.
-        skew_matrices: Batch of rotation axes in skew matrix (lie so(3)) basis.
-
-    Returns:
-        exp_skew: Batch of corresponding rotation matrices.
+    :param angles: Batch of rotation angles.
+    :param skew_matrices: Batch of rotation axes in skew matrix (lie so(3)) basis.
+    :param tol: small offset for numerical stability.
+    :return: Batch of rotation matrices.
     """
     # Set up identity matrix and broadcast.
     id3 = _broadcast_identity(skew_matrices)
@@ -597,11 +558,8 @@ def rotmat_to_rotvec(rotmat: torch.Tensor) -> torch.Tensor:
     which was adapted from https://github.com/geomstats/geomstats/blob/master/geomstats/geometry/special_orthogonal.py
     with heavy help from https://cvg.cit.tum.de/_media/members/demmeln/nurlanov2021so3log.pdf
 
-    Args:
-        rotmat: Input batch of rotation matrices.
-
-    Returns:
-        rotvec: Batch of rotation vectors.
+    :param rotmat: Batch of rotation matrices.
+    :return: Batch of rotation vectors.
     """
     # Get angles and sin/cos from rotation matrix.
     angles, angles_sin, _ = angle_from_rotmat(rotmat)
@@ -664,12 +622,9 @@ def rotvec_to_rotmat(rotvec: torch.Tensor, tol: float = 1e-7) -> torch.Tensor:
     Convert rotation vectors to rotation matrix representation. The length of the rotation vector
     is the angle of rotation, the unit vector the rotation axis.
 
-    Args:
-        rotation_vectors (torch.Tensor): Batch of rotation vectors.
-        tol: small offset for numerical stability.
-
-    Returns:
-        torch.Tensor: Rotation in rotation matrix representation.
+    :param rotvec: Batch of rotation vectors.
+    :param tol: small offset for numerical stability.
+    :return: Batch of rotation matrices.
     """
     # Compute rotation angle as vector norm.
     rotation_angles = torch.norm(rotvec, dim=-1)
@@ -691,11 +646,8 @@ def rotquat_to_rotvec(rotquat: torch.Tensor) -> torch.Tensor:
         θ = 2 * arccos(r)
         v = (2 * θ) * (q_v / |q_v|)
 
-    Args:
-        rotquat: Quaternion of shape [..., 4] in [r, i, j, k] format.
-
-    Returns:
-        rotvec: Rotation vector (axis-angle) of shape [..., 3].
+    :param rotquat: Quaternion of shape [..., 4] in [r, i, j, k] format.
+    :return: Rotation vector of shape [..., 3].
     """
     r = rotquat[..., 0:1]
     v = rotquat[..., 1:]
@@ -715,11 +667,8 @@ def rotvec_to_rotquat(rotvec: torch.Tensor) -> torch.Tensor:
         θ = |v|
         q = [cos(θ / 2), sin(θ / 2) * v / θ]
 
-    Args:
-        rotvec: Rotation vector of shape [..., 3].
-
-    Returns:
-        rotquat: Quaternion of shape [..., 4] in [r, i, j, k] format.
+    :param rotvec: Rotation vector of shape [..., 3].
+    :return: Quaternion of shape [..., 4] in [r, i, j, k] format.
     """
 
     theta = torch.norm(rotvec, dim=-1, keepdim=True)

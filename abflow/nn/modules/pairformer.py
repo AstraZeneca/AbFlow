@@ -273,66 +273,28 @@ class TriangleAttentionEndingNode(nn.Module):
         return z_ij_updated
 
 
-class PairformerStack(nn.Module):
-    """
-    Algorithm 17: Pairformer Stack.
-    """
+class AdaLN(nn.Module):
+    """Algorithm 26: Adaptive LayerNorm"""
 
-    def __init__(
-        self,
-        c_s: int,
-        c_z: int,
-        n_block: int,
-    ):
+    def __init__(self, c_s: int):
 
         super().__init__()
 
-        self.n_block = n_block
-        self.dropout_rowwise = DropoutRowwise(p=0.25)
-        self.dropout_columnwise = DropoutColumnwise(p=0.25)
+        self.layer_norm_a = nn.LayerNorm(c_s, elementwise_affine=False)
+        self.layer_norm_s = nn.LayerNorm(c_s, elementwise_affine=True, bias=False)
 
-        self.trunk = nn.ModuleDict()
-        for b in range(n_block):
+        self.linear_s = nn.Linear(c_s, c_s)
+        self.linear_no_bias_s = nn.Linear(c_s, c_s, bias=False)
 
-            self.trunk[f"triangle_multiplication_outgoing_{b}"] = (
-                TriangleMultiplicationOutgoing(c_z, c_hidden=c_z)
-            )
-            self.trunk[f"triangle_multiplication_incoming_{b}"] = (
-                TriangleMultiplicationIncoming(c_z, c_hidden=c_z)
-            )
-            self.trunk[f"triangle_attention_starting_node_{b}"] = (
-                TriangleAttentionStartingNode(c_z, c_head=max(c_z // 4, 1), n_head=4)
-            )
-            self.trunk[f"triangle_attention_ending_node_{b}"] = (
-                TriangleAttentionEndingNode(c_z, c_head=max(c_z // 4, 1), n_head=4)
-            )
-            self.trunk[f"transition_z_{b}"] = Transition(c_z)
-            self.trunk[f"attention_pair_bias_{b}"] = AttentionPairBias(
-                c_s=c_s, c_z=c_z, c_head=max(c_s // 16, 1), n_head=16
-            )
-            self.trunk[f"transition_s_{b}"] = Transition(c_s)
+        self.sigmoid = nn.Sigmoid()
 
-    def forward(self, s_i: torch.Tensor, z_ij: torch.Tensor):
+    def forward(self, a: torch.Tensor, s: torch.Tensor) -> torch.Tensor:
 
-        for b in range(self.n_block):
+        a = self.layer_norm_a(a)
+        s = self.layer_norm_s(s)
+        a = self.sigmoid(self.linear_s(s)) * a + self.linear_no_bias_s(s)
 
-            # Pairformer stack
-            z_ij = z_ij + self.dropout_rowwise(
-                self.trunk[f"triangle_multiplication_outgoing_{b}"](z_ij)
-            )
-            z_ij = z_ij + self.dropout_rowwise(
-                self.trunk[f"triangle_multiplication_incoming_{b}"](z_ij)
-            )
-            z_ij = z_ij + self.dropout_rowwise(
-                self.trunk[f"triangle_attention_starting_node_{b}"](z_ij)
-            )
-            z_ij = z_ij + self.dropout_columnwise(
-                self.trunk[f"triangle_attention_ending_node_{b}"](z_ij)
-            )
-            s_i = s_i + self.trunk[f"attention_pair_bias_{b}"](s_i, None, z_ij)
-            s_i = s_i + self.trunk[f"transition_s_{b}"](s_i)
-
-        return s_i, z_ij
+        return a
 
 
 class AttentionPairBias(nn.Module):
@@ -411,25 +373,83 @@ class AttentionPairBias(nn.Module):
         return a_i
 
 
-class AdaLN(nn.Module):
-    """Algorithm 26: Adaptive LayerNorm"""
+class PairformerStack(nn.Module):
+    """
+    Algorithm 17: Pairformer Stack.
+    """
 
-    def __init__(self, c_s: int):
+    def __init__(
+        self,
+        c_s: int,
+        c_z: int,
+        n_block: int,
+        params: dict,
+    ):
 
         super().__init__()
 
-        self.layer_norm_a = nn.LayerNorm(c_s, elementwise_affine=False)
-        self.layer_norm_s = nn.LayerNorm(c_s, elementwise_affine=True, bias=False)
+        self.n_block = n_block
+        self.dropout_rowwise = DropoutRowwise(p=params["dropout_rowwise_probabilty"])
+        self.dropout_columnwise = DropoutColumnwise(
+            p=params["dropout_columnwise_probabilty"]
+        )
 
-        self.linear_s = nn.Linear(c_s, c_s)
-        self.linear_no_bias_s = nn.Linear(c_s, c_s, bias=False)
+        self.trunk = nn.ModuleDict()
+        for b in range(n_block):
 
-        self.sigmoid = nn.Sigmoid()
+            self.trunk[f"triangle_multiplication_outgoing_{b}"] = (
+                TriangleMultiplicationOutgoing(c_z, c_hidden=c_z)
+            )
+            self.trunk[f"triangle_multiplication_incoming_{b}"] = (
+                TriangleMultiplicationIncoming(c_z, c_hidden=c_z)
+            )
+            self.trunk[f"triangle_attention_starting_node_{b}"] = (
+                TriangleAttentionStartingNode(
+                    c_z,
+                    c_head=max(
+                        c_z // params["TriangleAttentionStartingNode"]["n_head"],
+                        1,
+                    ),
+                    n_head=params["TriangleAttentionStartingNode"]["n_head"],
+                )
+            )
+            self.trunk[f"triangle_attention_ending_node_{b}"] = (
+                TriangleAttentionEndingNode(
+                    c_z,
+                    c_head=max(
+                        c_z // params["TriangleAttentionEndingNode"]["n_head"],
+                        1,
+                    ),
+                    n_head=params["TriangleAttentionEndingNode"]["n_head"],
+                )
+            )
+            self.trunk[f"transition_z_{b}"] = Transition(c_z)
+            self.trunk[f"attention_pair_bias_{b}"] = AttentionPairBias(
+                c_s=c_s,
+                c_z=c_z,
+                c_head=max(c_s // params["AttentionPairBias"]["n_head"], 1),
+                n_head=params["AttentionPairBias"]["n_head"],
+            )
+            self.trunk[f"transition_s_{b}"] = Transition(c_s)
 
-    def forward(self, a: torch.Tensor, s: torch.Tensor) -> torch.Tensor:
+    def forward(self, s_i: torch.Tensor, z_ij: torch.Tensor):
 
-        a = self.layer_norm_a(a)
-        s = self.layer_norm_s(s)
-        a = self.sigmoid(self.linear_s(s)) * a + self.linear_no_bias_s(s)
+        for b in range(self.n_block):
 
-        return a
+            # Pairformer stack
+            z_ij = z_ij + self.dropout_rowwise(
+                self.trunk[f"triangle_multiplication_outgoing_{b}"](z_ij)
+            )
+            z_ij = z_ij + self.dropout_rowwise(
+                self.trunk[f"triangle_multiplication_incoming_{b}"](z_ij)
+            )
+            z_ij = z_ij + self.dropout_rowwise(
+                self.trunk[f"triangle_attention_starting_node_{b}"](z_ij)
+            )
+            z_ij = z_ij + self.dropout_columnwise(
+                self.trunk[f"triangle_attention_ending_node_{b}"](z_ij)
+            )
+            s_i = s_i + self.trunk[f"attention_pair_bias_{b}"](s_i, None, z_ij)
+            s_i = s_i + self.trunk[f"transition_s_{b}"](s_i)
+
+        return s_i, z_ij

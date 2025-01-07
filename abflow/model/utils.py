@@ -1,16 +1,5 @@
 import torch
-from ..constants import region_to_index
-
-
-def batch_dict(data_dict: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
-    """
-    Combine a list of dictionaries into a single dictionary with an additional batch dimension.
-    """
-    keys = data_dict[0].keys()
-    batched_dict = {
-        key: torch.stack([d[key] for d in data_dict], dim=0) for key in keys
-    }
-    return batched_dict
+from ..constants import region_to_index, PAD_TOKEN
 
 
 def concat_dicts(dicts: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
@@ -167,25 +156,28 @@ def crop_complex(
     return new_mask
 
 
-def crop_data(data: dict, crop_config: dict) -> dict:
+def crop_data(data: dict, max_crop_size: int, antigen_crop_size: int) -> dict:
     """
-    Crop the data dict based on the crop mask.
-
-    :param data: Dictionary with value each of shape (N_res, ...).
-    :return: Dictionary containing the cropped data.
+    Crop the data dict based on the crop mask, including special handling for pairwise features.
     """
-
     crop_mask = crop_complex(
         data["region_index"],
         data["redesign_mask"],
         data["pos_heavyatom"],
-        crop_config["max_crop_size"],
-        crop_config["antigen_crop_size"],
+        max_crop_size,
+        antigen_crop_size,
     )
+    crop_indices = crop_mask.nonzero(as_tuple=True)[0]
 
     cropped_data = {}
     for key, value in data.items():
-        cropped_data[key] = value[crop_mask]
+        if isinstance(value, torch.Tensor):
+            if value.ndim >= 2 and value.shape[0] == value.shape[1]:  # Pairwise feature
+                cropped_data[key] = value[crop_indices][:, crop_indices]
+            else:
+                cropped_data[key] = value[crop_mask]
+        else:
+            cropped_data[key] = value
     return cropped_data
 
 
@@ -217,33 +209,72 @@ def center_complex(
 
 def pad_data(data: dict, max_res: int) -> dict:
     """
-    Pad the data dict to a fixed length.
+    Pad the data dict to a fixed length with custom padding logic, including handling for pairwise features.
 
     :param data: Dictionary with value each of shape (N_res, ...).
     :param max_res: Maximum number of residues.
-    :return: Dictionary containing the padded data. One additional key is added "valid_mask" which
-    is a tensor of shape (max_res,) indicating which residues are valid (True) and which are padded (False).
+    :return: Dictionary containing the padded data with a "valid_mask".
     """
-
     padded_data = {}
     valid_length = data["res_type"].size(0)
+
     valid_mask = torch.cat(
         [
             torch.ones(valid_length, dtype=torch.bool),
             torch.zeros(max_res - valid_length, dtype=torch.bool),
         ]
     )
+    padded_data["valid_mask"] = valid_mask
+
     for key, value in data.items():
         if isinstance(value, torch.Tensor):
             padding = max_res - value.size(0)
             if padding > 0:
-                # default padding is 0
-                padded_value = torch.zeros(
-                    (padding,) + value.size()[1:], dtype=value.dtype
-                )
-                padded_data[key] = torch.cat([value, padded_value], dim=0)
+                if (
+                    value.ndim >= 2 and value.shape[0] == value.shape[1]
+                ):  # Pairwise feature
+                    # Pad both dimensions to (max_res, max_res, ...)
+                    pad_shape = (max_res, max_res) + value.shape[2:]
+                    padded_value = torch.zeros(pad_shape, dtype=value.dtype)
+                    padded_value[:valid_length, :valid_length] = value
+                elif key == "res_type":
+                    # Pad with PAD_TOKEN for "res_type"
+                    padded_value = torch.full((padding,), PAD_TOKEN, dtype=value.dtype)
+                elif key == "chain_type":
+                    # Pad with the last valid chain_type value
+                    last_valid = value[-1] if valid_length > 0 else 0
+                    padded_value = torch.full((padding,), last_valid, dtype=value.dtype)
+                elif key == "chain_id":
+                    # Pad with the last valid chain_id value
+                    last_valid = value[-1] if valid_length > 0 else 0
+                    padded_value = torch.full((padding,), last_valid, dtype=value.dtype)
+                elif key == "res_index":
+                    # Pad with increasing values starting from the last valid value
+                    last_valid = value[-1] if valid_length > 0 else 0
+                    padded_value = torch.arange(
+                        last_valid + 1, last_valid + 1 + padding, dtype=value.dtype
+                    )
+                elif key == "region_index":
+                    # Pad with "framework" index for "region_index"
+                    padded_value = torch.full(
+                        (padding,), region_to_index["framework"], dtype=value.dtype
+                    )
+                else:
+                    # Default padding for continuous values is 0.0
+                    padded_value = torch.zeros(
+                        (padding,) + value.size()[1:], dtype=value.dtype
+                    )
+                # Concatenate the original tensor with the padded values
+                if value.ndim >= 2 and value.shape[0] == value.shape[1]:
+                    # For pairwise features, padded_value is already set above
+                    padded_data[key] = padded_value
+                else:
+                    padded_data[key] = torch.cat([value, padded_value], dim=0)
             else:
+                # If no padding needed, keep the original value
                 padded_data[key] = value
+        else:
+            # Non-tensor data types are left unchanged
+            padded_data[key] = value
 
-    padded_data["valid_mask"] = valid_mask
     return padded_data

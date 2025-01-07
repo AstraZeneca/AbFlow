@@ -58,26 +58,24 @@ from abflow.nn.modules.features import (
     RelativePositionEncoding,
 )
 from abflow.structure import get_frames_and_dihedrals
+from abflow.flow.rotation import rotmat_to_rotvec
 
 
 def fill_missing_atoms(input_pdb: str):
     """
-    Use PDBFixer to fill in missing atoms in a PDB file, but do not add missing residues,
-    as linearization of the missing residues can lead to incorrect backbone frame construction.
-
-    :param input_pdb: Path to the input PDB file.
+    Use PDBFixer to fill in missing atoms in a PDB file, but do not add missing residues.
     """
 
     fixer = PDBFixer(filename=input_pdb)
 
-    fixer.findMissingResidues()  # Identify missing residues
-    fixer.missingResidues = {}  # Remove missing residues
-    fixer.findNonstandardResidues()  # Identify nonstandard residues
-    fixer.replaceNonstandardResidues()  # Replace nonstandard residues with standard ones
-    fixer.removeHeterogens(True)  # Remove heterogens but keep water
-    fixer.findMissingAtoms()  # Identify missing heavy atoms
-    fixer.addMissingAtoms()  # Add missing heavy atoms
-    fixer.addMissingHydrogens(7.0)  # Add hydrogens at pH 7.0 (adjust as needed)
+    fixer.findMissingResidues()
+    fixer.missingResidues = {}
+    fixer.findNonstandardResidues()
+    fixer.replaceNonstandardResidues()
+    fixer.removeHeterogens(True)
+    fixer.findMissingAtoms()
+    fixer.addMissingAtoms()
+    fixer.addMissingHydrogens(7.0)
 
     with open(input_pdb, "w") as f:
         PDBFile.writeFile(fixer.topology, fixer.positions, f, keepIds=True)
@@ -87,12 +85,9 @@ def fill_missing_atoms(input_pdb: str):
     )
 
 
-def extract_sequence_from_chain(chain) -> str:
+def extract_sequence_from_chain(chain: BiopythonChain) -> str:
     """
     Extract the amino acid sequence from a PDB chain.
-
-    :param chain: Biopython chain object.
-    :return: Amino acid sequence as a string.
     """
     sequence = []
     for residue in chain:
@@ -105,14 +100,11 @@ def extract_sequence_from_chain(chain) -> str:
     return "".join(sequence)
 
 
-def extract_chain_data(chain, data, chain_name, ab_chain=None):
+def extract_chain_data(
+    chain: BiopythonChain, data: dict, chain_name: str, ab_chain: AbnumberChain = None
+):
     """
     Extract relevant data for a single chain and assign CDR regions using AbNumber.
-
-    :param chain: Biopython chain object.
-    :param data: Dictionary to store extracted data.
-    :param chain_name: Name of the chain ('heavy' or 'light').
-    :param ab_chain: AbNumber Chain object for the sequence.
     """
 
     for residue in chain:
@@ -124,9 +116,9 @@ def extract_chain_data(chain, data, chain_name, ab_chain=None):
             continue
 
         res_position = residue.id[1]
-
         data[chain_name]["aa"].append(aa_index)
         data[chain_name]["res_nb"].append(res_position)
+
         atom_positions = [
             residue[atom].get_coord() if atom in residue else [0.0, 0.0, 0.0]
             for atom in restype_to_heavyatom_names[aa_index]
@@ -260,14 +252,26 @@ def process_lmdb_chain(data: dict) -> dict:
 
         if chain_data is not None:
             res_type_list.append(chain_data["aa"])
-            if chain_name == "light" and data["light_ctype"] == "K":
-                chain_type_list.append(
-                    torch.full_like(chain_data["aa"], chain_id_to_index["light_kappa"])
-                )
-            elif chain_name == "light" and data["light_ctype"] == "L":
-                chain_type_list.append(
-                    torch.full_like(chain_data["aa"], chain_id_to_index["light_lambda"])
-                )
+            if chain_name == "light":
+                if data["light_ctype"] == "K":
+                    chain_type_list.append(
+                        torch.full_like(
+                            chain_data["aa"], chain_id_to_index["light_kappa"]
+                        )
+                    )
+                elif data["light_ctype"] == "L":
+                    chain_type_list.append(
+                        torch.full_like(
+                            chain_data["aa"], chain_id_to_index["light_lambda"]
+                        )
+                    )
+                else:
+                    # Kappa is more common than lambda in humans (approximately 2:1), so make it a default option when not sure.
+                    chain_type_list.append(
+                        torch.full_like(
+                            chain_data["aa"], chain_id_to_index["light_kappa"]
+                        )
+                    )
             else:
                 chain_type_list.append(
                     torch.full_like(chain_data["aa"], chain_id_to_index[chain_name])
@@ -308,6 +312,9 @@ def add_features(data: Dict[str, torch.Tensor]):
     """
     Add additional preprocessed features to the processed data dictionary for input to AbFlow.
     """
+
+    feature_dict = {}
+
     res_type_ont_hot_enc = OneHotEmbedding(20)
     chain_type_one_hot_enc = OneHotEmbedding(5)
     dihedral_trigometry_enc = DihedralEmbedding()
@@ -320,6 +327,7 @@ def add_features(data: Dict[str, torch.Tensor]):
     frame_rotations, frame_translations, dihedrals = get_frames_and_dihedrals(
         data["pos_heavyatom"][None, ...], data["res_type"][None, ...]
     )
+    frame_rotations = rotmat_to_rotvec(frame_rotations)
     frame_rotations = frame_rotations.squeeze(0)
     frame_translations = frame_translations.squeeze(0)
     dihedrals = dihedrals.squeeze(0)
@@ -339,18 +347,18 @@ def add_features(data: Dict[str, torch.Tensor]):
     )
     rel_positions = rel_pos_enc(data["res_index"], data["chain_id"])
 
-    data["res_type_one_hot"] = res_type_one_hot
-    data["chain_type_one_hot"] = chain_type_one_hot
-    data["frame_rotations"] = frame_rotations
-    data["frame_translations"] = frame_translations
-    data["dihedrals"] = dihedrals
-    data["dihedral_trigometry"] = dihedral_trigometry
+    feature_dict["res_type_one_hot"] = res_type_one_hot
+    feature_dict["chain_type_one_hot"] = chain_type_one_hot
+    feature_dict["frame_rotations"] = frame_rotations
+    feature_dict["frame_translations"] = frame_translations
+    feature_dict["dihedrals"] = dihedrals
+    feature_dict["dihedral_trigometry"] = dihedral_trigometry
 
-    data["cb_distogram"] = cb_distogram
-    data["ca_unit_vectors"] = ca_unit_vectors
-    data["rel_positions"] = rel_positions
+    feature_dict["cb_distogram"] = cb_distogram
+    feature_dict["ca_unit_vectors"] = ca_unit_vectors
+    feature_dict["rel_positions"] = rel_positions
 
-    return data
+    return feature_dict
 
 
 def output_to_pdb(data: Dict[str, torch.Tensor], path: str):

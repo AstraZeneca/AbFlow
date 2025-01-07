@@ -4,14 +4,14 @@ import pickle
 import os
 import random
 import pandas as pd
+import zlib
 
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, default_collate
 from pytorch_lightning import LightningDataModule
 from itertools import chain
 
 from .utils import (
     rm_duplicates,
-    batch_dict,
     get_redesign_mask,
     crop_data,
     center_complex,
@@ -202,8 +202,9 @@ class AntibodyAntigenDataset(Dataset):
 
         # Load the structure (dictionary) using its ID
         with self.db_connection.begin() as txn:
-
-            return pickle.loads(txn.get(db_id.encode()))
+            compressed_data = txn.get(db_id.encode())
+            decompressed_data = zlib.decompress(compressed_data)
+            return pickle.loads(decompressed_data)
 
 
 class AntibodyAntigenDataModule(LightningDataModule):
@@ -215,7 +216,6 @@ class AntibodyAntigenDataModule(LightningDataModule):
         """
         super().__init__()
 
-        self.config = config
         self._train_dataset = AntibodyAntigenDataset(config["dataset"], split="train")
         self._val_dataset = AntibodyAntigenDataset(config["dataset"], split="val")
         self._test_dataset = AntibodyAntigenDataset(config["dataset"], split="test")
@@ -223,7 +223,8 @@ class AntibodyAntigenDataModule(LightningDataModule):
         self._num_workers = config["num_workers"]
         self._batch_size = config["batch_size"]
         self._redesign = config["redesign"]
-        self._crop = config["crop"]
+        self._max_crop_size = config["max_crop_size"]
+        self._antigen_crop_size = config["antigen_crop_size"]
 
     def __repr__(self):
         return f"{self.__class__.__name__}(batch_size={self._batch_size})"
@@ -237,12 +238,17 @@ class AntibodyAntigenDataModule(LightningDataModule):
 
         for data in data_dict:
             data.update(get_redesign_mask(data, self._redesign))
-            data.update(crop_data(data, self._crop))
+            data.update(
+                crop_data(
+                    data,
+                    max_crop_size=self._max_crop_size,
+                    antigen_crop_size=self._antigen_crop_size,
+                )
+            )
             data.update(center_complex(data["pos_heavyatom"], data["redesign_mask"]))
-            data.update(pad_data(data, self._crop["max_crop_size"]))
+            data.update(pad_data(data, self._max_crop_size))
 
-        # check default collate from torch.utils.data
-        data_dict = batch_dict(data_dict)
+        data_dict = default_collate(data_dict)
         return data_dict
 
     @property

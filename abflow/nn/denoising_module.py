@@ -7,9 +7,9 @@ import copy
 import torch.nn as nn
 
 from .modules.ipa import IPAStack
-from .modules.features import OneHotEmbedding
+from .modules.features import apply_label_smoothing
 
-from ..structure import get_frames_and_dihedrals, full_atom_reconstruction
+from ..structure import full_atom_reconstruction
 from ..rigid import Rigid
 
 from ..flow.manifold_flow import (
@@ -38,18 +38,16 @@ class DenoisingModule(nn.Module):
         c_z: int,
         n_block: int,
         design_mode: list[str],
-        self_condition_rate: float,
-        self_condition_steps: int,
         label_smoothing: float,
+        network_params: dict = None,
     ):
         super().__init__()
 
-        self.ipa_stack = IPAStack(c_s, c_z, n_block)
+        self.ipa_stack = IPAStack(
+            c_s, c_z, n_block, params=network_params["InvariantPointAttention"]
+        )
         self.design_mode = design_mode
-        self.self_condition_rate = self_condition_rate
-        self.self_condition_steps = self_condition_steps
-
-        # self.res_type_prob = OneHotEmbedding(20, label_smoothing=label_smoothing)
+        self.label_smoothing = label_smoothing
 
         self.linear_no_bias_s = nn.Linear(20 + 5 + 1, c_s, bias=False)
         self.output_proj = nn.Linear(c_s, 20 + 3 + 3 + 5, bias=False)
@@ -96,8 +94,12 @@ class DenoisingModule(nn.Module):
 
     def _add_features(self, data_dict: dict[str, torch.Tensor]):
 
+        res_type_prob = apply_label_smoothing(
+            data_dict["res_type_one_hot"], self.label_smoothing, 20
+        )
+
         return {
-            "res_type_prob": data_dict["res_type_one_hot"],
+            "res_type_prob": res_type_prob,
             "frame_rotations": data_dict["frame_rotations"],
             "frame_translations": data_dict["frame_translations"],
             "dihedrals": data_dict["dihedrals"],
@@ -394,6 +396,7 @@ class DenoisingModule(nn.Module):
 
         return {
             "res_type": res_type,
+            "res_type_prob": pred_feature_dict["res_type_prob"],
             "pos_heavyatom": pos_heavyatom,
         }
 
@@ -448,9 +451,10 @@ class DenoisingModule(nn.Module):
         num_steps: int,
     ):
         """
-        Rollout the denoising module.
+        Rollout the denoising module, returning the predicted data dictionary with denoising trajectory.
         """
         pred_data_dict = copy.deepcopy(true_data_dict)
+        pred_data_dict["denoising_trajectory"] = []
 
         true_feature_dict = self._add_features(true_data_dict)
         noised_feature_dict = self._init_features(true_feature_dict)
@@ -466,7 +470,8 @@ class DenoisingModule(nn.Module):
             noised_feature_dict = self._update_features(
                 noised_feature_dict, pred_vf_dict, d_t
             )
+            pred_data_dict_update = self._reconstruct(true_data_dict, pred_feature_dict)
+            pred_data_dict.update(pred_data_dict_update)
+            pred_data_dict["denoising_trajectory"].append(pred_data_dict)
 
-        pred_data_update = self._reconstruct(true_data_dict, pred_feature_dict)
-        pred_data_dict.update(pred_data_update)
         return pred_data_dict

@@ -23,35 +23,35 @@ class InvariantPointAttention(nn.Module):
         c_s: int,
         c_z: int,
         c_hidden: int = 16,
-        N_head: int = 12,
-        N_query_points: int = 4,
-        N_point_values: int = 8,
+        n_head: int = 12,
+        n_query_points: int = 4,
+        n_point_values: int = 8,
     ):
         super().__init__()
 
-        self.N_head = N_head
+        self.n_head = n_head
         self.c_hidden = c_hidden
-        hc = N_head * c_hidden
-        self.N_query_points = N_query_points
-        self.N_point_values = N_point_values
+        hc = n_head * c_hidden
+        self.n_query_points = n_query_points
+        self.n_point_values = n_point_values
 
-        self.w_C = (2 / (9 * N_query_points)) ** 0.5
+        self.w_C = (2 / (9 * n_query_points)) ** 0.5
         self.w_L = (1 / 3) ** 0.5
 
         self.linear_q_h = nn.Linear(c_s, hc, bias=False)
         self.linear_k_h = nn.Linear(c_s, hc, bias=False)
         self.linear_v_h = nn.Linear(c_s, hc, bias=False)
 
-        self.linear_q_hp = nn.Linear(c_s, N_head * N_query_points * 3, bias=False)
-        self.linear_k_hp = nn.Linear(c_s, N_head * N_query_points * 3, bias=False)
-        self.linear_v_hp = nn.Linear(c_s, N_head * N_point_values * 3, bias=False)
+        self.linear_q_hp = nn.Linear(c_s, n_head * n_query_points * 3, bias=False)
+        self.linear_k_hp = nn.Linear(c_s, n_head * n_query_points * 3, bias=False)
+        self.linear_v_hp = nn.Linear(c_s, n_head * n_point_values * 3, bias=False)
 
-        self.linear_no_bias_b = nn.Linear(c_z, N_head, bias=False)
+        self.linear_no_bias_b = nn.Linear(c_z, n_head, bias=False)
 
-        self.gamma_h = nn.Parameter(torch.randn(1, 1, 1, N_head))
+        self.gamma_h = nn.Parameter(torch.randn(1, 1, 1, n_head))
 
         self.linear_output = nn.Linear(
-            N_head * c_z + hc + N_head * N_point_values * 3 + N_head * N_point_values,
+            n_head * c_z + hc + n_head * n_point_values * 3 + n_head * n_point_values,
             c_s,
         )
 
@@ -73,27 +73,27 @@ class InvariantPointAttention(nn.Module):
         computed such that all three terms contribute equally and that the resulting variance is 1.
         """
 
-        q_h_i = rearrange(self.linear_q_h(s_i), "b i (h d) -> b i h d", h=self.N_head)
-        k_h_i = rearrange(self.linear_k_h(s_i), "b i (h d) -> b i h d", h=self.N_head)
-        v_h_i = rearrange(self.linear_v_h(s_i), "b i (h d) -> b i h d", h=self.N_head)
+        q_h_i = rearrange(self.linear_q_h(s_i), "b i (h d) -> b i h d", h=self.n_head)
+        k_h_i = rearrange(self.linear_k_h(s_i), "b i (h d) -> b i h d", h=self.n_head)
+        v_h_i = rearrange(self.linear_v_h(s_i), "b i (h d) -> b i h d", h=self.n_head)
 
         q_hp_i = rearrange(
             self.linear_q_hp(s_i),
             "b i (h p d) -> b i h p d",
-            h=self.N_head,
-            p=self.N_query_points,
+            h=self.n_head,
+            p=self.n_query_points,
         )
         k_hp_i = rearrange(
             self.linear_k_hp(s_i),
             "b i (h p d) -> b i h p d",
-            h=self.N_head,
-            p=self.N_query_points,
+            h=self.n_head,
+            p=self.n_query_points,
         )
         v_hp_i = rearrange(
             self.linear_v_hp(s_i),
             "b i (h p d) -> b i h p d",
-            h=self.N_head,
-            p=self.N_point_values,
+            h=self.n_head,
+            p=self.n_point_values,
         )
 
         b_h_ij = self.linear_no_bias_b(z_ij)
@@ -140,22 +140,22 @@ class IPAStack(nn.Module):
     Invariant Point Attention (IPA) stack.
     """
 
-    def __init__(self, c_s: int, c_z: int, n_block: int):
+    def __init__(self, c_s: int, c_z: int, n_block: int, params: dict):
 
         super().__init__()
 
         self.n_block = n_block
-        self.dropout = nn.Dropout(p=0.1)
+        self.dropout = nn.Dropout(p=params["dropout_probability"])
 
         self.trunk = nn.ModuleDict()
         for b in range(n_block):
             self.trunk[f"invariant_point_attention_{b}"] = InvariantPointAttention(
                 c_s,
                 c_z,
-                c_hidden=16,
-                N_head=12,
-                N_query_points=4,
-                N_point_values=8,
+                c_hidden=max(c_s // params["n_head"], 1),
+                n_head=params["n_head"],
+                n_query_points=params["n_query_points"],
+                n_point_values=params["n_point_values"],
             )
             self.trunk[f"layer_norm_1_{b}"] = nn.LayerNorm(c_s)
             self.trunk[f"transition_{b}"] = Transition(c_s)

@@ -5,6 +5,22 @@ from torch import nn
 from einops import rearrange
 
 
+def apply_label_smoothing(
+    one_hot_data: torch.Tensor, label_smoothing: float, num_classes: int
+) -> torch.Tensor:
+    """
+    Apply label smoothing to one-hot encoded data.
+
+    :param one_hot_data: One-hot encoded tensor of shape (..., num_classes).
+    :param label_smoothing: Label smoothing factor (0 to 1).
+    :param num_classes: Number of classes in one-hot encoding.
+    :return: Smoothed tensor of shape (..., num_classes).
+    """
+    smooth_value = label_smoothing / (num_classes - 1)
+    smoothed_data = one_hot_data * (1 - label_smoothing) + smooth_value
+    return smoothed_data
+
+
 class OneHotEmbedding(nn.Module):
     """
     Converts input sequences to one-hot encoded format with optional label smoothing.
@@ -15,23 +31,21 @@ class OneHotEmbedding(nn.Module):
         :param num_classes: Number of classes for one-hot encoding.
         :param label_smoothing: Label smoothing factor (0 to 1).
         """
-
         super().__init__()
-
         self.num_classes = num_classes
         self.label_smoothing = label_smoothing
 
     def forward(self, x_i: torch.Tensor) -> torch.Tensor:
         """
-        param x_i: Input tensor of shape (...) with integer class indices.
-        return s_i: One-hot encoded tensor of shape (..., num_classes) with label smoothing applied.
+        :param x_i: Input tensor of shape (...) with integer class indices.
+        :return: One-hot encoded tensor of shape (..., num_classes) with label smoothing applied.
         """
-
         one_hot_data = F.one_hot(x_i, num_classes=self.num_classes).to(torch.float32)
-        smooth_value = self.label_smoothing / (self.num_classes - 1)
-        s_i = one_hot_data * (1 - self.label_smoothing) + smooth_value
-
-        return s_i
+        if self.label_smoothing > 0:
+            return apply_label_smoothing(
+                one_hot_data, self.label_smoothing, self.num_classes
+            )
+        return one_hot_data
 
 
 class DihedralEmbedding(nn.Module):

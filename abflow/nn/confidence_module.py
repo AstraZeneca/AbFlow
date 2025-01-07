@@ -17,6 +17,7 @@ class ConfidenceModule(nn.Module):
         c_s: int,
         c_z: int,
         n_block: int,
+        network_params: dict = None,
     ):
 
         super().__init__()
@@ -41,6 +42,7 @@ class ConfidenceModule(nn.Module):
             c_s,
             c_z,
             n_block=n_block,
+            params=network_params["Pairformer"],
         )
         self.linear_no_bias_plddt = nn.Linear(c_s, 50, bias=False)
 

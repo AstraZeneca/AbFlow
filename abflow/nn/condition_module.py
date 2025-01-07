@@ -6,16 +6,8 @@ import torch
 import torch.nn as nn
 
 from .modules.pairformer import PairformerStack
-from .modules.features import (
-    OneHotEmbedding,
-    DihedralEmbedding,
-    CBDistogramEmbedding,
-    CAUnitVectorEmbedding,
-    RelativePositionEncoding,
-)
-
-from ..constants import MASK_TOKEN, PAD_TOKEN
-from ..structure import get_frames_and_dihedrals
+from .modules.features import OneHotEmbedding
+from ..constants import MASK_TOKEN
 from ..utils.utils import mask_data
 
 
@@ -31,6 +23,7 @@ class ConditionModule(nn.Module):
         n_block: int,
         n_cycle: int,
         design_mode: list[str],
+        network_params: dict = None,
     ):
 
         super().__init__()
@@ -38,14 +31,7 @@ class ConditionModule(nn.Module):
         self.n_cycle = n_cycle
         self.design_mode = design_mode
 
-        # self.res_type_ont_hot = OneHotEmbedding(22)
-        # self.chain_type_one_hot = OneHotEmbedding(5)
-        # self.dihedral_trig = DihedralEmbedding()
-        # self.cb_distogram = CBDistogramEmbedding(
-        #     num_bins=40, min_dist=3.25, max_dist=50.75
-        # )
-        # self.ca_unit_vector = CAUnitVectorEmbedding()
-        # self.rel_pos_enc = RelativePositionEncoding(rmax=32)
+        self.res_type_one_hot = OneHotEmbedding(22)
 
         self.linear_no_bias_s = nn.Linear(22 + 5 + 10, c_s, bias=False)
         self.linear_no_bias_z = nn.Linear(40 + 3 + 2 * 32 + 1, c_z, bias=False)
@@ -61,6 +47,7 @@ class ConditionModule(nn.Module):
             c_s,
             c_z,
             n_block=n_block,
+            params=network_params["Pairformer"],
         )
 
     def _embed(
@@ -70,7 +57,7 @@ class ConditionModule(nn.Module):
         Mask and embeds input data to node and edge embeddings.
         """
 
-        res_type_one_hot = data_dict["res_type_one_hot"]
+        res_type = data_dict["res_type"]
         chain_type_one_hot = data_dict["chain_type_one_hot"]
         dihedral_trigometry = data_dict["dihedral_trigometry"]
         cb_distogram = data_dict["cb_distogram"]
@@ -79,9 +66,8 @@ class ConditionModule(nn.Module):
 
         # mask redesigned regions
         if "sequence" in self.design_mode:
-            res_type_one_hot = mask_data(
-                res_type_one_hot, 0.0, data_dict["redesign_mask"]
-            )
+            res_type = mask_data(res_type, MASK_TOKEN, data_dict["redesign_mask"])
+            res_type_one_hot = self.res_type_one_hot(res_type)
 
         if "backbone" in self.design_mode:
             cb_distogram = mask_data(

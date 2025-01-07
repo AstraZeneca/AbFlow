@@ -2,7 +2,7 @@ import torch
 import random
 import numpy as np
 
-from typing import Optional, Tuple, Dict
+from typing import Optional, Dict, List
 from torch import nn
 from pytorch_lightning import LightningModule
 
