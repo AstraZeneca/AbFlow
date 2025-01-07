@@ -8,7 +8,6 @@ import torch.nn.functional as F
 from typing import List
 
 from ..structure import get_frames_and_dihedrals
-
 from ..utils.utils import combine_coords, combine_masks, mask_data, average_data
 from ..constants import (
     AtomVanDerWaalRadii,

@@ -26,7 +26,6 @@ output_to_pdb(processed_data, "9c44_output.pdb")
 """
 
 import torch
-import pandas as pd
 import numpy as np
 
 from typing import Dict

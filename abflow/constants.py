@@ -56,10 +56,6 @@ class AminoAcid3(IntEnum):
     TYR = 19
 
 
-# Additional residue types
-MASK_TOKEN = 20
-PAD_TOKEN = 21
-
 AminoAcid3Index = {aa: index for index, aa in AminoAcid3.__members__.items()}
 
 # Stores indices under the 1-letter code of each AA
@@ -564,17 +560,6 @@ class AtomVanDerWaalRadii(Enum):
     S = 1.81
 
 
-class GlyBBCoords(Enum):
-    """
-    Enumeration for ideal backbone coordinates of glycine in a protein.
-    """
-
-    N = tuple([-0.527, 1.337, 0.0])
-    CA = tuple([0.0, 0.0, 0.0])
-    C = tuple([1.517, 0.0, 0.0])
-    CB = tuple([0.0, 0.0, 0.0])
-
-
 class Liability(Enum):
     """
     Enumeration for antibody liabilities within the CDR regions, with motifs and amino acid indices.
@@ -584,8 +569,8 @@ class Liability(Enum):
     "LAP: Liability Antibody Profiler by sequence & structural mapping of natural and therapeutic antibodies"
 
     Examples:
-        DeAmdH_NG: Deamidation (with high severity). Motif pattern: Asparagine followed by Glycine.
-        FragH_DP: Fragmentation (with high severity). Motif pattern: Aspartate followed by Proline
+    DeAmdH_NG: Deamidation (with high severity). Motif pattern: Asparagine followed by Glycine.
+    FragH_DP: Fragmentation (with high severity). Motif pattern: Aspartate followed by Proline
     """
 
     DeAmdH_NG = ("N", "G")

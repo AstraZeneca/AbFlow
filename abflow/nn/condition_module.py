@@ -7,8 +7,11 @@ import torch.nn as nn
 
 from .modules.pairformer import PairformerStack
 from .modules.features import OneHotEmbedding
-from ..constants import MASK_TOKEN
 from ..utils.utils import mask_data
+
+# Additional tokens for condition module
+PAD_TOKEN = 21
+MASK_TOKEN = 20
 
 
 class ConditionModule(nn.Module):
@@ -67,6 +70,7 @@ class ConditionModule(nn.Module):
         # mask redesigned regions
         if "sequence" in self.design_mode:
             res_type = mask_data(res_type, MASK_TOKEN, data_dict["redesign_mask"])
+            res_type = mask_data(res_type, PAD_TOKEN, ~data_dict["valid_mask"])
             res_type_one_hot = self.res_type_one_hot(res_type)
 
         if "backbone" in self.design_mode:

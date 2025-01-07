@@ -9,7 +9,7 @@ trainer:
     devices: 1
     max_epochs: 200
     precision: 32-true # please train the model with 32-bit precision as rotation flow is not stable with 16-bit precision
-    val_check_interval: 0.5
+    val_check_interval: 1.0
     gradient_clip_val: 1.0
 checkpoint:
     path: null

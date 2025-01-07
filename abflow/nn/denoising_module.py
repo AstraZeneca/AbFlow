@@ -18,7 +18,7 @@ from ..flow.manifold_flow import (
     LinearSimplexFlow,
     LinearToricFlow,
 )
-from ..flow.rotation import rotmat_to_rotvec, rotvec_to_rotmat, rotvecs_mul
+from ..flow.rotation import rotvec_to_rotmat, rotvecs_mul
 from ..utils.utils import apply_mask, create_rigid
 
 # Conversion scales between nanometers and angstroms

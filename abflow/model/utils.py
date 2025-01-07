@@ -1,5 +1,5 @@
 import torch
-from ..constants import region_to_index, PAD_TOKEN
+from ..constants import region_to_index
 
 
 def concat_dicts(dicts: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
@@ -237,38 +237,12 @@ def pad_data(data: dict, max_res: int) -> dict:
                     pad_shape = (max_res, max_res) + value.shape[2:]
                     padded_value = torch.zeros(pad_shape, dtype=value.dtype)
                     padded_value[:valid_length, :valid_length] = value
-                elif key == "res_type":
-                    # Pad with PAD_TOKEN for "res_type"
-                    padded_value = torch.full((padding,), PAD_TOKEN, dtype=value.dtype)
-                elif key == "chain_type":
-                    # Pad with the last valid chain_type value
-                    last_valid = value[-1] if valid_length > 0 else 0
-                    padded_value = torch.full((padding,), last_valid, dtype=value.dtype)
-                elif key == "chain_id":
-                    # Pad with the last valid chain_id value
-                    last_valid = value[-1] if valid_length > 0 else 0
-                    padded_value = torch.full((padding,), last_valid, dtype=value.dtype)
-                elif key == "res_index":
-                    # Pad with increasing values starting from the last valid value
-                    last_valid = value[-1] if valid_length > 0 else 0
-                    padded_value = torch.arange(
-                        last_valid + 1, last_valid + 1 + padding, dtype=value.dtype
-                    )
-                elif key == "region_index":
-                    # Pad with "framework" index for "region_index"
-                    padded_value = torch.full(
-                        (padding,), region_to_index["framework"], dtype=value.dtype
-                    )
+                    padded_data[key] = padded_value
                 else:
                     # Default padding for continuous values is 0.0
                     padded_value = torch.zeros(
                         (padding,) + value.size()[1:], dtype=value.dtype
                     )
-                # Concatenate the original tensor with the padded values
-                if value.ndim >= 2 and value.shape[0] == value.shape[1]:
-                    # For pairwise features, padded_value is already set above
-                    padded_data[key] = padded_value
-                else:
                     padded_data[key] = torch.cat([value, padded_value], dim=0)
             else:
                 # If no padding needed, keep the original value
