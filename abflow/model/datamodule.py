@@ -245,7 +245,13 @@ class AntibodyAntigenDataModule(LightningDataModule):
                     antigen_crop_size=self._antigen_crop_size,
                 )
             )
-            data.update(center_complex(data["pos_heavyatom"], data["redesign_mask"]))
+            data.update(
+                center_complex(
+                    data["pos_heavyatom"],
+                    data["frame_translations"],
+                    data["redesign_mask"],
+                )
+            )
             data.update(pad_data(data, self._max_crop_size))
 
         data_dict = default_collate(data_dict)

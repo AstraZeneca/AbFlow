@@ -182,13 +182,16 @@ def crop_data(data: dict, max_crop_size: int, antigen_crop_size: int) -> dict:
 
 
 def center_complex(
-    pos_heavyatom: torch.Tensor, redesign_mask: torch.Tensor
+    pos_heavyatom: torch.Tensor,
+    frame_translations: torch.Tensor,
+    redesign_mask: torch.Tensor,
 ) -> torch.Tensor:
     """
     Center the complex by the centroid of CA coordinates of non-redesigned residues.
     If all residues are being redesigned, center by the centroid of the entire complex.
 
     :param pos_heavyatom: A tensor of shape (N_res, 15, 3) containing the position of the heavy atoms for each residue.
+    :param frame_translations: A tensor of shape (N_res, 3) containing the CA-translation for each residue.
     :param redesign_mask: A tensor of shape (N_res,) indicating which residues to redesign (True) and which to fix (False).
     :return: A tensor of shape (N_res, 15, 3) containing the position of the heavy atoms for each residue after centering.
     """
@@ -203,8 +206,12 @@ def center_complex(
         centroid = pos_ca.mean(dim=0)
 
     centered_pos_heavyatom = pos_heavyatom - centroid[None, None, :]
+    centered_frame_translations = frame_translations - centroid[None, :]
 
-    return {"pos_heavyatom": centered_pos_heavyatom}
+    return {
+        "pos_heavyatom": centered_pos_heavyatom,
+        "frame_translations": centered_frame_translations,
+    }
 
 
 def pad_data(data: dict, max_res: int) -> dict:

@@ -1,5 +1,5 @@
 """
-PDB Processing Pipeline for AbFlow
+PDB Processing Pipeline for AbFlow.
 
 This script processes PDB files for use in AbFlow, including filling missing atoms, extracting chain data, and outputting processed PDB files.
 
@@ -19,6 +19,9 @@ data = process_pdb_to_lmdb(pdb_file, sabdab_summary_file, id=0)
 
 ## Step 3: Process data for AbFlow input
 processed_data = process_lmdb_chain(data)
+
+## Step 4: Add additional features to the processed data
+processed_data.update(add_features(processed_data))
 
 # Input data dict to PDB file
 output_to_pdb(processed_data, "9c44_output.pdb")

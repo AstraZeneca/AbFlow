@@ -8,8 +8,7 @@ model_name: all_atom_de_novo
 trainer:
     devices: 1
     max_epochs: 200
-    precision: 32-true # please train the model with 32-bit precision as rotation flow is not stable with 16-bit precision
-    val_check_interval: 1.0
+    precision: 32-true # Use 32-bit precision as 16-bit causes instability in rotation flow
     gradient_clip_val: 1.0
 checkpoint:
     path: null
@@ -23,7 +22,7 @@ shared:
 # abflow datamodule settings
 datamodule:
     num_workers: 8
-    batch_size: 4 # batch size per GPU
+    batch_size: 4
     redesign:
         framework: False
         hcdr1: False
@@ -37,8 +36,6 @@ datamodule:
     dataset:
         name: sabdab
         seed: *seed
-        load_val_test: True  # True only during training, and False during data pre-processing
-        scheme: chothia       # Scheme to use for sequence alignment. Default: chothia
         num_val_cluster: 10
         paths:
             data: /scratch/hz362/datavol/data/
@@ -47,10 +44,10 @@ datamodule:
 # abflow model settings
 model:
     loss_weighting:
-        sequence_vf_loss: 1.0
+        sequence_vf_loss: 100.0
         translation_vf_loss: 1.0
-        rotation_vf_loss: 1.0
-        dihedral_vf_loss: 1.0
+        rotation_vf_loss: 10.0
+        dihedral_vf_loss: 10.0
         distogram_loss: 1.0
         confidence_lddt_loss: 1.0
     learning_rate: 0.0001
@@ -67,7 +64,7 @@ network:
     n_confidence_module_blocks: 1 # default: 4
     n_cycle: 4
     mini_rollout_steps: 20
-    full_rollout_steps: 500
+    full_rollout_steps: 100
     label_smoothing: 0.0
     network_params:
         Pairformer:

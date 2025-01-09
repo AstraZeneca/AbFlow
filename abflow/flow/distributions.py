@@ -34,12 +34,9 @@ class BaseDistribution(ABC):
         """
         Abstract method to sample from the distribution.
 
-        Args:
-            size: batch shape of the tensors to sample.
-            device: device to sample the tensor.
-
-        Returns:
-            A sampled tensor from the distribution.
+        :param size: batch shape of the tensors to sample.
+        :param device: device to sample the tensor.
+        :return: A sampled tensor from the distribution.
         """
         raise NotImplementedError
 
@@ -50,13 +47,12 @@ class EuclideanDistribution(BaseDistribution, ABC):
     """
 
     def __init__(self, dim: int):
-
         super().__init__()
-
         self.dim = dim
 
 
 class NormalEuclidean(EuclideanDistribution):
+
     def __init__(self, dim: int):
         super().__init__(dim)
 
@@ -67,16 +63,18 @@ class NormalEuclidean(EuclideanDistribution):
 
 class SimplexDistribution(BaseDistribution, ABC):
     """
-    Abstract base class for distributions on the Simplex space.
+    Abstract base class for distributions on the simplex space.
     """
 
     def __init__(self, dim: int):
         super().__init__()
-
         self.dim = dim
 
 
 class UniformSimplex(SimplexDistribution):
+    """
+    Uniform distribution U[0, 1] on the simplex space.
+    """
 
     def __init__(self, dim: int):
         super().__init__(dim)

@@ -3,6 +3,7 @@ Contains constants used in protein structure analysis.
 """
 
 import torch
+
 from enum import Enum, IntEnum
 from Bio.PDB.Polypeptide import protein_letters_3to1
 

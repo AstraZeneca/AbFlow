@@ -2,6 +2,8 @@ import torch.nn as nn
 import torch
 import torch.nn.functional as F
 
+from einops import rearrange
+
 from .modules.features import CBDistogramEmbedding
 
 
@@ -26,7 +28,9 @@ class DistogramHead(nn.Module):
 
     def forward(self, z_ij: torch.Tensor) -> torch.Tensor:
 
-        p_distogram_ij = self.linear_no_bias_d(z_ij + torch.einsum("bijd->bjid", z_ij))
+        p_distogram_ij = self.linear_no_bias_d(
+            z_ij + rearrange(z_ij, "b i j d -> b j i d")
+        )
         p_distogram_ij = F.softmax(p_distogram_ij, dim=-1)
 
         return p_distogram_ij

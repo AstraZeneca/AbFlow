@@ -154,10 +154,10 @@ class DenoisingModule(nn.Module):
     def _sample_time(self, num_batch: int, device: torch.device) -> torch.Tensor:
         """
         Sample a different continuous time step between 0 and 1 for each data point in the batch,
-        then clamp the values to be between 0 and 0.999.
+        then clamp the values to be between 0 and 0.99.
         """
         time_steps = torch.rand(num_batch, device=device)
-        return torch.clamp(time_steps, min=0.0, max=0.999)
+        return torch.clamp(time_steps, min=0.0, max=0.99)
 
     def _noise_features(
         self, true_feature_dict: dict[str, torch.Tensor], time: torch.Tensor
