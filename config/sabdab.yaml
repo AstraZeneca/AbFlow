@@ -66,6 +66,7 @@ network:
     mini_rollout_steps: 20
     full_rollout_steps: 100
     label_smoothing: 0.0
+    max_time_clamp: 0.99
     network_params:
         Pairformer:
             dropout_rowwise_probabilty: 0.25

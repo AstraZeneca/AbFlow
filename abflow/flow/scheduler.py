@@ -52,7 +52,6 @@ class LinearSchedule(BaseSchedule):
             beta_t = t,
             speed_t = 1 / (1 - t)
         """
-        t = torch.clamp(t, max=0.999)
         alpha_t = 1 - t
         beta_t = t
         speed_t = 1 / (1 - t)

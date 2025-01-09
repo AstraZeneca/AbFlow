@@ -31,6 +31,7 @@ class FlowPrediction(nn.Module):
         mini_rollout_steps: int = 20,
         full_rollout_steps: int = 500,
         label_smoothing: float = 0.0,
+        max_time_clamp: float = 0.995,
         network_params: dict = None,
     ):
         """
@@ -50,6 +51,8 @@ class FlowPrediction(nn.Module):
             mixture of the original ground truth and a uniform distribution as inspired by
             paper: Rethinking the Inception Architecture for Computer Vision.
             link: https://arxiv.org/abs/1512.00567. Default: 0.0.
+        :param max_time_clamp: A float in [0.0, 1.0]. Specifies the maximum time to sample for training.
+            This is used to avoid instability when t is close to 1.0. Default: 0.995.
         :param network_params: A dictionary containing the neural network parameters.
         """
 
@@ -73,6 +76,7 @@ class FlowPrediction(nn.Module):
             n_block=n_denoising_module_blocks,
             design_mode=design_mode,
             label_smoothing=label_smoothing,
+            max_time_clamp=max_time_clamp,
             network_params=network_params,
         )
         self.confidence_module = ConfidenceModule(

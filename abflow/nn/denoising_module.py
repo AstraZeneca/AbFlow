@@ -39,6 +39,7 @@ class DenoisingModule(nn.Module):
         n_block: int,
         design_mode: list[str],
         label_smoothing: float,
+        max_time_clamp: float = 0.99,
         network_params: dict = None,
     ):
         super().__init__()
@@ -48,6 +49,7 @@ class DenoisingModule(nn.Module):
         )
         self.design_mode = design_mode
         self.label_smoothing = label_smoothing
+        self.max_time_clamp = max_time_clamp
 
         self.linear_no_bias_s = nn.Linear(20 + 5 + 1, c_s, bias=False)
         self.output_proj = nn.Linear(c_s, 20 + 3 + 3 + 5, bias=False)
@@ -157,7 +159,7 @@ class DenoisingModule(nn.Module):
         then clamp the values to be between 0 and 0.99.
         """
         time_steps = torch.rand(num_batch, device=device)
-        return torch.clamp(time_steps, min=0.0, max=0.99)
+        return torch.clamp(time_steps, min=0.0, max=self.max_time_clamp)
 
     def _noise_features(
         self, true_feature_dict: dict[str, torch.Tensor], time: torch.Tensor
