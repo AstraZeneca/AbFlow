@@ -33,8 +33,11 @@ def process_single_entry(args):
     return db_id, zlib.compress(pickle.dumps(processed_data, protocol=pickle.HIGHEST_PROTOCOL))
 
 def process_lmdb(data_folder):
+    """
+    Process the LMDB database to the input data dict for abflow.
+    """
     source_db_path = os.path.join(data_folder, "structures.lmdb")
-    output_db_path = "processed_structures.lmdb"
+    output_db_path = "abflow_processed_structures_oas_sabdab.lmdb"
     if os.path.exists(output_db_path):
         os.remove(output_db_path)
 
@@ -96,18 +99,18 @@ if __name__ == "__main__":
         "--path",
         type=str,
         required=True,
-        help="Path to the folder containing 'entries_list.pkl' and 'structures.lmdb'.",
+        help="Path to the data folder containing 'entries_list.pkl' and 'structures.lmdb'.",
     )
     args = parser.parse_args()
 
     data_folder = args.path
     if not os.path.isdir(data_folder):
-        raise ValueError(f"Not a valid directory: '{data_folder}'")
+        raise ValueError(f"The provided path '{data_folder}' is not a valid directory.")
 
     # Some basic checks
     required_files = ["entries_list.pkl", "structures.lmdb"]
     missing_files = [f for f in required_files if not os.path.exists(os.path.join(data_folder, f))]
     if missing_files:
-        raise ValueError(f"Missing required files in '{data_folder}': {', '.join(missing_files)}")
+        raise ValueError(f"The following required files are missing in '{data_folder}': {', '.join(missing_files)}")
 
     process_lmdb(data_folder)
