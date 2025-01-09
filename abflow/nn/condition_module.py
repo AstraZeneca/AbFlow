@@ -16,7 +16,8 @@ MASK_TOKEN = 20
 
 class ConditionModule(nn.Module):
     """
-    Condition module based on Pairformer from AlphaFold3.
+    Condition module based on Pairformer from AlphaFold3,
+    used to compute node (s_i) and edge (z_ij) embeddings.
     """
 
     def __init__(
@@ -26,29 +27,38 @@ class ConditionModule(nn.Module):
         n_block: int,
         n_cycle: int,
         design_mode: list[str],
+        num_chain_types: int = 5,
+        num_res_types: int = 22,
+        num_rel_pos: int = 32,
         network_params: dict = None,
     ):
-
         super().__init__()
 
         self.n_cycle = n_cycle
         self.design_mode = design_mode
 
-        self.res_type_one_hot = OneHotEmbedding(22)
+        self.res_type_one_hot = OneHotEmbedding(num_res_types)
 
-        self.linear_no_bias_s = nn.Linear(22 + 5 + 10, c_s, bias=False)
-        self.linear_no_bias_z = nn.Linear(40 + 3 + 2 * 32 + 1, c_z, bias=False)
+        self.linear_no_bias_s = nn.Linear(
+            in_features=num_res_types + num_chain_types + 10,
+            out_features=c_s,
+            bias=False,
+        )
+        self.linear_no_bias_z = nn.Linear(
+            in_features=40 + 3 + 2 * num_rel_pos + 1, out_features=c_z, bias=False
+        )
 
         self.linear_no_bias_s_i = nn.Linear(c_s, c_z, bias=False)
         self.linear_no_bias_s_j = nn.Linear(c_s, c_z, bias=False)
         self.linear_no_bias_z_hat = nn.Linear(c_z, c_z, bias=False)
         self.layer_norm_z_hat = nn.LayerNorm(c_z)
+
         self.linear_no_bias_s_hat = nn.Linear(c_s, c_s, bias=False)
         self.layer_norm_s_hat = nn.LayerNorm(c_s)
 
         self.pairformer_stack = PairformerStack(
-            c_s,
-            c_z,
+            c_s=c_s,
+            c_z=c_z,
             n_block=n_block,
             params=network_params["Pairformer"],
         )
@@ -60,36 +70,42 @@ class ConditionModule(nn.Module):
         Mask and embeds input data to node and edge embeddings.
         """
 
-        res_type = data_dict["res_type"]
-        chain_type_one_hot = data_dict["chain_type_one_hot"]
-        dihedral_trigometry = data_dict["dihedral_trigometry"]
-        cb_distogram = data_dict["cb_distogram"]
-        ca_unit_vectors = data_dict["ca_unit_vectors"]
-        rel_positions = data_dict["rel_positions"]
+        res_type = data_dict["res_type"].clone()
+        chain_type_one_hot = data_dict["chain_type_one_hot"].clone()
+        dihedral_trigometry = data_dict["dihedral_trigometry"].clone()
+        cb_distogram = data_dict["cb_distogram"].clone()
+        ca_unit_vectors = data_dict["ca_unit_vectors"].clone()
+        rel_positions = data_dict["rel_positions"].clone()
 
         # mask redesigned regions
         if "sequence" in self.design_mode:
-            res_type = mask_data(res_type, MASK_TOKEN, data_dict["redesign_mask"])
-            res_type = mask_data(res_type, PAD_TOKEN, ~data_dict["valid_mask"])
+            mask_data(res_type, MASK_TOKEN, data_dict["redesign_mask"], in_place=True)
+            mask_data(res_type, PAD_TOKEN, ~data_dict["valid_mask"], in_place=True)
             res_type_one_hot = self.res_type_one_hot(res_type)
 
         if "backbone" in self.design_mode:
-            cb_distogram = mask_data(
-                cb_distogram, 0.0, data_dict["redesign_mask"][:, None, :]
+            mask_data(
+                cb_distogram, 0.0, data_dict["redesign_mask"][:, None, :], in_place=True
             )
-            cb_distogram = mask_data(
-                cb_distogram, 0.0, data_dict["redesign_mask"][:, :, None]
+            mask_data(
+                cb_distogram, 0.0, data_dict["redesign_mask"][:, :, None], in_place=True
             )
-            ca_unit_vectors = mask_data(
-                ca_unit_vectors, 0.0, data_dict["redesign_mask"][:, None, :]
+            mask_data(
+                ca_unit_vectors,
+                0.0,
+                data_dict["redesign_mask"][:, None, :],
+                in_place=True,
             )
-            ca_unit_vectors = mask_data(
-                ca_unit_vectors, 0.0, data_dict["redesign_mask"][:, :, None]
+            mask_data(
+                ca_unit_vectors,
+                0.0,
+                data_dict["redesign_mask"][:, :, None],
+                in_place=True,
             )
 
         if "sidechain" in self.design_mode:
-            dihedral_trigometry = mask_data(
-                dihedral_trigometry, 0.0, data_dict["redesign_mask"]
+            mask_data(
+                dihedral_trigometry, 0.0, data_dict["redesign_mask"], in_place=True
             )
 
         # concatenate the per node features
@@ -122,6 +138,9 @@ class ConditionModule(nn.Module):
         """
         Forward pass with recycling.
         """
+
+        data_dict = data_dict.copy()
+
         s_inputs_i, z_inputs_ij = self._embed(data_dict)
         s_init_i = s_inputs_i.clone()
         z_init_ij = z_inputs_ij.clone() + torch.einsum(
@@ -130,15 +149,21 @@ class ConditionModule(nn.Module):
             self.linear_no_bias_s_j(s_inputs_i),
         )
 
-        s_i, z_ij = torch.zeros_like(s_init_i), torch.zeros_like(z_init_ij)
+        s_i = torch.zeros_like(s_init_i)
+        z_ij = torch.zeros_like(z_init_ij)
+
         for cycle_i in range(self.n_cycle):
 
-            # only set gradients in it is the final recycle
+            # Only keep gradients on the final cycle
             with torch.set_grad_enabled(cycle_i == self.n_cycle - 1):
+                # LN + linear on z_ij
                 z_ij = z_init_ij + self.linear_no_bias_z_hat(
                     self.layer_norm_z_hat(z_ij)
                 )
+                # LN + linear on s_i
                 s_i = s_init_i + self.linear_no_bias_s_hat(self.layer_norm_s_hat(s_i))
+
+                # Pairformer
                 s_i, z_ij = self.pairformer_stack(s_i, z_ij)
 
         return s_inputs_i, z_inputs_ij, s_i, z_ij

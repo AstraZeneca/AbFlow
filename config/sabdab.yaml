@@ -4,27 +4,28 @@
 project_name: flow_matching
 model_name: all_atom_de_novo
 
+# shared settings
+shared:
+    design_mode: &design_mode ["sequence", "backbone", "sidechain"]
+    seed: &seed 2025
+
 # training settings
 trainer:
     devices: 1
     max_epochs: 200
     precision: 32-true # Use 32-bit precision as 16-bit causes instability in rotation flow
     gradient_clip_val: 1.0
-    val_check_interval: 0.1
+    val_check_interval: 0.2
+    accumulate_grad_batches: 4
     log_every_n_steps: 100
 checkpoint:
     path: null
     load_optimizer: False
 
-# shared settings
-shared:
-    design_mode: &design_mode ["sequence", "backbone", "sidechain"]
-    seed: &seed 2025
-
 # abflow datamodule settings
 datamodule:
     num_workers: 8
-    batch_size: 4
+    batch_size: 8
     redesign:
         framework: False
         hcdr1: False
@@ -61,8 +62,8 @@ model:
 # abflow network settings
 network:
     design_mode: *design_mode
-    c_s: 96 # default: 384
-    c_z: 32 # default: 128
+    c_s: 192 # default: 384
+    c_z: 64 # default: 128
     n_condition_module_blocks: 8 # default: 48
     n_denoising_module_blocks: 4 # default: 24
     n_confidence_module_blocks: 1 # default: 4

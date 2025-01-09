@@ -23,17 +23,12 @@ class AntibodyAntigenDataset(Dataset):
     """Antibody-antigen structure dataset."""
 
     def __init__(self, config: dict, split: str = "train"):
-        """
-        :param config: Configuration dictionary.
-        :param split: Dataset split (train, val, test).
-        """
         super().__init__()
-
         self.config = config
         self.split = split
         self.db_connection = None
         self.data_path = config["paths"]["data"]
-        self.map_size = 250 * 1024**3  # 250GB - Maximum size of the whole DB
+        self.map_size = 250 * 1024**3
         self._load_entries()
         self._load_clusters()
         self._load_split()
@@ -211,9 +206,6 @@ class AntibodyAntigenDataModule(LightningDataModule):
     """A datamodule for antibody-antigen complexes."""
 
     def __init__(self, config: dict):
-        """
-        :param config: Configuration dictionary.
-        """
         super().__init__()
 
         self._train_dataset = AntibodyAntigenDataset(config["dataset"], split="train")
@@ -230,13 +222,13 @@ class AntibodyAntigenDataModule(LightningDataModule):
         return f"{self.__class__.__name__}(batch_size={self._batch_size})"
 
     def collate(
-        self, data_dict: list[dict[str, torch.Tensor]]
+        self, data_list: list[dict[str, torch.Tensor]]
     ) -> dict[str, torch.Tensor]:
         """
         Combines a list of dictionaries into a single dictionary with an additional batch dimension.
         """
 
-        for data in data_dict:
+        for data in data_list:
             data.update(get_redesign_mask(data, self._redesign))
             data.update(
                 crop_data(
@@ -254,8 +246,8 @@ class AntibodyAntigenDataModule(LightningDataModule):
             )
             data.update(pad_data(data, self._max_crop_size))
 
-        data_dict = default_collate(data_dict)
-        return data_dict
+        batch = default_collate(data_list)
+        return batch
 
     @property
     def batch_size(self) -> int:
@@ -286,6 +278,7 @@ class AntibodyAntigenDataModule(LightningDataModule):
             num_workers=self._num_workers,
             batch_size=self._batch_size,
             pin_memory=True,
+            persistent_workers=True,
         )
 
     def val_dataloader(self) -> torch.utils.data.DataLoader:
@@ -299,6 +292,8 @@ class AntibodyAntigenDataModule(LightningDataModule):
             num_workers=self._num_workers,
             batch_size=self._batch_size,
             pin_memory=True,
+            persistent_workers=True,
+            drop_last=True,
         )
 
     def test_dataloader(self) -> torch.utils.data.DataLoader:
@@ -312,5 +307,6 @@ class AntibodyAntigenDataModule(LightningDataModule):
             collate_fn=self.collate,
             num_workers=self._num_workers,
             batch_size=self._batch_size,
+            persistent_workers=True,
             pin_memory=True,
         )

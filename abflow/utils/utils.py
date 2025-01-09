@@ -6,6 +6,7 @@ import torch
 from typing import List
 
 from ..rigid import Rigid, Rotation
+import torch
 
 
 def expand_mask(mask: torch.Tensor, data: torch.Tensor) -> torch.Tensor:
@@ -74,15 +75,25 @@ def apply_mask(
 
 
 def mask_data(
-    data: torch.Tensor, mask_value: float, mask: torch.Tensor
+    data: torch.Tensor, mask_value: float, mask: torch.Tensor, in_place: bool = False
 ) -> torch.Tensor:
     """
-    Mask the data by setting specified positions to a mask value.
+    Masks 'data' by setting positions where 'mask' is True to 'mask_value'.
+    If 'in_place' is True, modifies 'data' in place and returns it.
+    Otherwise, returns a new tensor with those positions masked.
     """
 
-    mask_value_data = torch.full_like(data, mask_value)
-    masked_data = apply_mask(data, mask_value_data, mask)
-    return masked_data
+    mask = expand_mask(mask, data)
+
+    if in_place:
+        # In-place masking
+        data[mask] = mask_value
+        return data
+    else:
+        # Out-of-place masking (original data remains unchanged)
+        masked_data = data.clone()
+        masked_data[mask] = mask_value
+        return masked_data
 
 
 def combine_coords(*coord_args: list[torch.Tensor], coord_dim: int = 3) -> torch.Tensor:

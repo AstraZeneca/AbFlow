@@ -71,7 +71,7 @@ class AbFlowLoss(nn.Module):
         cumulative_loss = 0
         loss_dict = {}
 
-        # main flow matching conditional vector fields
+        # Main flow matching conditional vector fields
         if "sequence" in self.design_mode:
             loss_dict["sequence_vf_loss"] = get_mse_loss(
                 pred_loss_dict["sequence_vf"],
@@ -96,7 +96,7 @@ class AbFlowLoss(nn.Module):
                 masks=[true_loss_dict["redesign_mask"], true_loss_dict["valid_mask"]],
             )
 
-        # auxiliary predictions
+        # Auxiliary predictions
         loss_dict["distogram_loss"] = get_ce_loss(
             pred_loss_dict["distogram"],
             true_loss_dict["distogram"],
@@ -106,7 +106,7 @@ class AbFlowLoss(nn.Module):
             ],
         )
 
-        # confidence estimations
+        # Confidence estimations
         if "backbone" in self.design_mode:
             loss_dict["confidence_lddt_loss"] = get_ce_loss(
                 pred_loss_dict["lddt_one_hot"],
@@ -130,14 +130,13 @@ class AbFlowLoss(nn.Module):
                 ],
             )
 
-        # weighting and summing the losses
+        # Weighting and summing the losses
         for loss_name, loss_value in loss_dict.items():
             weight = self.loss_weights[loss_name]
             weighted_loss = weight * loss_value
             cumulative_loss = cumulative_loss + weighted_loss.mean()
             loss_dict[loss_name] = weighted_loss.detach().clone()
 
-            # print(f"{loss_name}: {weighted_loss.mean().item()}")
         loss_dict["total_loss"] = cumulative_loss.detach().clone()
 
         return cumulative_loss, loss_dict

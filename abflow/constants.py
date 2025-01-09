@@ -74,11 +74,12 @@ aa1_index_to_name = {v: k for k, v in AminoAcid1.__members__.items()}
 aa3_name_to_index = {k: v for k, v in AminoAcid3.__members__.items()}
 aa1_name_to_index = {k: v for k, v in AminoAcid1.__members__.items()}
 
+# Chi angles atoms and mask
 
 # fmt: off
 chi_angles_atoms = {
     AminoAcid3.ALA: [],
-    # Chi5 in arginine is always 0 +- 5 degrees, so ignore it.
+    # Chi5 in arginine is always 0 ± 5 degrees, so ignore it.
     AminoAcid3.ARG: [
         ["N", "CA", "CB", "CG"],
         ["CA", "CB", "CG", "CD"],
@@ -397,43 +398,117 @@ HEAVY_ATOM_COORDS = {
 }
 
 
-PREVIOUS_SIDECHAIN_ATOM_ROTATIONS = torch.zeros([20, 6, 3, 3])
-PREVIOUS_SIDECHAIN_ATOM_TRANSLATIONS = torch.zeros([20, 6, 3])
-HEAVY_ATOM_TORSION_INDEX = torch.zeros([20, 15], dtype=torch.int64)
-HEAYY_ATOM_POSITIONS = torch.zeros([20, 15, 3])
+def _validate_heavy_atom_coords():
+    """
+    Validates that each AminoAcid3 has corresponding HEAVY_ATOM_COORDS and restype_to_heavyatom_names entries.
+    """
+    for aa in AminoAcid3:
+        if aa not in HEAVY_ATOM_COORDS:
+            raise ValueError(f"Missing HEAVY_ATOM_COORDS for {aa}")
+        if aa not in restype_to_heavyatom_names:
+            raise ValueError(f"Missing restype_to_heavyatom_names for {aa}")
+
+
+_validate_heavy_atom_coords()
+
+
+# DDP Initialization Function
+def initialize_ddp_constants(trainer):
+    """
+    Initialize constants on the appropriate device for DDP with PyTorch Lightning.
+
+    :param trainer: The PyTorch Lightning trainer.
+    """
+
+    if hasattr(trainer, "local_rank"):
+        device = torch.device(f"cuda:{trainer.local_rank}")
+    else:
+        device = torch.device("cpu")
+
+    initialize_constants(device)
+
+
+# Initialize global variables as None
+PREVIOUS_SIDECHAIN_ATOM_ROTATIONS = None
+PREVIOUS_SIDECHAIN_ATOM_TRANSLATIONS = None
+HEAVY_ATOM_TORSION_INDEX = None
+HEAYY_ATOM_POSITIONS = None
+
+
+def initialize_constants(device):
+    """
+    Initialize global constants on the appropriate device.
+
+    Args:
+        device: The torch.device for the current process in DDP.
+    """
+    global PREVIOUS_SIDECHAIN_ATOM_ROTATIONS
+    global PREVIOUS_SIDECHAIN_ATOM_TRANSLATIONS
+    global HEAVY_ATOM_TORSION_INDEX
+    global HEAYY_ATOM_POSITIONS
+
+    # Allocate tensors on the specified device
+    PREVIOUS_SIDECHAIN_ATOM_ROTATIONS = torch.zeros([20, 6, 3, 3], device=device)
+    PREVIOUS_SIDECHAIN_ATOM_TRANSLATIONS = torch.zeros([20, 6, 3], device=device)
+    HEAVY_ATOM_TORSION_INDEX = torch.zeros([20, 15], dtype=torch.int64, device=device)
+    HEAYY_ATOM_POSITIONS = torch.zeros([20, 15, 3], device=device)
+
+    # Initialize the constants
+    _init_heavy_atom_constants()
 
 
 def _init_heavy_atom_constants():
+    """
+    Initialize the constants for heavy atom positions, torsion indices, and rotations/translations.
+    This function assumes the global variables have been pre-allocated on the correct device.
+    """
+    global PREVIOUS_SIDECHAIN_ATOM_ROTATIONS
+    global PREVIOUS_SIDECHAIN_ATOM_TRANSLATIONS
+    global HEAVY_ATOM_TORSION_INDEX
+    global HEAYY_ATOM_POSITIONS
 
     for aa in AminoAcid3:
+        # Create a mapping from atom name to group
         atom_groups = {name: group for name, group, _ in HEAVY_ATOM_COORDS[aa]}
+
+        # Create a mapping from atom name to position tensor
         atom_positions = {
-            name: torch.FloatTensor(pos) for name, _, pos in HEAVY_ATOM_COORDS[aa]
+            name: torch.tensor(
+                pos,
+                dtype=torch.float32,
+                device=PREVIOUS_SIDECHAIN_ATOM_ROTATIONS.device,
+            )
+            for name, group, pos in HEAVY_ATOM_COORDS[aa]
         }
 
-        # heavy atom 15 positions
+        # Populate HEAVY_ATOM_TORSION_INDEX and HEAYY_ATOM_POSITIONS
         for atom_idx, atom_name in enumerate(restype_to_heavyatom_names[aa]):
-            if (atom_name == "") or (atom_name not in atom_groups):
+            if atom_name == "" or atom_name not in atom_groups:
                 continue
             HEAVY_ATOM_TORSION_INDEX[aa, atom_idx] = atom_groups[atom_name]
             HEAYY_ATOM_POSITIONS[aa, atom_idx, :] = atom_positions[atom_name]
 
-        # idenity matrix for backbone
-        PREVIOUS_SIDECHAIN_ATOM_ROTATIONS[aa, Torsion.BACKBONE] = torch.eye(3)
-        PREVIOUS_SIDECHAIN_ATOM_TRANSLATIONS[aa, Torsion.BACKBONE] = torch.zeros(3)
+        # Identity matrix for backbone
+        PREVIOUS_SIDECHAIN_ATOM_ROTATIONS[aa, Torsion.BACKBONE] = torch.eye(
+            3, device=PREVIOUS_SIDECHAIN_ATOM_ROTATIONS.device
+        )
+        PREVIOUS_SIDECHAIN_ATOM_TRANSLATIONS[aa, Torsion.BACKBONE] = torch.zeros(
+            3, device=PREVIOUS_SIDECHAIN_ATOM_TRANSLATIONS.device
+        )
 
-        # psi torsion for oxygen imputation
+        # Psi torsion for oxygen imputation
         PREVIOUS_SIDECHAIN_ATOM_ROTATIONS[aa, Torsion.PSI] = create_rotation_matrix(
             v1=atom_positions["C"] - atom_positions["CA"],
             v2=atom_positions["N"] - atom_positions["CA"],
         )
         PREVIOUS_SIDECHAIN_ATOM_TRANSLATIONS[aa, Torsion.PSI] = atom_positions["C"]
 
-        # previous sidechain atom rotations and translations
-        # for chi1
-        if chi_angles_mask[aa][0]:
-            base_atom_name = chi_angles_atoms[aa][0]
-            base_atom_position = [atom_positions[name] for name in base_atom_name]
+        # Previous sidechain atom rotations and translations for chi1
+        if chi_angles_mask[aa][0]:  # For chi1
+            base_atom_names = chi_angles_atoms[aa][0]
+            if len(base_atom_names) < 3:
+                continue  # Ensure there are enough atoms to define the rotation
+            base_atom_position = [atom_positions[name] for name in base_atom_names]
             PREVIOUS_SIDECHAIN_ATOM_ROTATIONS[aa, Torsion.CHI1, :, :] = (
                 create_rotation_matrix(
                     v1=base_atom_position[2] - base_atom_position[1],
@@ -444,14 +519,22 @@ def _init_heavy_atom_constants():
                 base_atom_position[2]
             )
 
-        # for chi2, chi3, chi4
+        # Previous sidechain atom rotations and translations for chi2, chi3, chi4
         for chi_idx in range(1, 4):
             if chi_angles_mask[aa][chi_idx]:
-                previous_end_atom_name = chi_angles_atoms[aa][chi_idx][2]
+                chi_atom_names = chi_angles_atoms[aa][chi_idx]
+                if len(chi_atom_names) < 3:
+                    continue  # Ensure there are enough atoms to define the rotation
+                previous_end_atom_name = chi_atom_names[2]
                 previous_end_atom_position = atom_positions[previous_end_atom_name]
                 PREVIOUS_SIDECHAIN_ATOM_ROTATIONS[aa, chi_idx + Torsion.CHI1, :, :] = (
                     create_rotation_matrix(
-                        v1=previous_end_atom_position, v2=torch.FloatTensor([-1, 0, 0])
+                        v1=previous_end_atom_position,
+                        v2=torch.tensor(
+                            [-1, 0, 0],
+                            dtype=torch.float32,
+                            device=PREVIOUS_SIDECHAIN_ATOM_ROTATIONS.device,
+                        ),
                     )
                 )
                 PREVIOUS_SIDECHAIN_ATOM_TRANSLATIONS[aa, chi_idx + Torsion.CHI1, :] = (
@@ -459,40 +542,54 @@ def _init_heavy_atom_constants():
                 )
 
 
-_init_heavy_atom_constants()
-
-
 def get_heavy_atom_constants(
     res_type: torch.Tensor,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    Retrieve heavy atom constants for the given residue types.
+
+    :param res_type: Tensor of residue types, shape (batch_size, num_residues).
+    :return: Tuple containing:
+        - prev_rotation: Previous sidechain atom rotations.
+        - prev_translation: Previous sidechain atom translations.
+        - torsion_index: Torsion index for heavy atoms.
+        - atom14_position: Atom positions for heavy atoms.
+    """
     N_batch, N_res = res_type.size()
     res_type = res_type.flatten()
-    prev_rotation = PREVIOUS_SIDECHAIN_ATOM_ROTATIONS.to(res_type.device)[
-        res_type
-    ].reshape(N_batch, N_res, 6, 3, 3)
-    prev_translation = PREVIOUS_SIDECHAIN_ATOM_TRANSLATIONS.to(res_type.device)[
-        res_type
-    ].reshape(N_batch, N_res, 6, 3)
-    torsion_index = HEAVY_ATOM_TORSION_INDEX.to(res_type.device)[res_type].reshape(
-        N_batch, N_res, 15
+
+    prev_rotation = PREVIOUS_SIDECHAIN_ATOM_ROTATIONS[res_type].reshape(
+        N_batch, N_res, 6, 3, 3
     )
-    atom14_position = HEAYY_ATOM_POSITIONS.to(res_type.device)[res_type].reshape(
-        N_batch, N_res, 15, 3
+    prev_translation = PREVIOUS_SIDECHAIN_ATOM_TRANSLATIONS[res_type].reshape(
+        N_batch, N_res, 6, 3
     )
+    torsion_index = HEAVY_ATOM_TORSION_INDEX[res_type].reshape(N_batch, N_res, 15)
+    atom14_position = HEAYY_ATOM_POSITIONS[res_type].reshape(N_batch, N_res, 15, 3)
+
     return prev_rotation, prev_translation, torsion_index, atom14_position
 
 
 def get_dihedral_mask(res_type: torch.Tensor) -> torch.Tensor:
+    """
+    Retrieve dihedral masks for the given residue types.
+
+    :param res_type: Tensor of residue types, shape (batch_size, num_residues).
+    :return: Mask tensor of shape (batch_size, num_residues, 4).
+    """
     N_batch, N_res = res_type.size()
     res_type = res_type.flatten()
+    # Convert residue types to list of chi_angles_mask
+    mask_list = [chi_angles_mask[aa] for aa in res_type.cpu().numpy()]
     mask = torch.tensor(
-        [chi_angles_mask[aa] for aa in res_type.cpu().numpy()],
+        mask_list,
         dtype=torch.bool,
         device=res_type.device,
     ).reshape(N_batch, N_res, 4)
     return mask
 
 
+# Backbone bond length and angle enums
 class BackboneBondLengths(Enum):
     """
     Enum for storing mean backbone bond lengths, taken from:

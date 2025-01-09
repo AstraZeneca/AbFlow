@@ -26,37 +26,43 @@ def get_frames_and_dihedrals(
 
     :param pos_heavyatom: Heavy atom coordinates of shape (N_batch, N_res, 15, 3)
     :param res_type: Amino acid type indices of shape (N_batch, N_res)
-    :return: backbone frame rotations of shape (N_batch, N_res, 3, 3),
-            backbone frame translations of shape (N_batch, N_res, 3),
-            dihedrals of shape (N_batch, N_res, 5), four sidechain dihedrals and one psi angle.
+    :return:
+        - frame_rotations: (N_batch, N_res, 3, 3)
+        - frame_translations: (N_batch, N_res, 3)
+        - dihedrals: (N_batch, N_res, 5) -> 4 sidechain dihedrals + 1 psi angle
     """
 
-    # get backbone frames
+    # Backbone frames
     CA_C_vector = pos_heavyatom[:, :, 2] - pos_heavyatom[:, :, 1]
     CA_N_vector = pos_heavyatom[:, :, 0] - pos_heavyatom[:, :, 1]
     CA_vector = pos_heavyatom[:, :, 1]
     frame_rotations = create_rotation_matrix(v1=CA_C_vector, v2=CA_N_vector)
     frame_translations = CA_vector
 
-    # get sidechain dihedrals
+    # Prepare sidechain dihedrals
     N_batch, N_res = res_type.shape
-    sidechain_dihedrals = torch.zeros(N_batch, N_res, 4, device=pos_heavyatom.device)
+    sidechain_dihedrals = torch.zeros(
+        N_batch, N_res, 4, device=pos_heavyatom.device, dtype=pos_heavyatom.dtype
+    )
+
+    res_type_cpu = res_type.detach().cpu().numpy()
     for b in range(N_batch):
         for r in range(N_res):
-            aa = res_type[b, r].item()
+            aa = res_type_cpu[b, r]
             base_atom_names = chi_angles_atoms[aa]
             for i, four_atom_names in enumerate(base_atom_names):
                 atom_indices = [
                     restype_atom14_name_to_index[aa][atom_name]
                     for atom_name in four_atom_names
                 ]
-                p = torch.stack([pos_heavyatom[b, r, i, :] for i in atom_indices])
-                dihedrals = get_dihedrals(p)
-                sidechain_dihedrals[b, r, i] = dihedrals
+                coords_4 = pos_heavyatom[b, r, atom_indices, :]
+                dihed_val = get_dihedrals(coords_4)
+                sidechain_dihedrals[b, r, i] = dihed_val
 
-    # get psi dihedral
-    psi_dihedrals = get_dihedrals(pos_heavyatom[:, :, :4, :])  # (N_batch, N_res)
+    # Compute psi dihedral
+    psi_dihedrals = get_dihedrals(pos_heavyatom[:, :, :4, :])
 
+    # Combine sidechain dihedrals + psi
     dihedrals = torch.cat([sidechain_dihedrals, psi_dihedrals.unsqueeze(-1)], dim=-1)
     return frame_rotations, frame_translations, dihedrals
 
@@ -71,16 +77,17 @@ def full_atom_reconstruction(
     Reconstruct full atomic coordinates from backbone frames and dihedrals.
     See AlphaFold2 Supplementary Algorithm 24 for details.
 
-    :param frame_rotations: Backbone frame rotations of shape (N_batch, N_res, 3, 3)
-    :param frame_translations: Backbone frame translations of shape (N_batch, N_res, 3)
-    :param dihedrals: Dihedrals of shape (N_batch, N_res, 5)
-    :param res_type: Amino acid type indices of shape (N_batch, N_res)
-    :return: Full atomic coordinates of shape (N_batch, N_res, 15, 3)
+    :param frame_rotations: (N_batch, N_res, 3, 3)
+    :param frame_translations: (N_batch, N_res, 3)
+    :param dihedrals: (N_batch, N_res, 5)
+    :param res_type: (N_batch, N_res)
+    :return:
+        - pos_heavyatom: (N_batch, N_res, 15, 3)
     """
 
     N_batch, N_res = res_type.size()
 
-    # get full atomic coordinates
+    # Compose rotations from chi + psi
     chi1_rotations, chi2_rotations, chi3_rotations, chi4_rotations, psi_rotations = (
         create_chi_rotation(dihedrals)
     )
@@ -126,26 +133,18 @@ def full_atom_reconstruction(
         ],
     )
 
-    R_all = torch.stack(
-        [frame_rotations, R_chi1, R_chi2, R_chi3, R_chi4, R_psi], dim=2
-    )  # (N_batch, N_res, 6, 3, 3)
+    # Stack them for indexing
+    R_all = torch.stack([frame_rotations, R_chi1, R_chi2, R_chi3, R_chi4, R_psi], dim=2)
     t_all = torch.stack(
         [frame_translations, t_chi1, t_chi2, t_chi3, t_chi4, t_psi], dim=2
-    )  # (N_batch, N_res, 6, 3)
+    )
+    index_R = torsion_index.reshape(N_batch, N_res, 15, 1, 1).repeat(1, 1, 1, 3, 3)
+    index_t = torsion_index.reshape(N_batch, N_res, 15, 1).repeat(1, 1, 1, 3)
 
-    index_R = torsion_index.reshape(N_batch, N_res, 15, 1, 1).repeat(
-        1, 1, 1, 3, 3
-    )  # (N_batch, N_res, 15, 3, 3)
-    index_t = torsion_index.reshape(N_batch, N_res, 15, 1).repeat(
-        1, 1, 1, 3
-    )  # (N_batch, N_res, 15, 3)
+    R_atom = torch.gather(R_all, 2, index_R)
+    t_atom = torch.gather(t_all, 2, index_t)
+    p_atom = atom14_position
 
-    R_atom = torch.gather(R_all, 2, index_R)  # (N_batch, N_res, 15, 3, 3)
-    t_atom = torch.gather(t_all, 2, index_t)  # (N_batch, N_res, 15, 3)
-    p_atom = atom14_position  # (N_batch, N_res, 15, 3)
-
-    pos_heavyatom = (
-        torch.einsum("bijkm,bijm->bijk", R_atom, p_atom) + t_atom
-    )  # (N_batch, N_res, 15, 3)
+    pos_heavyatom = torch.einsum("bijkm,bijm->bijk", R_atom, p_atom) + t_atom
 
     return pos_heavyatom

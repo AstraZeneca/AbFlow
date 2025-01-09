@@ -6,6 +6,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from typing import List
+import numpy as np
 
 from ..structure import get_frames_and_dihedrals
 from ..utils.utils import combine_coords, combine_masks, mask_data, average_data
@@ -62,15 +63,11 @@ def get_liability_issues(
     liability_issues = torch.zeros_like(pred_seq, dtype=torch.long)
 
     for liability in Liability:
-
         aa_indices = [AminoAcid1[aa].value for aa in liability.value]
         motif_length = len(aa_indices)
 
         motif_mask = torch.ones(
-            N_batch,
-            N_res - motif_length + 1,
-            dtype=torch.bool,
-            device=pred_seq.device,
+            N_batch, N_res - motif_length + 1, dtype=torch.bool, device=pred_seq.device
         )
         for i, aa_index in enumerate(aa_indices):
             motif_mask &= (
@@ -94,7 +91,6 @@ def get_liability_issues(
         liability_issues = torch.logical_or(liability_issues, motif_mask).long()
 
     liability_flags = average_data(liability_issues, masks=masks)
-
     return liability_flags
 
 
@@ -117,12 +113,11 @@ def kabsch_alignment(
     """
     assert P.shape == Q.shape, "Matrix dimensions must match"
     mask = combine_masks(masks, P)
-    assert mask.shape == P.shape, "Mask dimensions must match point matrices (B, N, 3)"
+    assert mask.shape == P.shape, "Mask dimensions must match (B, N, 3)"
 
     P_selected = P * mask
     Q_selected = Q * mask
 
-    # Compute centroids
     centroid_P = torch.sum(P_selected, dim=1, keepdim=True) / torch.sum(
         mask, dim=1, keepdim=True
     )
@@ -130,32 +125,26 @@ def kabsch_alignment(
         mask, dim=1, keepdim=True
     )
 
-    # Optimal translation
     t = centroid_Q - centroid_P
     t = t.squeeze(1)
 
-    # Center the points
     p = P - centroid_P
     q = Q - centroid_Q
 
-    # Compute the covariance matrix
     p_masked = p * mask
     q_masked = q * mask
     H = torch.matmul(p_masked.transpose(1, 2), q_masked)
 
-    # SVD
     U, S, Vt = torch.linalg.svd(H)
 
-    # Validate right-handed coordinate system
     d = torch.det(torch.matmul(Vt.transpose(1, 2), U.transpose(1, 2)))
     flip = d < 0.0
-    if flip.any().item():
-        Vt[flip, -1] *= -1.0
+    flip_indices = torch.nonzero(flip).squeeze(1)
+    if flip_indices.numel() > 0:
+        Vt[flip_indices, -1] *= -1.0
 
-    # Optimal rotation
     R = torch.matmul(Vt.transpose(1, 2), U.transpose(1, 2))
 
-    # apply rotation
     P_rotated = torch.einsum("bij, bnj -> bni", R, p)
 
     return P_rotated, q
@@ -186,21 +175,15 @@ def get_rmsd(
 
     pred_coord = combine_coords(*pred_coords)
     true_coord = combine_coords(*true_coords)
-    masks = (
-        [torch.repeat_interleave(mask, len(pred_coords), dim=-1) for mask in masks]
-        if masks is not None
-        else None
-    )
-    alignment_masks = (
-        [
+    if masks is not None:
+        masks = [
+            torch.repeat_interleave(mask, len(pred_coords), dim=-1) for mask in masks
+        ]
+    if alignment_masks is not None:
+        alignment_masks = [
             torch.repeat_interleave(mask, len(pred_coords), dim=-1)
             for mask in alignment_masks
         ]
-        if alignment_masks is not None
-        else None
-    )
-
-    if alignment_masks is not None:
         pred_coord, true_coord = kabsch_alignment(
             pred_coord, true_coord, alignment_masks
         )
@@ -208,7 +191,6 @@ def get_rmsd(
     sq_distance = torch.sum((pred_coord - true_coord) ** 2, dim=-1)
     mean_sq_distance = average_data(sq_distance, masks=masks)
     rmsd = torch.sqrt(mean_sq_distance)
-
     return rmsd
 
 
@@ -245,15 +227,12 @@ def get_tm_score(
         )
 
     combined_mask = combine_masks(masks, pred_coord[:, :, 0])
-
     L_target = combined_mask
     d0 = 1.24 * torch.pow(torch.clamp(L_target.float(), min=19) - 15, 1 / 3) - 1.8
 
     dist = torch.sqrt(torch.sum((pred_coord - true_coord) ** 2, dim=-1))
     tm_score_res = 1 / (1 + (dist / d0) ** 2)
-
     tm_score = average_data(tm_score_res, masks=masks)
-
     return tm_score
 
 
@@ -296,20 +275,19 @@ def get_bb_clash_violation(
     N_C_dist = torch.cdist(N_coords, C_coords.roll(1, dims=-2), p=2)
     CA_C_dist = torch.cdist(CA_coords, C_coords, p=2)
 
-    # cut the first row and column of N_C_dist
+    # Cut the first row/col in N_C_dist
     N_C_dist[:, 0] = C_N_lit_dist
     N_C_dist[:, :, 0] = C_N_lit_dist
 
-    # fill diagonals so that each residue itself is not penalised for being within VDW radius
     diag_mask_matrix = (
         torch.eye(N_dist.shape[1], device=N_dist.device).expand_as(N_dist).bool()
     )
-    N_dist = mask_data(N_dist, 1e9, diag_mask_matrix)
-    CA_dist = mask_data(CA_dist, 1e9, diag_mask_matrix)
-    C_dist = mask_data(C_dist, 1e9, diag_mask_matrix)
-    N_CA_dist = mask_data(N_CA_dist, 1e9, diag_mask_matrix)
-    N_C_dist = mask_data(N_C_dist, 1e9, diag_mask_matrix)
-    CA_C_dist = mask_data(CA_C_dist, 1e9, diag_mask_matrix)
+    N_dist = mask_data(N_dist, 1e9, diag_mask_matrix, in_place=True)
+    CA_dist = mask_data(CA_dist, 1e9, diag_mask_matrix, in_place=True)
+    C_dist = mask_data(C_dist, 1e9, diag_mask_matrix, in_place=True)
+    N_CA_dist = mask_data(N_CA_dist, 1e9, diag_mask_matrix, in_place=True)
+    N_C_dist = mask_data(N_C_dist, 1e9, diag_mask_matrix, in_place=True)
+    CA_C_dist = mask_data(CA_C_dist, 1e9, diag_mask_matrix, in_place=True)
 
     N_clash_loss = torch.clamp(N_N_lit_dist - tolerance - N_dist, min=0.0) / 2
     CA_clash_loss = torch.clamp(C_C_lit_dist - tolerance - CA_dist, min=0.0) / 2
@@ -326,9 +304,9 @@ def get_bb_clash_violation(
         + N_C_clash_loss
         + CA_C_clash_loss
     )
+
     masks_dim_2 = [mask[:, None, :] for mask in masks_dim_2]
     mask_dim_2 = combine_masks(masks_dim_2, total_clash_loss)
-
     total_clash_loss = (total_clash_loss * mask_dim_2).sum(dim=-1) / (
         mask_dim_2.sum(dim=-1) + 1e-9
     )
@@ -336,7 +314,6 @@ def get_bb_clash_violation(
 
     clash_loss = average_data(total_clash_loss, masks=masks_dim_1)
     clash_violation = average_data(total_clash_violation, masks=masks_dim_1)
-
     return clash_loss, clash_violation
 
 
@@ -382,12 +359,16 @@ def get_bb_bond_angle_violation(
     CA_C_N_bond_angles = torch.acos(cos_CA_C_N_bond_angles)
     C_N_CA_bond_angles = torch.acos(cos_C_N_CA_bond_angles)
 
-    # set the last element to the literature value
+    mask = combine_masks(masks, N_CA_C_bond_angles)
+    mask_np = mask.detach().cpu().numpy()
+
+    # For each batch, replace the last valid index with the reference angle
     for i in range(N_coords.shape[0]):
-        mask = combine_masks(masks, N_CA_C_bond_angles)
-        last_valid_idx = torch.nonzero(mask[i], as_tuple=True)[0].max().item()
-        CA_C_N_bond_angles[i, last_valid_idx] = BackboneBondAngles["CA_C_N"].value
-        C_N_CA_bond_angles[i, last_valid_idx] = BackboneBondAngles["C_N_CA"].value
+        idx_array = mask_np[i].nonzero()[0]
+        if len(idx_array) > 0:
+            last_valid_idx = idx_array[-1]
+            CA_C_N_bond_angles[i, last_valid_idx] = BackboneBondAngles["CA_C_N"].value
+            C_N_CA_bond_angles[i, last_valid_idx] = BackboneBondAngles["C_N_CA"].value
 
     N_CA_C_angle_loss = torch.clamp_min(
         torch.abs(N_CA_C_bond_angles - BackboneBondAngles["N_CA_C"].value)
@@ -410,7 +391,6 @@ def get_bb_bond_angle_violation(
 
     bond_angle_loss = average_data(total_angle_loss, masks=masks)
     bond_angle_violation = average_data(total_angle_violation, masks=masks)
-
     return bond_angle_loss, bond_angle_violation
 
 
@@ -442,13 +422,17 @@ def get_bb_bond_length_violation(
     """
     N_CA_bond_lengths = torch.norm(N_coords - CA_coords, dim=-1)
     CA_C_bond_lengths = torch.norm(CA_coords - C_coords, dim=-1)
-    # Roll the N coords, so that the coords are lined up correctly, and then cut the last element
     C_N_bond_lengths = torch.norm(C_coords - N_coords.roll(-1, dims=-2), dim=-1)
-    # set the last element to the literature value
+
+    mask = combine_masks(masks, N_CA_bond_lengths)
+    mask_np = mask.detach().cpu().numpy()
+
+    # Replace the last valid index in each batch with the literature value
     for i in range(N_coords.shape[0]):
-        mask = combine_masks(masks, N_CA_bond_lengths)
-        last_valid_idx = torch.nonzero(mask[i], as_tuple=True)[0].max().item()
-        C_N_bond_lengths[i, last_valid_idx] = BackboneBondLengths["C_N"].value
+        idx_array = mask_np[i].nonzero()[0]
+        if len(idx_array) > 0:
+            last_valid_idx = idx_array[-1]
+            C_N_bond_lengths[i, last_valid_idx] = BackboneBondLengths["C_N"].value
 
     N_CA_length_loss = torch.clamp_min(
         torch.abs(N_CA_bond_lengths - BackboneBondLengths["N_CA"].value)
@@ -471,7 +455,6 @@ def get_bb_bond_length_violation(
 
     bond_length_loss = average_data(total_length_loss, masks=masks)
     bond_length_violation = average_data(total_length_violation, masks=masks)
-
     return bond_length_loss, bond_length_violation
 
 
@@ -530,7 +513,6 @@ def get_sidechain_mae(
     diff = torch.abs(pred_dihedral_angles - true_dihedral_angles)
     diff = torch.min(diff, 2 * torch.pi - diff)
     sidechain_mae = average_data(diff, masks=masks)
-
     return sidechain_mae
 
 
@@ -558,44 +540,33 @@ def get_lddt(
     :param distance_cutoff: Distance cutoff for local region.
     :return: torch.Tensor: lDDT scores for each atom, shape (N_batch, N_res).
     """
-
-    # calculate the distance matrix of shape (N_batch, N_res, N_res)
     d_dist = torch.cdist(pred_coord, true_coord, p=2)
     d_dist_gt = torch.cdist(true_coord, true_coord, p=2)
-
     N_batch, N_res, _ = pred_coord.shape
     lddt_scores = torch.zeros(
         N_batch, N_res, device=pred_coord.device, dtype=pred_coord.dtype
     )
 
-    # distance thresholds
     thresholds = torch.tensor(
         [0.5, 1.0, 2.0, 4.0], device=pred_coord.device, dtype=pred_coord.dtype
     )
 
+    d_dist_gt_cpu = d_dist_gt.detach().cpu().numpy()
+    d_dist_cpu = d_dist.detach().cpu().numpy()
+
     for batch in range(N_batch):
         for i in range(N_res):
-            # Select atoms j in R_i if
-            # 1) the distance between atom i and j is less than the cutoff
-            # 2) the masked position is 1
-
-            R_i = (
-                ((d_dist_gt[batch, i] < distance_cutoff))
-                .nonzero(as_tuple=False)
-                .squeeze(1)
-            )
-
-            if len(R_i) == 0:
+            valid_indices = np.nonzero((d_dist_gt_cpu[batch, i] < distance_cutoff))[0]
+            if len(valid_indices) == 0:
                 continue
 
-            lddt_i = 0
-            for j in R_i:
-                d_dist_ij = d_dist[batch, i, j]
+            lddt_i = 0.0
+            for j in valid_indices:
+                d_dist_ij = d_dist_cpu[batch, i, j]
+                lddt_ij = (d_dist_ij < thresholds.cpu().numpy()).astype(float).mean()
+                lddt_i += lddt_ij
 
-                lddt_ij = (d_dist_ij < thresholds).float().mean()
-                lddt_i = lddt_i + lddt_ij
-
-            lddt_scores[batch, i] = lddt_i / len(R_i) * 100
+            lddt_scores[batch, i] = (lddt_i / len(valid_indices)) * 100
 
     return lddt_scores
 
@@ -615,7 +586,6 @@ def get_distance_error(pred_coord: torch.Tensor, true_coord: torch.Tensor):
     true_dist = torch.cdist(true_coord, true_coord, p=2)
 
     distance_error = torch.abs(pred_dist - true_dist)
-
     return distance_error
 
 
@@ -630,7 +600,7 @@ def get_alignment_error(
 
     :param pred_frame_coords: Predicted frame coordinates, shape (N_batch, N_res, 3, 3).
     :param true_frame_coords: True frame coordinates, shape (N_batch, N_res, 3, 3).
-    :param epsilon: Small value to zero near the bin boundary.
+    :param epsilon: Small value to avoid zero near the bin boundary.
     :return: torch.Tensor: Alignment error for pairs of residues in each complex, shape (N_batch, N_res, N_res).
     """
 
@@ -655,7 +625,6 @@ def get_alignment_error(
     alignment_error = torch.sqrt(
         torch.sum((pred_aligned_dist - true_aligned_dist) ** 2, dim=-1) + epsilon
     )
-
     return alignment_error
 
 
@@ -674,7 +643,6 @@ def average_bins(
     bins = torch.linspace(bin_min, bin_max, steps=num_bins + 1, device=data.device)
     bin_centers = (bins[1:] + bins[:-1]) / 2
     weighted_avg = torch.sum(data * bin_centers, dim=-1)
-
     return weighted_avg
 
 
@@ -705,12 +673,13 @@ def get_ptm_score(
 
     target_length = combined_mask
     d0 = 1.24 * torch.pow(torch.clamp(target_length.float(), min=19) - 15, 1 / 3) - 1.8
+
     bin_centers = (bins[1:] + bins[:-1]) / 2
     tm_weights = 1 / (1 + (bin_centers[None, None, None, :] / d0[:, :, :, None]) ** 2)
+
     weighted_scores = torch.sum(pae_dist * tm_weights, dim=-1)
     ptm_scores = torch.sum(weighted_scores * combined_mask, dim=-1)
     ptm_scores = torch.amax(ptm_scores, dim=-1)
-
     return ptm_scores
 
 
@@ -727,21 +696,16 @@ def get_likelihood(
     :param masks: List of masks to apply, each shape (N_batch, N_res).
     :return: Average log-likelihood score for each batch, shape (N_batch,).
     """
-    likelihood = torch.gather(
-        pred_res_type_prob, -1, true_res_type.unsqueeze(-1)
-    ).squeeze(-1)
+    likelihood = torch.gather(pred_res_type_prob, -1, true_res_type[..., None]).squeeze(
+        -1
+    )
     log_likelihood = torch.log(likelihood)
 
     average_log_likelihood = average_data(log_likelihood, masks=masks)
-
     return average_log_likelihood
 
 
 class AbFlowMetrics(nn.Module):
-    """
-    This class takes in the antibody and antigen structures and computes the metrics for each data in a batch.
-    """
-
     def __init__(self):
         super().__init__()
 
@@ -749,7 +713,7 @@ class AbFlowMetrics(nn.Module):
 
         metrics = {}
 
-        # sequence metrics
+        # Sequence metrics
         metrics["aar/redesign"] = get_aar(
             pred_data_dict["res_type"],
             true_data_dict["res_type"],
@@ -769,7 +733,7 @@ class AbFlowMetrics(nn.Module):
                 ],
             )
 
-        # backbone N, CA, C metrics
+        # Backbone metrics
         metrics["rmsd/redesign"] = get_rmsd(
             [
                 pred_data_dict["pos_heavyatom"][:, :, 0, :],
@@ -782,31 +746,30 @@ class AbFlowMetrics(nn.Module):
                 true_data_dict["pos_heavyatom"][:, :, 2, :],
             ],
             masks=[true_data_dict["redesign_mask"], true_data_dict["valid_mask"]],
-            alignment_masks=None,
         )
         _, metrics["bb_clash_violation/redesign"] = get_bb_clash_violation(
-            N_coords=pred_data_dict["pos_heavyatom"][:, :, 0, :],
-            CA_coords=pred_data_dict["pos_heavyatom"][:, :, 1, :],
-            C_coords=pred_data_dict["pos_heavyatom"][:, :, 2, :],
+            pred_data_dict["pos_heavyatom"][:, :, 0, :],
+            pred_data_dict["pos_heavyatom"][:, :, 1, :],
+            pred_data_dict["pos_heavyatom"][:, :, 2, :],
             masks_dim_1=[true_data_dict["redesign_mask"], true_data_dict["valid_mask"]],
             masks_dim_2=[true_data_dict["valid_mask"]],
         )
         _, metrics["bb_bond_angle_violation/redesign"] = get_bb_bond_angle_violation(
-            N_coords=pred_data_dict["pos_heavyatom"][:, :, 0, :],
-            CA_coords=pred_data_dict["pos_heavyatom"][:, :, 1, :],
-            C_coords=pred_data_dict["pos_heavyatom"][:, :, 2, :],
+            pred_data_dict["pos_heavyatom"][:, :, 0, :],
+            pred_data_dict["pos_heavyatom"][:, :, 1, :],
+            pred_data_dict["pos_heavyatom"][:, :, 2, :],
             masks=[true_data_dict["redesign_mask"], true_data_dict["valid_mask"]],
         )
         _, metrics["bb_bond_length_violation/redesign"] = get_bb_bond_length_violation(
-            N_coords=pred_data_dict["pos_heavyatom"][:, :, 0, :],
-            CA_coords=pred_data_dict["pos_heavyatom"][:, :, 1, :],
-            C_coords=pred_data_dict["pos_heavyatom"][:, :, 2, :],
+            pred_data_dict["pos_heavyatom"][:, :, 0, :],
+            pred_data_dict["pos_heavyatom"][:, :, 1, :],
+            pred_data_dict["pos_heavyatom"][:, :, 2, :],
             masks=[true_data_dict["redesign_mask"], true_data_dict["valid_mask"]],
         )
         metrics["total_violation/redesign"] = get_total_violation(
-            N_coords=pred_data_dict["pos_heavyatom"][:, :, 0, :],
-            CA_coords=pred_data_dict["pos_heavyatom"][:, :, 1, :],
-            C_coords=pred_data_dict["pos_heavyatom"][:, :, 2, :],
+            pred_data_dict["pos_heavyatom"][:, :, 0, :],
+            pred_data_dict["pos_heavyatom"][:, :, 1, :],
+            pred_data_dict["pos_heavyatom"][:, :, 2, :],
             masks_dim_1=[true_data_dict["redesign_mask"], true_data_dict["valid_mask"]],
             masks_dim_2=[true_data_dict["valid_mask"]],
         )
@@ -826,16 +789,14 @@ class AbFlowMetrics(nn.Module):
                     true_data_dict["region_index"] == region_index,
                     true_data_dict["valid_mask"],
                 ],
-                alignment_masks=None,
             )
         metrics["tm_score/antibody"] = get_tm_score(
             pred_data_dict["pos_heavyatom"][:, :, 1, :],
             true_data_dict["pos_heavyatom"][:, :, 1, :],
             masks=[true_data_dict["antibody_mask"], true_data_dict["valid_mask"]],
-            alignment_masks=None,
         )
 
-        # sidechain dihedrals metrics - add or remove the oxygen dihedral
+        # Sidechain dihedral metrics
         _, _, pred_dihedrals = get_frames_and_dihedrals(
             pred_data_dict["pos_heavyatom"], pred_data_dict["res_type"]
         )
@@ -845,6 +806,7 @@ class AbFlowMetrics(nn.Module):
         pred_sidechain_dihedrals = pred_dihedrals[:, :, :4]
         true_sidechain_dihedrals = true_dihedrals[:, :, :4]
         true_sidechain_dihedral_mask = get_dihedral_mask(true_data_dict["res_type"])
+
         metrics["sidechain_mae/redesign"] = get_sidechain_mae(
             pred_sidechain_dihedrals,
             true_sidechain_dihedrals,
@@ -854,14 +816,13 @@ class AbFlowMetrics(nn.Module):
                 true_sidechain_dihedral_mask,
             ],
         )
-        chi1_mask = torch.zeros_like(true_sidechain_dihedrals, dtype=torch.bool)
-        chi1_mask[:, :, 0] = True
-        chi2_mask = torch.zeros_like(true_sidechain_dihedrals, dtype=torch.bool)
-        chi2_mask[:, :, 1] = True
-        chi3_mask = torch.zeros_like(true_sidechain_dihedrals, dtype=torch.bool)
-        chi3_mask[:, :, 2] = True
-        chi4_mask = torch.zeros_like(true_sidechain_dihedrals, dtype=torch.bool)
-        chi4_mask[:, :, 3] = True
+
+        chi_masks = []
+        for chi_idx in range(4):
+            chi_mask = torch.zeros_like(true_sidechain_dihedrals, dtype=torch.bool)
+            chi_mask[:, :, chi_idx] = True
+            chi_masks.append(chi_mask)
+
         metrics["sidechain_mae_chi1/redesign"] = torch.rad2deg(
             get_sidechain_mae(
                 pred_sidechain_dihedrals,
@@ -870,7 +831,7 @@ class AbFlowMetrics(nn.Module):
                     true_data_dict["redesign_mask"],
                     true_data_dict["valid_mask"],
                     true_sidechain_dihedral_mask,
-                    chi1_mask,
+                    chi_masks[0],
                 ],
             )
         )
@@ -882,7 +843,7 @@ class AbFlowMetrics(nn.Module):
                     true_data_dict["redesign_mask"],
                     true_data_dict["valid_mask"],
                     true_sidechain_dihedral_mask,
-                    chi2_mask,
+                    chi_masks[1],
                 ],
             )
         )
@@ -894,7 +855,7 @@ class AbFlowMetrics(nn.Module):
                     true_data_dict["redesign_mask"],
                     true_data_dict["valid_mask"],
                     true_sidechain_dihedral_mask,
-                    chi3_mask,
+                    chi_masks[2],
                 ],
             )
         )
@@ -906,18 +867,18 @@ class AbFlowMetrics(nn.Module):
                     true_data_dict["redesign_mask"],
                     true_data_dict["valid_mask"],
                     true_sidechain_dihedral_mask,
-                    chi4_mask,
+                    chi_masks[3],
                 ],
             )
         )
 
-        # averaged confidence scores
+        # Confidence metrics
         metrics["confidence_plddt/redesign"] = pred_data_dict["plddt_redesign"]
         metrics["confidence_pae/redesign"] = pred_data_dict["pae_redesign"]
         metrics["confidence_pde/redesign"] = pred_data_dict["pde_redesign"]
         metrics["confidence_ptm/redesign"] = pred_data_dict["ptm_redesign"]
 
-        # get likelihoods
+        # Log likelihood
         metrics["likelihood/redesign"] = get_likelihood(
             pred_data_dict["res_type_prob"],
             true_data_dict["res_type"],
@@ -927,7 +888,7 @@ class AbFlowMetrics(nn.Module):
             ],
         )
 
-        # remove nans
+        # Remove nans
         for key in metrics:
             if isinstance(metrics[key], torch.Tensor):
                 metrics[key] = metrics[key][~torch.isnan(metrics[key])]

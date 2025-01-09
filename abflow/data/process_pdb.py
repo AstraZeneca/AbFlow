@@ -1,7 +1,8 @@
 """
 PDB Processing Pipeline for AbFlow.
 
-This script processes PDB files for use in AbFlow, including filling missing atoms, extracting chain data, and outputting processed PDB files.
+This script processes PDB files for use in AbFlow, including filling missing atoms, 
+extracting chain data, and outputting processed input data dictionary.
 
 ### Example Usage:
 ```python
@@ -9,13 +10,12 @@ from abflow.data.process_pdb import fill_missing_atoms, process_pdb_to_lmdb, pro
 
 # pdb file to input data dict
 pdb_file = "9c44.pdb"
-sabdab_summary_file = "9c44.tsv"
 
 ## Step 1: Fix PDB file to ensure missing atoms and residues are filled
 fill_missing_atoms(pdb_file)
 
 ## Step 2: Extract raw ab-ag data from PDB file and SAbDab summary file
-data = process_pdb_to_lmdb(pdb_file, sabdab_summary_file, id=0)
+data = process_pdb_to_lmdb(pdb_file, model_id=0, heavy_chain_id="H", light_chain_id="L", antigen_chain_ids=["A"], scheme="chothia")
 
 ## Step 3: Process data for AbFlow input
 processed_data = process_lmdb_chain(data)
@@ -41,7 +41,7 @@ from abnumber import Chain as AbnumberChain
 from pdbfixer import PDBFixer
 from openmm.app import PDBFile
 
-from abflow.constants import (
+from ..constants import (
     region_to_index,
     restype_to_heavyatom_names,
     aa3_name_to_index,
@@ -49,18 +49,16 @@ from abflow.constants import (
     antibody_index,
     antigen_index,
     aa3_index_to_name,
-    restype_to_heavyatom_names,
 )
-
-from abflow.nn.modules.features import (
+from ..structure import get_frames_and_dihedrals
+from ..nn.modules.features import (
     OneHotEmbedding,
     DihedralEmbedding,
     CBDistogramEmbedding,
     CAUnitVectorEmbedding,
     RelativePositionEncoding,
 )
-from abflow.structure import get_frames_and_dihedrals
-from abflow.flow.rotation import rotmat_to_rotvec
+from ..flow.rotation import rotmat_to_rotvec
 
 
 def fill_missing_atoms(input_pdb: str):
@@ -132,7 +130,6 @@ def extract_chain_data(
         data[chain_name]["cdr_locations"] = [region_index] * len(data[chain_name]["aa"])
     else:
         for pos, aa in ab_chain:
-
             if chain_name == "heavy":
                 if pos in ab_chain.cdr1_dict:
                     cdr_region = "hcdr1"
@@ -153,7 +150,6 @@ def extract_chain_data(
                     cdr_region = "framework"
 
             region_index = region_to_index.get(cdr_region, region_to_index["framework"])
-
             data[chain_name]["cdr_locations"].append(region_index)
 
 
@@ -199,24 +195,22 @@ def process_pdb_to_lmdb(
             ab_chain = AbnumberChain(pdb_chain_seq, scheme=scheme)
             extract_chain_data(model[chain_id], data, chain_name, ab_chain)
 
-            # record heavy_ctype and light_ctype
             if chain_name == "heavy":
                 data["heavy_ctype"] = ab_chain.chain_type
             elif chain_name == "light":
                 data["light_ctype"] = ab_chain.chain_type
 
-    for chain_name in ["heavy", "light", "antigen"]:
-        data[chain_name]["aa"] = torch.tensor(
-            np.array(data[chain_name]["aa"]), dtype=torch.long
+    for cn in ["heavy", "light", "antigen"]:
+        chain_data = data[cn]
+        chain_data["aa"] = torch.tensor(np.array(chain_data["aa"]), dtype=torch.long)
+        chain_data["res_nb"] = torch.tensor(
+            np.array(chain_data["res_nb"]), dtype=torch.long
         )
-        data[chain_name]["res_nb"] = torch.tensor(
-            np.array(data[chain_name]["res_nb"]), dtype=torch.long
+        chain_data["cdr_locations"] = torch.tensor(
+            np.array(chain_data["cdr_locations"]), dtype=torch.long
         )
-        data[chain_name]["cdr_locations"] = torch.tensor(
-            np.array(data[chain_name]["cdr_locations"]), dtype=torch.long
-        )
-        data[chain_name]["pos_heavyatom"] = torch.tensor(
-            np.array(data[chain_name]["pos_heavyatom"]), dtype=torch.float32
+        chain_data["pos_heavyatom"] = torch.tensor(
+            np.array(chain_data["pos_heavyatom"]), dtype=torch.float32
         )
 
     return data
@@ -224,10 +218,9 @@ def process_pdb_to_lmdb(
 
 def process_lmdb_chain(data: dict) -> dict:
     """
-    Concatenate chains and create `res_type`, `chain_type`, `res_index`, `region_index`, `pos_heavyatom`, `antibody_mask`, and `antigen_mask`.
+    Concatenate chains and create a chain data dictionary.
 
     :param data: Dictionary containing the original lmdb data for a single complex.
-
     :return: Dictionary with the following information:
         - res_type: A tensor of shape (N_res,) containing the amino acid type index for each residue.
         - chain_type: A tensor of shape (N_res,) containing the chain type index for each residue.
@@ -247,11 +240,10 @@ def process_lmdb_chain(data: dict) -> dict:
     pos_heavyatom_list = []
 
     chain_names = ["heavy", "light", "antigen"]
-    chain_id = 0
+    chain_id_counter = 0
 
     for chain_name in chain_names:
         chain_data = data.get(chain_name)
-
         if chain_data is not None:
             res_type_list.append(chain_data["aa"])
             if chain_name == "light":
@@ -278,15 +270,17 @@ def process_lmdb_chain(data: dict) -> dict:
                 chain_type_list.append(
                     torch.full_like(chain_data["aa"], chain_id_to_index[chain_name])
                 )
-            chain_id_list.append(torch.full_like(chain_data["aa"], chain_id))
-            chain_id += 1
+            chain_id_list.append(torch.full_like(chain_data["aa"], chain_id_counter))
+            chain_id_counter += 1
             res_index_list.append(chain_data["res_nb"])
+
             if chain_name == "antigen":
                 region_index_list.append(
                     torch.full_like(chain_data["aa"], region_to_index["antigen"])
                 )
             else:
                 region_index_list.append(chain_data["cdr_locations"])
+
             pos_heavyatom_list.append(chain_data["pos_heavyatom"])
 
     res_type = torch.cat(res_type_list)
@@ -295,6 +289,7 @@ def process_lmdb_chain(data: dict) -> dict:
     res_index = torch.cat(res_index_list)
     region_index = torch.cat(region_index_list)
     pos_heavyatom = torch.cat(pos_heavyatom_list)
+
     antibody_mask = torch.isin(chain_type, torch.tensor(antibody_index))
     antigen_mask = torch.isin(chain_type, torch.tensor(antigen_index))
 
@@ -374,47 +369,41 @@ def output_to_pdb(data: Dict[str, torch.Tensor], path: str):
     model = Model.Model(0)
     structure.add(model)
 
-    chain_mapping = {
-        0: "A",  # Antigen
-        1: "H",  # Heavy chain
-        2: "K",  # Kappa light chain
-        3: "L",  # Lambda light chain
-    }
+    chain_type_cpu = data["chain_type"].detach().cpu().numpy()
+    res_index_cpu = data["res_index"].detach().cpu().numpy()
+    res_type_cpu = data["res_type"].detach().cpu().numpy()
+    pos_heavyatom_cpu = data["pos_heavyatom"].detach().cpu().numpy()
 
-    chain_ids = torch.unique(data["chain_type"]).tolist()
-    chains = {
-        chain_id: BiopythonChain.Chain(chain_mapping[chain_id])
-        for chain_id in chain_ids
-    }
+    chain_mapping = {0: "A", 1: "H", 2: "K", 3: "L"}
+    chain_ids = np.unique(chain_type_cpu).tolist()
+    chains = {cid: BiopythonChain.Chain(chain_mapping[cid]) for cid in chain_ids}
 
-    for chain in chains.values():
-        model.add(chain)
+    for ch in chains.values():
+        model.add(ch)
 
-    res_type = data["res_type"]
-    chain_type = data["chain_type"]
-    res_index = data["res_index"]
-    pos_heavyatom = data["pos_heavyatom"]
-
-    for i in range(res_type.size(0)):
-        chain_id = chain_type[i].item()
-        residue_index = res_index[i].item()
-        residue_type = res_type[i].item()
+    for i in range(len(res_type_cpu)):
+        chain_id = chain_type_cpu[i]
+        residue_index = res_index_cpu[i]
+        residue_type = res_type_cpu[i]
 
         chain = chains[chain_id]
         residue_name = list(aa3_index_to_name.values())[residue_type]
+
         residue = Residue((" ", residue_index, " "), residue_name, 0)
         chain.add(residue)
 
         heavy_atoms = restype_to_heavyatom_names[residue_type]
+
         for atom_index, atom_name in enumerate(heavy_atoms):
-            if atom_name == "" or atom_name == "OXT":
+            if not atom_name or atom_name == "OXT":
                 continue
             element = atom_name[0]
-            atom_coords = pos_heavyatom[i, atom_index].tolist()
-            if any(c != 0.0 for c in atom_coords):
+            atom_coords = pos_heavyatom_cpu[i, atom_index]
+
+            if not np.allclose(atom_coords, 0.0):
                 atom = Atom.Atom(
                     atom_name,
-                    atom_coords,
+                    atom_coords.tolist(),
                     1.0,
                     1.0,
                     " ",

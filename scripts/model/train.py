@@ -13,17 +13,52 @@ import torch
 import yaml
 import traceback
 
-from pytorch_lightning.strategies import DDPStrategy
-from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
-from pytorch_lightning.loggers import WandbLogger
-from pytorch_lightning.trainer import Trainer
+
 from datetime import timedelta
+import pytorch_lightning as pl
+from pytorch_lightning.strategies import DDPStrategy, FSDPStrategy
+from pytorch_lightning.strategies import DDPStrategy, FSDPStrategy
+from pytorch_lightning.callbacks import (
+    LearningRateMonitor,
+    ModelCheckpoint,
+    TQDMProgressBar,
+)
+from pytorch_lightning.loggers import CSVLogger, WandbLogger
 
 from abflow.utils.training import setup_model
 from abflow.utils.arguments import get_arguments, get_config, print_config_summary
 
 # Set the NCCL blocking wait environment variable
-os.environ["NCCL_BLOCKING_WAIT"] = "1"
+# os.environ["NCCL_BLOCKING_WAIT"] = "1"
+# os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+
+
+from torch.profiler import ProfilerActivity
+from pytorch_lightning.profilers import PyTorchProfiler
+
+
+# Define a short schedule (adjust wait/warmup/active as needed)
+schedule = torch.profiler.schedule(
+    wait=0,  # Number of steps to skip profiling
+    warmup=1,  # Number of steps to warm up before collecting
+    active=3,  # Number of steps to actively profile
+    repeat=1,
+)
+
+
+profiler = PyTorchProfiler(
+    dirpath=".",  # Directory to save profiling traces
+    filename="profile_trace",  # File prefix for traces
+    activities=[  # What to profile (CPU and/or GPU)
+        ProfilerActivity.CPU,
+        ProfilerActivity.CUDA,
+    ],
+    schedule=schedule,
+    on_trace_ready=torch.profiler.tensorboard_trace_handler("./logs"),
+    record_shapes=True,  # Include shapes of operator inputs
+    profile_memory=True,  # Track memory usage
+    with_stack=True,  # Collect stack traces
+)
 
 
 def train(config: dict):
@@ -57,26 +92,33 @@ def train(config: dict):
     )
     callbacks.append(checkpoint_callback)
 
+    # Progress bar
+    tqdm = TQDMProgressBar(refresh_rate=10)
+    callbacks.append(tqdm)
+
     # Logger
     logger = WandbLogger(
         project=config["project_name"], name=config["model_name"], log_model=False
     )
 
     # Trainer
-    trainer = Trainer(
+    trainer = pl.Trainer(
         devices=config["trainer"]["devices"],
         accelerator="gpu",
         strategy=DDPStrategy(
             timeout=timedelta(seconds=15400), find_unused_parameters=True
         ),
         precision=config["trainer"]["precision"],
+        # max_steps=10,
         max_epochs=config["trainer"]["max_epochs"],
+        accumulate_grad_batches=config["trainer"]["accumulate_grad_batches"],
         logger=logger,
         callbacks=callbacks,
         enable_checkpointing=True,
         val_check_interval=config["trainer"]["val_check_interval"],
         log_every_n_steps=config["trainer"]["log_every_n_steps"],
         gradient_clip_val=config["trainer"]["gradient_clip_val"],
+        # profiler=profiler,
     )
 
     trainer.fit(model, datamodule=datamodule)
