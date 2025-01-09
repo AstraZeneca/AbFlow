@@ -75,7 +75,7 @@ def train(config: dict):
         callbacks=callbacks,
         enable_checkpointing=True,
         val_check_interval=config["trainer"]["val_check_interval"],
-        log_every_n_steps=10,
+        log_every_n_steps=config["trainer"]["log_every_n_steps"],
         gradient_clip_val=config["trainer"]["gradient_clip_val"],
     )
 

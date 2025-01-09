@@ -135,8 +135,8 @@ class FlowPrediction(nn.Module):
             z_inputs_ij,
             s_i,
             z_ij,
-            pred_data_dict["pos_heavyatom"][:, :, 1, :],
-            true_data_dict["pos_heavyatom"][:, :, 1, :],
+            pred_data_dict["pos_heavyatom"][:, :, :3, :],
+            true_data_dict["pos_heavyatom"][:, :, :3, :],
         )
         pred_loss_dict.update(pred_loss_update)
         true_loss_dict.update(true_loss_update)
@@ -165,11 +165,12 @@ class FlowPrediction(nn.Module):
         )
         # confidence module - per residue level confidence scores
         pred_data_update = self.confidence_module.predict(
+            pred_data_dict,
             s_inputs_i,
             z_inputs_ij,
             s_i,
             z_ij,
-            pred_data_dict["pos_heavyatom"][:, :, 1, :],
+            pred_data_dict["pos_heavyatom"][:, :, :3, :],
         )
         pred_data_dict.update(pred_data_update)
 

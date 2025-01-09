@@ -111,12 +111,24 @@ class AbFlowLoss(nn.Module):
             loss_dict["confidence_lddt_loss"] = get_ce_loss(
                 pred_loss_dict["lddt_one_hot"],
                 true_loss_dict["lddt_one_hot"],
-                masks=[true_loss_dict["redesign_mask"], true_loss_dict["valid_mask"]],
+                masks=[true_loss_dict["valid_mask"]],
             )
-            # loss_dict["ptm_loss"]
-            # loss_dict["pae_loss"]
-            # interface residues metrics, ipae, iLDDT, iTM etc.
-            # loglikelihood (native sequence), per data
+            loss_dict["confidence_de_loss"] = get_ce_loss(
+                pred_loss_dict["de_one_hot"],
+                true_loss_dict["de_one_hot"],
+                masks=[
+                    true_loss_dict["valid_mask"][:, None, :],
+                    true_loss_dict["valid_mask"][:, :, None],
+                ],
+            )
+            loss_dict["confidence_ae_loss"] = get_ce_loss(
+                pred_loss_dict["ae_one_hot"],
+                true_loss_dict["ae_one_hot"],
+                masks=[
+                    true_loss_dict["valid_mask"][:, None, :],
+                    true_loss_dict["valid_mask"][:, :, None],
+                ],
+            )
 
         # weighting and summing the losses
         for loss_name, loss_value in loss_dict.items():

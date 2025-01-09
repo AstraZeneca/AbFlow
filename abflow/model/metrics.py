@@ -20,6 +20,8 @@ from ..constants import (
     region_to_index,
     get_dihedral_mask,
 )
+from ..nn.modules.features import express_coords_in_frames
+from ..geometry import create_rotation_matrix
 
 
 def get_aar(
@@ -535,7 +537,6 @@ def get_sidechain_mae(
 def get_lddt(
     pred_coord: torch.Tensor,
     true_coord: torch.Tensor,
-    masks: list[torch.Tensor] = None,
     distance_cutoff: float = 15.0,
 ):
     """
@@ -554,11 +555,9 @@ def get_lddt(
 
     :param pred_coord: Predicted atom coords, shape (N_batch, N_res, 3).
     :param true_coord: Ground truth atom coords, shape (N_batch, N_res, 3).
-    :param masks: List of masks to apply to first dimension, each shape less than or equal to (N_batch, N_res).
     :param distance_cutoff: Distance cutoff for local region.
     :return: torch.Tensor: lDDT scores for each atom, shape (N_batch, N_res).
     """
-    mask = combine_masks(masks, pred_coord[:, :, 0])
 
     # calculate the distance matrix of shape (N_batch, N_res, N_res)
     d_dist = torch.cdist(pred_coord, true_coord, p=2)
@@ -579,10 +578,9 @@ def get_lddt(
             # Select atoms j in R_i if
             # 1) the distance between atom i and j is less than the cutoff
             # 2) the masked position is 1
-            mask_i = mask[batch]
 
             R_i = (
-                ((d_dist_gt[batch, i] < distance_cutoff) & (mask_i))
+                ((d_dist_gt[batch, i] < distance_cutoff))
                 .nonzero(as_tuple=False)
                 .squeeze(1)
             )
@@ -602,26 +600,118 @@ def get_lddt(
     return lddt_scores
 
 
-def average_plddt(p_plddt_i: torch.Tensor) -> torch.Tensor:
+def get_distance_error(pred_coord: torch.Tensor, true_coord: torch.Tensor):
     """
-    Compute the pLDDT score during inference as the weighted average of the bin centers (1, 3, etc).
+    Compute the absolute distance error between predicted and true distance matrix.
+    This distance matrix is CA atom distance matrix to be used in confidence pde loss.
 
-    \[
-    \text{plddt}_{i} = \sum_{b=1}^{50} c_b p_{i}^{b}
-    \]
-
-    where:
-    - \( c_b \) are the center values of the bins.
-    - \( p_{i}^{b} \) is the probability for bin \( b \) for residue \( i \).
-
-    :param p_plddt_i: Predicted probabilities for each bin, shape (N_batch, N_res, 50).
-    :return: pLDDT scores for each residue, shape (N_batch, N_res).
+    :param pred_coord: Predicted atom coords, shape (N_batch, N_res, 3).
+    :param true_coord: Ground truth atom coords, shape (N_batch, N_res, 3).
+    :param masks: List of masks to apply to first dimension, each shape less than or equal to (N_batch, N_res).
+    :return: torch.Tensor: Distance error for pairs of residues in each complex, shape (N_batch, N_res, N_res).
     """
-    bins = torch.linspace(0, 100, steps=51, device=p_plddt_i.device)
+
+    pred_dist = torch.cdist(pred_coord, pred_coord, p=2)
+    true_dist = torch.cdist(true_coord, true_coord, p=2)
+
+    distance_error = torch.abs(pred_dist - true_dist)
+
+    return distance_error
+
+
+def get_alignment_error(
+    pred_frame_coords: torch.Tensor,
+    true_frame_coords: torch.Tensor,
+    epsilon: float = 1e-8,
+) -> torch.Tensor:
+    """
+    Compute the l2 norm distance error after aligning the coordinates using local frame orientation.
+    Algorithm 30 from the AlphaFold3 paper.
+
+    :param pred_frame_coords: Predicted frame coordinates, shape (N_batch, N_res, 3, 3).
+    :param true_frame_coords: True frame coordinates, shape (N_batch, N_res, 3, 3).
+    :param epsilon: Small value to zero near the bin boundary.
+    :return: torch.Tensor: Alignment error for pairs of residues in each complex, shape (N_batch, N_res, N_res).
+    """
+
+    N_pred_coords = pred_frame_coords[:, :, 0, :]
+    CA_pred_coords = pred_frame_coords[:, :, 1, :]
+    C_pred_coords = pred_frame_coords[:, :, 2, :]
+    N_true_coords = true_frame_coords[:, :, 0, :]
+    CA_true_coords = true_frame_coords[:, :, 1, :]
+    C_true_coords = true_frame_coords[:, :, 2, :]
+
+    pred_CA_C_vector = C_pred_coords - CA_pred_coords
+    pred_CA_N_vector = N_pred_coords - CA_pred_coords
+    pred_frame_orient = create_rotation_matrix(v1=pred_CA_C_vector, v2=pred_CA_N_vector)
+
+    true_CA_C_vector = C_true_coords - CA_true_coords
+    true_CA_N_vector = N_true_coords - CA_true_coords
+    true_frame_orient = create_rotation_matrix(v1=true_CA_C_vector, v2=true_CA_N_vector)
+
+    pred_aligned_dist = express_coords_in_frames(CA_pred_coords, pred_frame_orient)
+    true_aligned_dist = express_coords_in_frames(CA_true_coords, true_frame_orient)
+
+    alignment_error = torch.sqrt(
+        torch.sum((pred_aligned_dist - true_aligned_dist) ** 2, dim=-1) + epsilon
+    )
+
+    return alignment_error
+
+
+def average_bins(
+    data: torch.Tensor, bin_min: float, bin_max: float, num_bins: int
+) -> torch.Tensor:
+    """
+    Compute the weighted average of bin centers along the last dimension of the input tensor.
+
+    :param data: Input tensor containing probabilities for each bin, shape (..., num_bins).
+    :param bin_min: Minimum value of the bin range.
+    :param bin_max: Maximum value of the bin range.
+    :param num_bins: Number of bins.
+    :return: Weighted average scores along the last dimension, shape (...).
+    """
+    bins = torch.linspace(bin_min, bin_max, steps=num_bins + 1, device=data.device)
     bin_centers = (bins[1:] + bins[:-1]) / 2
-    lddt_per_residue = torch.sum(p_plddt_i * bin_centers[None, None, :], dim=-1)
+    weighted_avg = torch.sum(data * bin_centers, dim=-1)
 
-    return lddt_per_residue
+    return weighted_avg
+
+
+def get_ptm_score(
+    pae_dist: torch.Tensor,
+    bin_min: float,
+    bin_max: float,
+    num_bins: int,
+    masks: List[torch.Tensor] = None,
+) -> torch.Tensor:
+    """
+    Approximate the TM-score for a set of residues from predicted alignment error distribution
+    as in AlphaFold2 supplementary information section 1.9.7.
+
+    pTM = max_{i} 1 / N_res * sum_{j} E[f(e_ij)]
+    where the expectation is taken over the probability distribution defined by e_ij.
+
+    This function can compute a TM-score prediction for any subset of residues by
+    restricting the range of residues via masks.
+
+    :param pae_dist: Predicted alignment error distribution, shape (N_batch, N_res, N_res, num_bins).
+    :param bins: Bin edges for the distance distribution, shape (num_bins + 1,).
+    :param masks: Optional list of masks to restrict residue range, each of shape (N_batch, N_res, N_res).
+    :return: TM-score predictions, shape (N_batch,).
+    """
+    bins = torch.linspace(bin_min, bin_max, steps=num_bins + 1, device=pae_dist.device)
+    combined_mask = combine_masks(masks, pae_dist[:, :, :, 0])
+
+    target_length = combined_mask
+    d0 = 1.24 * torch.pow(torch.clamp(target_length.float(), min=19) - 15, 1 / 3) - 1.8
+    bin_centers = (bins[1:] + bins[:-1]) / 2
+    tm_weights = 1 / (1 + (bin_centers[None, None, None, :] / d0[:, :, :, None]) ** 2)
+    weighted_scores = torch.sum(pae_dist * tm_weights, dim=-1)
+    ptm_scores = torch.sum(weighted_scores * combined_mask, dim=-1)
+    ptm_scores = torch.amax(ptm_scores, dim=-1)
+
+    return ptm_scores
 
 
 def get_likelihood(
@@ -822,13 +912,10 @@ class AbFlowMetrics(nn.Module):
         )
 
         # averaged confidence scores
-        # average plddt
-        # average (ae?)
-        # average (tm?)
-        metrics["confidence_plddt/redesign"] = average_data(
-            pred_data_dict["lddt_per_residue"],
-            masks=[pred_data_dict["redesign_mask"], pred_data_dict["valid_mask"]],
-        )
+        metrics["confidence_plddt/redesign"] = pred_data_dict["plddt_redesign"]
+        metrics["confidence_pae/redesign"] = pred_data_dict["pae_redesign"]
+        metrics["confidence_pde/redesign"] = pred_data_dict["pde_redesign"]
+        metrics["confidence_ptm/redesign"] = pred_data_dict["ptm_redesign"]
 
         # get likelihoods
         metrics["likelihood/redesign"] = get_likelihood(
