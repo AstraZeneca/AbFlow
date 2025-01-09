@@ -32,7 +32,7 @@ def process_single_entry(args):
     processed_data.update(add_features(processed_data))
     return db_id, zlib.compress(pickle.dumps(processed_data, protocol=pickle.HIGHEST_PROTOCOL))
 
-def process_lmdb(data_folder):
+def process_lmdb(data_folder: str):
     """
     Process the LMDB database to the input data dict for abflow.
     """
