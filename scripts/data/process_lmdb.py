@@ -1,19 +1,9 @@
-"""
-This script process a saved LMDB database to the input data dict in lmdb format for abflow.
-
-A saved LMDB database contains the following files:
-- entries_list.pkl: A list of dictionaries containing the entry ID for each complex.
-- structures.lmdb: The LMDB database containing the structure data for each complex.
-
-To use this script, run: python abflow/scripts/process_lmdb.py --path <path_to_data_folder>
-Example command to process sabdab data: python abflow/scripts/data/process_lmdb.py --path /scratch/hz362/datavol/data/sabdab
-"""
-
 import lmdb
 import pickle
 import os
 import argparse
 import sys
+import zlib  # Import zlib for compression
 
 from tqdm import tqdm
 from abflow.data.process_pdb import process_lmdb_chain, add_features
@@ -26,7 +16,7 @@ def process_lmdb(data_folder: str):
 
     entries_path = os.path.join(data_folder, "entries_list.pkl")
     source_db_path = os.path.join(data_folder, "structures.lmdb")
-    output_db_path = os.path.join(data_folder, "processed_structures.lmdb")
+    output_db_path = "abflow_processed_structures_oas_sabdab.lmdb"
 
     if os.path.exists(output_db_path):
         os.remove(output_db_path)
@@ -62,16 +52,23 @@ def process_lmdb(data_folder: str):
             # Process the data
             processed_data = process_lmdb_chain(data)
 
-            # add preprocessed features
+            # Add preprocessed features
             processed_data = add_features(processed_data)
 
-            # Serialize and store in the new LMDB
-            processed_data = pickle.dumps(processed_data)
-            output_txn.put(db_id.encode(), processed_data)
+            # Serialize and compress the processed data
+            serialized_data = pickle.dumps(processed_data)
+            compressed_data = zlib.compress(serialized_data)
+
+            # Store the compressed data in the new LMDB
+            try:
+                output_txn.put(db_id.encode(), compressed_data)
+            except lmdb.Error as e:
+                print(f"Failed to write data for entry ID '{db_id}' to LMDB: {e}")
+                exit()
 
     source_db.close()
     output_db.close()
-    print("Preprocessing complete. Data saved to:", output_db_path)
+    print("Preprocessing complete. Compressed data saved to:", output_db_path)
 
 
 if __name__ == "__main__":

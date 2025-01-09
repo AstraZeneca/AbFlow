@@ -260,18 +260,25 @@ def process_lmdb_chain(data: dict) -> dict:
 
         if chain_data is not None:
             res_type_list.append(chain_data["aa"])
-            if chain_name == "light" and data["light_ctype"] == "K":
-                chain_type_list.append(
-                    torch.full_like(chain_data["aa"], chain_id_to_index["light_kappa"])
-                )
-            elif chain_name == "light" and data["light_ctype"] == "L":
-                chain_type_list.append(
-                    torch.full_like(chain_data["aa"], chain_id_to_index["light_lambda"])
-                )
+            if chain_name == "light":
+                if data["light_ctype"] == "K":
+                    chain_type_list.append(
+                        torch.full_like(chain_data["aa"], chain_id_to_index["light_kappa"])
+                    )
+                elif data["light_ctype"] == "L":
+                    chain_type_list.append(
+                        torch.full_like(chain_data["aa"], chain_id_to_index["light_lambda"])
+                    )
+                else:
+                    # Kappa is more common than lambda in humans (approximately 2:1), so make it a default option when not sure.
+                    chain_type_list.append(
+                        torch.full_like(chain_data["aa"], chain_id_to_index["light_kappa"])
+                    )
             else:
                 chain_type_list.append(
                     torch.full_like(chain_data["aa"], chain_id_to_index[chain_name])
                 )
+
             chain_id_list.append(torch.full_like(chain_data["aa"], chain_id))
             chain_id += 1
             res_index_list.append(chain_data["res_nb"])
