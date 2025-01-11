@@ -39,23 +39,27 @@ class ConfidenceModule(nn.Module):
         ca_min = 3.375
         ca_max = 21.375
         ca_bins = torch.linspace(ca_min, ca_max, ca_num_bins + 1)
-        self.ca_binned_one_hot = BinnedOneHotEmbedding(ca_bins)
+        self.register_buffer("ca_bins", ca_bins)
+        self.ca_binned_one_hot = BinnedOneHotEmbedding(self.ca_bins)
         self.linear_no_bias_d = nn.Linear(ca_num_bins, c_z, bias=False)
         lddt_num_bins = 50
         lddt_min = 0
         lddt_max = 100
         lddt_bins = torch.linspace(lddt_min, lddt_max, lddt_num_bins + 1)
-        self.lddt_binned_one_hot = BinnedOneHotEmbedding(lddt_bins)
+        self.register_buffer("lddt_bins", lddt_bins)
+        self.lddt_binned_one_hot = BinnedOneHotEmbedding(self.lddt_bins)
         de_num_bins = 64
         de_min = 0
         de_max = 32
         de_bins = torch.linspace(de_min, de_max, de_num_bins + 1)
-        self.de_binned_one_hot = BinnedOneHotEmbedding(de_bins)
+        self.register_buffer("de_bins", de_bins)
+        self.de_binned_one_hot = BinnedOneHotEmbedding(self.de_bins)
         ae_num_bins = 64
         ae_min = 0
         ae_max = 32
         ae_bins = torch.linspace(ae_min, ae_max, ae_num_bins + 1)
-        self.ae_binned_one_hot = BinnedOneHotEmbedding(ae_bins)
+        self.register_buffer("ae_bins", ae_bins)
+        self.ae_binned_one_hot = BinnedOneHotEmbedding(self.ae_bins)
 
         self.pairformer_stack = PairformerStack(
             c_s,

@@ -32,7 +32,6 @@ def express_coords_in_frames(
     :param normalize: Whether to normalize the displacement vectors.
     :return: CA_vectors: The unit vector between CA atoms in the local frame, shape (..., N_res, N_res, 3).
     """
-    # Calculate CA displacement vectors
     CA_CA = CA_coords[..., None, :, :] - CA_coords[..., :, None, :]
 
     if normalize:
@@ -64,7 +63,7 @@ class OneHotEmbedding(nn.Module):
         :param x_i: Input tensor of shape (...) with integer class indices.
         :return: One-hot encoded tensor of shape (..., num_classes) with label smoothing applied.
         """
-        one_hot_data = F.one_hot(x_i, num_classes=self.num_classes).to(torch.float32)
+        one_hot_data = F.one_hot(x_i, num_classes=self.num_classes)
         if self.label_smoothing > 0:
             return apply_label_smoothing(
                 one_hot_data, self.label_smoothing, self.num_classes
@@ -124,7 +123,9 @@ class BinnedOneHotEmbedding(nn.Module):
 
         bin_indices = torch.clamp(bin_indices, min=0, max=len(self.v_bins) - 2)
 
-        p = torch.zeros((*data.size(), len(self.v_bins) - 1), device=data.device)
+        p = torch.zeros(
+            (*data.size(), len(self.v_bins) - 1), device=data.device, dtype=data.dtype
+        )
         while len(bin_indices.shape) < len(p.shape):
             bin_indices = bin_indices.unsqueeze(-1)
         p.scatter_(dim=-1, index=bin_indices, value=1.0)
@@ -215,6 +216,6 @@ class RelativePositionEncoding(nn.Module):
                 2 * self.rmax,
             ),
             torch.tensor(2 * self.rmax + 1, device=res_index.device),
-        ).to(torch.float32)
+        )
         a_rel_pol_ij = self.rel_pos_binned_one_hot(d_res_ij)
         return a_rel_pol_ij

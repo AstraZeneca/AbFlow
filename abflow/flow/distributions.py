@@ -30,7 +30,9 @@ class BaseDistribution(ABC):
         pass
 
     @abstractmethod
-    def sample(self, size: torch.Size, device: torch.device) -> torch.Tensor:
+    def sample(
+        self, size: torch.Size, device: torch.device, dtype: torch.dtype
+    ) -> torch.Tensor:
         """
         Abstract method to sample from the distribution.
 
@@ -56,8 +58,10 @@ class NormalEuclidean(EuclideanDistribution):
     def __init__(self, dim: int):
         super().__init__(dim)
 
-    def sample(self, size: torch.Size, device: torch.device) -> torch.Tensor:
-        samples = torch.randn(size + (self.dim,), device=device)
+    def sample(
+        self, size: torch.Size, device: torch.device, dtype: torch.dtype
+    ) -> torch.Tensor:
+        samples = torch.randn(size + (self.dim,), device=device, dtype=dtype)
         return samples
 
 
@@ -79,10 +83,12 @@ class UniformSimplex(SimplexDistribution):
     def __init__(self, dim: int):
         super().__init__(dim)
 
-    def sample(self, size: torch.Size, device: torch.device) -> torch.Tensor:
+    def sample(
+        self, size: torch.Size, device: torch.device, dtype: torch.dtype
+    ) -> torch.Tensor:
 
         samples = torch.distributions.dirichlet.Dirichlet(
-            torch.ones(self.dim, device=device)
+            torch.ones(self.dim, device=device, dtype=dtype)
         ).sample(size)
 
         return samples
@@ -212,17 +218,17 @@ class SO3Distribution(BaseDistribution, ABC):
 
         return angle
 
-    def sample(self, size: torch.Size, device: torch.device) -> torch.Tensor:
+    def sample(
+        self, size: torch.Size, device: torch.device, dtype: torch.dtype
+    ) -> torch.Tensor:
         """
         Samples one or more rotation matrices according to `size`, returned as a tensor of shape `size + (3, 3)`.
         """
 
-        axes = torch.as_tensor(
-            self.sample_axis(size), dtype=torch.float32, device=device
-        )
-        angles = torch.as_tensor(
-            self.sample_angle(size), dtype=torch.float32, device=device
-        )[..., None]
+        axes = torch.as_tensor(self.sample_axis(size), dtype=dtype, device=device)
+        angles = torch.as_tensor(self.sample_angle(size), dtype=dtype, device=device)[
+            ..., None
+        ]
 
         return axes * angles
 
@@ -260,6 +266,11 @@ class UniformToric(ToricDistribution):
         super().__init__()
         self.dim = dim
 
-    def sample(self, size: torch.Size, device: torch.device) -> torch.Tensor:
-        x_0 = torch.rand(size + (self.dim,), device=device) * 2 * math.pi - math.pi
+    def sample(
+        self, size: torch.Size, device: torch.device, dtype: torch.dtype
+    ) -> torch.Tensor:
+        x_0 = (
+            torch.rand(size + (self.dim,), device=device, dtype=dtype) * 2 * math.pi
+            - math.pi
+        )
         return x_0

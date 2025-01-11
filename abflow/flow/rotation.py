@@ -2,7 +2,11 @@
 Author: Haowen Zhao
 Email: hz362@cam.ac.uk
 
-Implementations for SO(3) rotation operations.
+Implementations for SO(3) rotation operations with tensors enforced to be float32.
+This script is implemented with heavy help from:
+https://github.com/aqlaboratory/openfold/blob/main/openfold/utils/rigid_utils.py
+https://github.com/microsoft/protein-frame-flow/blob/main/data/so3_utils.py
+
 
 ### Rotation Representations:
 1. **Rotation Matrix**: 3x3 orthogonal matrix with determinant 1.
@@ -46,11 +50,54 @@ rotquat = rotvec_to_rotquat(rotvec)
 
 import torch
 import numpy as np
-from functools import lru_cache
+from functools import lru_cache, wraps
 from einops import rearrange
 from typing import Tuple
 
 
+def enforce_float32(func):
+    """
+    Decorator to temporarily cast all tensor inputs to float32,
+    execute the function, and restore the original dtype for all tensor outputs.
+    """
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        original_dtype = next(
+            (arg.dtype for arg in args if isinstance(arg, torch.Tensor)), None
+        )
+
+        if original_dtype is None:
+            raise ValueError("No tensor inputs found to determine the original dtype.")
+
+        args = tuple(
+            arg.float() if isinstance(arg, torch.Tensor) else arg for arg in args
+        )
+        kwargs = {
+            k: v.float() if isinstance(v, torch.Tensor) else v
+            for k, v in kwargs.items()
+        }
+
+        result = func(*args, **kwargs)
+
+        def restore_dtype(output):
+            return (
+                output.to(original_dtype)
+                if isinstance(output, torch.Tensor)
+                else output
+            )
+
+        if isinstance(result, torch.Tensor):
+            return restore_dtype(result)
+        elif isinstance(result, (list, tuple)):
+            return type(result)(restore_dtype(r) for r in result)
+        else:
+            return result
+
+    return wrapper
+
+
+@enforce_float32
 def rotmat_inv(rotmat: torch.Tensor) -> torch.Tensor:
     """
     Invert a rotation matrix by taking its transpose.
@@ -65,6 +112,7 @@ def rotmat_inv(rotmat: torch.Tensor) -> torch.Tensor:
     return rotmat_inv
 
 
+@enforce_float32
 def rotquat_inv(rotquat: torch.Tensor) -> torch.Tensor:
     """
     Invert a unit quaternion in [r, i, j, k] format by taking its conjugate.
@@ -80,6 +128,7 @@ def rotquat_inv(rotquat: torch.Tensor) -> torch.Tensor:
     return rotquat_inv
 
 
+@enforce_float32
 def rotvec_inv(rotvec: torch.Tensor) -> torch.Tensor:
     """
     Invert a rotation vector by negating it (rotating about the opposite
@@ -95,6 +144,7 @@ def rotvec_inv(rotvec: torch.Tensor) -> torch.Tensor:
     return rotvec_inv
 
 
+@enforce_float32
 def rotmats_mul(rotmat1: torch.Tensor, rotmat2: torch.Tensor) -> torch.Tensor:
     """
     Performs matrix multiplication of two rotation matrix tensors. Written
@@ -137,6 +187,7 @@ def rotmats_mul(rotmat1: torch.Tensor, rotmat2: torch.Tensor) -> torch.Tensor:
     return rotmats
 
 
+@enforce_float32
 def rotvecs_mul(rotvec1: torch.Tensor, rotvec2: torch.Tensor) -> torch.Tensor:
     """
     Multiply two rotations represented as rotation vectors (axis-angle) by converting
@@ -160,6 +211,7 @@ def rotvecs_mul(rotvec1: torch.Tensor, rotvec2: torch.Tensor) -> torch.Tensor:
     return rotvecs
 
 
+@enforce_float32
 def rotquats_mul(rotquat1: torch.Tensor, rotquat2: torch.Tensor) -> torch.Tensor:
     """
     Multiply two quaternions.
@@ -191,6 +243,7 @@ def rotquats_mul(rotquat1: torch.Tensor, rotquat2: torch.Tensor) -> torch.Tensor
     return rotquats
 
 
+@enforce_float32
 def rotmat_mul_vec(rotmat: torch.Tensor, vec: torch.Tensor) -> torch.Tensor:
     """
     Applies a rotation to a vector. Written out by hand to avoid transfer
@@ -216,6 +269,7 @@ def rotmat_mul_vec(rotmat: torch.Tensor, vec: torch.Tensor) -> torch.Tensor:
     return rotated_vec
 
 
+@enforce_float32
 def rotvec_mul_vec(
     rotvec: torch.Tensor, vec: torch.Tensor, tol: float = 1e-7
 ) -> torch.Tensor:
@@ -260,14 +314,15 @@ def rotvec_mul_vec(
     return rotated_vec
 
 
+@enforce_float32
 def rotquat_mul_vec(rotquat: torch.Tensor, vec: torch.Tensor) -> torch.Tensor:
     """
     Rotate a vector using a quaternion by performing q * v * q^-1 as in:
     https://en.wikipedia.org/wiki/Quaternions_and_spatial_rotation#cite_note-8
 
-    :param rotquat: Rotation quaternion of shape [..., 4].
-    :param vec: Vector to be rotated of shape [..., 3].
-    :return: Rotated vector of shape [..., 3].
+    :param rotquat: Rotation quaternion tensor of shape [..., 4].
+    :param vec: Vector tensor of shape [..., 3].
+    :return: Rotated vector tensor of shape [..., 3].
     """
 
     vec_quat = torch.cat([torch.zeros_like(vec[..., :1]), vec], dim=-1)
@@ -330,6 +385,7 @@ def _get_quat(quat_key, dtype, device):
     return torch.tensor(_CACHED_QUATS[quat_key], dtype=dtype, device=device)
 
 
+@enforce_float32
 def rotmat_to_rotquat(rotmat: torch.Tensor) -> torch.Tensor:
 
     rotmat = [[rotmat[..., i, j] for j in range(3)] for i in range(3)]
@@ -370,6 +426,7 @@ def rotmat_to_rotquat(rotmat: torch.Tensor) -> torch.Tensor:
     return rotquat
 
 
+@enforce_float32
 def rotquat_to_rotmat(rotquat: torch.Tensor) -> torch.Tensor:
     """
     Converts a quaternion to a rotation matrix.
@@ -377,6 +434,7 @@ def rotquat_to_rotmat(rotquat: torch.Tensor) -> torch.Tensor:
     :param rotquat: [..., 4] quaternions
     :return: [..., 3, 3] rotation matrices
     """
+
     # [*, 4, 4]
     rotquat = rotquat[..., None] * rotquat[..., None, :]
 
@@ -398,6 +456,7 @@ def _broadcast_identity(target: torch.Tensor) -> torch.Tensor:
     :param target: Batch of target 3 by 3 matrices.
     :return: 3 by 3 identity matrices in the shapes of the target.
     """
+
     id3 = torch.eye(3, device=target.device, dtype=target.dtype)
     id3 = torch.broadcast_to(id3, target.shape)
     return id3
@@ -412,8 +471,8 @@ def rotvec_to_skewmat(rotvec: torch.Tensor) -> torch.Tensor:
         [x,y,z] ->  [  z  0 -x]
                     [ -y  x  0]
 
-    :param rotvec: Rotation vector tensor of shape [..., 3].
-    :return: Skew-symmetric matrix tensor of shape [..., 3, 3].
+    :param rotvec: Rotation vector of shape [..., 3].
+    :return: Skew-symmetric matrix of shape [..., 3, 3].
     """
 
     # Generate empty skew matrices.
@@ -457,8 +516,9 @@ def angle_from_rotmat(
     Uses atan2 for better numerical stability for small angles.
 
     :param rotation_matrices: Batch of rotation matrices.
-    :return: Tuple of rotation angles, sines of angles, and cosines of angles.
+    :return: Tuple of computed angles, sines of the angles and cosines of angles.
     """
+
     # Compute sine of angles (uses the relation that the unnormalized skew vector generated by a
     # rotation matrix has the length 2*sin(theta))
     skew_matrices = rotation_matrices - rotation_matrices.transpose(-2, -1)
@@ -493,8 +553,7 @@ def skewmat_exponential_map(
 
     :param angles: Batch of rotation angles.
     :param skew_matrices: Batch of rotation axes in skew matrix (lie so(3)) basis.
-    :param tol: small offset for numerical stability.
-    :return: Batch of rotation matrices.
+    :return: Batch of corresponding rotation matrices.
     """
     # Set up identity matrix and broadcast.
     id3 = _broadcast_identity(skew_matrices)
@@ -523,6 +582,7 @@ def skewmat_exponential_map(
     return exp_skew
 
 
+@enforce_float32
 def rotmat_to_rotvec(rotmat: torch.Tensor) -> torch.Tensor:
     """
     Convert a batch of rotation matrices to rotation vectors (logarithmic map from SO(3) to so(3)).
@@ -561,6 +621,7 @@ def rotmat_to_rotvec(rotmat: torch.Tensor) -> torch.Tensor:
     :param rotmat: Batch of rotation matrices.
     :return: Batch of rotation vectors.
     """
+
     # Get angles and sin/cos from rotation matrix.
     angles, angles_sin, _ = angle_from_rotmat(rotmat)
     # Compute skew matrix representation and extract so(3) vector components.
@@ -617,15 +678,17 @@ def rotmat_to_rotvec(rotmat: torch.Tensor) -> torch.Tensor:
     return rotvec
 
 
+@enforce_float32
 def rotvec_to_rotmat(rotvec: torch.Tensor, tol: float = 1e-7) -> torch.Tensor:
     """
     Convert rotation vectors to rotation matrix representation. The length of the rotation vector
     is the angle of rotation, the unit vector the rotation axis.
 
-    :param rotvec: Batch of rotation vectors.
-    :param tol: small offset for numerical stability.
-    :return: Batch of rotation matrices.
+    :param rotvec: Rotation vectors of shape [..., 3].
+    :param tol: Small offset for numerical stability.
+    :return: Rotation matrices of shape [..., 3, 3].
     """
+
     # Compute rotation angle as vector norm.
     rotation_angles = torch.norm(rotvec, dim=-1)
 
@@ -638,6 +701,7 @@ def rotvec_to_rotmat(rotvec: torch.Tensor, tol: float = 1e-7) -> torch.Tensor:
     return rotmat
 
 
+@enforce_float32
 def rotquat_to_rotvec(rotquat: torch.Tensor) -> torch.Tensor:
     """
     Convert a quaternion to a rotation vector (axis-angle representation).
@@ -646,9 +710,10 @@ def rotquat_to_rotvec(rotquat: torch.Tensor) -> torch.Tensor:
         θ = 2 * arccos(r)
         v = (2 * θ) * (q_v / |q_v|)
 
-    :param rotquat: Quaternion of shape [..., 4] in [r, i, j, k] format.
+    :param rotquat: Quaternion of shape [..., 4].
     :return: Rotation vector of shape [..., 3].
     """
+
     r = rotquat[..., 0:1]
     v = rotquat[..., 1:]
 
@@ -659,6 +724,7 @@ def rotquat_to_rotvec(rotquat: torch.Tensor) -> torch.Tensor:
     return rotvec
 
 
+@enforce_float32
 def rotvec_to_rotquat(rotvec: torch.Tensor) -> torch.Tensor:
     """
     Convert a rotation vector (axis-angle) to a quaternion.
@@ -668,7 +734,7 @@ def rotvec_to_rotquat(rotvec: torch.Tensor) -> torch.Tensor:
         q = [cos(θ / 2), sin(θ / 2) * v / θ]
 
     :param rotvec: Rotation vector of shape [..., 3].
-    :return: Quaternion of shape [..., 4] in [r, i, j, k] format.
+    :return: Quaternion of shape [..., 4].
     """
 
     theta = torch.norm(rotvec, dim=-1, keepdim=True)

@@ -3,6 +3,7 @@ Contains constants used in protein structure analysis.
 """
 
 import torch
+import pytorch_lightning as pl
 
 from enum import Enum, IntEnum
 from Bio.PDB.Polypeptide import protein_letters_3to1
@@ -413,7 +414,7 @@ _validate_heavy_atom_coords()
 
 
 # DDP Initialization Function
-def initialize_ddp_constants(trainer):
+def initialize_ddp_constants(trainer: pl.Trainer, dtype: torch.dtype = torch.float32):
     """
     Initialize constants on the appropriate device for DDP with PyTorch Lightning.
 
@@ -425,7 +426,7 @@ def initialize_ddp_constants(trainer):
     else:
         device = torch.device("cpu")
 
-    initialize_constants(device)
+    initialize_constants(device, dtype=dtype)
 
 
 # Initialize global variables as None
@@ -435,12 +436,12 @@ HEAVY_ATOM_TORSION_INDEX = None
 HEAYY_ATOM_POSITIONS = None
 
 
-def initialize_constants(device):
+def initialize_constants(device: torch.device, dtype: torch.dtype = torch.float32):
     """
     Initialize global constants on the appropriate device.
 
-    Args:
-        device: The torch.device for the current process in DDP.
+    :param device: The torch.device for the current process in DDP.
+    :param dtype: The torch.dtype for the float tensors.
     """
     global PREVIOUS_SIDECHAIN_ATOM_ROTATIONS
     global PREVIOUS_SIDECHAIN_ATOM_TRANSLATIONS
@@ -448,10 +449,14 @@ def initialize_constants(device):
     global HEAYY_ATOM_POSITIONS
 
     # Allocate tensors on the specified device
-    PREVIOUS_SIDECHAIN_ATOM_ROTATIONS = torch.zeros([20, 6, 3, 3], device=device)
-    PREVIOUS_SIDECHAIN_ATOM_TRANSLATIONS = torch.zeros([20, 6, 3], device=device)
+    PREVIOUS_SIDECHAIN_ATOM_ROTATIONS = torch.zeros(
+        [20, 6, 3, 3], device=device, dtype=dtype
+    )
+    PREVIOUS_SIDECHAIN_ATOM_TRANSLATIONS = torch.zeros(
+        [20, 6, 3], device=device, dtype=dtype
+    )
     HEAVY_ATOM_TORSION_INDEX = torch.zeros([20, 15], dtype=torch.int64, device=device)
-    HEAYY_ATOM_POSITIONS = torch.zeros([20, 15, 3], device=device)
+    HEAYY_ATOM_POSITIONS = torch.zeros([20, 15, 3], device=device, dtype=dtype)
 
     # Initialize the constants
     _init_heavy_atom_constants()

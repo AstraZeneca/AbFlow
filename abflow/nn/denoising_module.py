@@ -112,6 +112,7 @@ class DenoisingModule(nn.Module):
 
         N_batch, N_res, _ = true_feature_dict["res_type_prob"].shape
         device = true_feature_dict["res_type_prob"].device
+        dtype = true_feature_dict["res_type_prob"].dtype
         redesign_mask = true_feature_dict["redesign_mask"]
         res_type_prob = true_feature_dict["res_type_prob"]
         frame_rotations = true_feature_dict["frame_rotations"]
@@ -120,16 +121,16 @@ class DenoisingModule(nn.Module):
 
         if "sequence" in self.design_mode:
             init_res_type_prob = self._sequence_flow.prior_sample(
-                size=(N_batch, N_res), device=device
+                size=(N_batch, N_res), device=device, dtype=dtype
             )
             res_type_prob = apply_mask(res_type_prob, init_res_type_prob, redesign_mask)
 
         if "backbone" in self.design_mode:
             init_frame_rotations = self._rotation_flow.prior_sample(
-                size=(N_batch, N_res), device=device
+                size=(N_batch, N_res), device=device, dtype=dtype
             )
             init_frame_translations = self._translation_flow.prior_sample(
-                size=(N_batch, N_res), device=device
+                size=(N_batch, N_res), device=device, dtype=dtype
             )
             frame_rotations = apply_mask(
                 frame_rotations, init_frame_rotations, redesign_mask
@@ -140,7 +141,7 @@ class DenoisingModule(nn.Module):
 
         if "sidechain" in self.design_mode:
             init_dihedrals = self._dihedral_flow.prior_sample(
-                size=(N_batch, N_res), device=device
+                size=(N_batch, N_res), device=device, dtype=dtype
             )
             dihedrals = apply_mask(dihedrals, init_dihedrals, redesign_mask)
 
@@ -149,16 +150,16 @@ class DenoisingModule(nn.Module):
             "frame_rotations": frame_rotations,
             "frame_translations": frame_translations,
             "dihedrals": dihedrals,
-            "time": torch.zeros(N_batch, N_res, 1, device=device),
+            "time": torch.zeros(N_batch, N_res, 1, device=device, dtype=dtype),
             "redesign_mask": redesign_mask,
         }
 
-    def _sample_time(self, num_batch: int, device: torch.device) -> torch.Tensor:
+    def _sample_time(self, num_batch: int, device: torch.device, dtype: torch.dtype):
         """
         Sample a different continuous time step between 0 and 1 for each data point in the batch,
         then clamp the values to be between 0 and 0.99.
         """
-        time_steps = torch.rand(num_batch, device=device)
+        time_steps = torch.rand(num_batch, device=device, dtype=dtype)
         return torch.clamp(time_steps, min=0.0, max=self.max_time_clamp)
 
     def _noise_features(
@@ -417,10 +418,11 @@ class DenoisingModule(nn.Module):
         true_loss_update = {}
 
         true_feature_dict = self._add_features(true_data_dict)
-        num_batch = true_data_dict["res_type"].shape[0]
-        num_res = true_data_dict["res_type"].shape[1]
-        device = true_data_dict["res_type"].device
-        time = self._sample_time(num_batch=num_batch, device=device)[
+        num_batch = true_data_dict["pos_heavyatom"].shape[0]
+        num_res = true_data_dict["pos_heavyatom"].shape[1]
+        device = true_data_dict["pos_heavyatom"].device
+        dtype = true_data_dict["pos_heavyatom"].dtype
+        time = self._sample_time(num_batch=num_batch, device=device, dtype=dtype)[
             :, None, None
         ].expand(num_batch, num_res, 1)
         noised_feature_dict = self._noise_features(true_feature_dict, time)
@@ -462,7 +464,7 @@ class DenoisingModule(nn.Module):
         noised_feature_dict = self._init_features(true_feature_dict)
         d_t = 1 / num_steps
 
-        for _ in range(num_steps):
+        for i in range(num_steps):
             s_i, r_i = self._embed(noised_feature_dict)
             s_i = self.forward(s_i, r_i, s_inputs_i, z_inputs_ij, s_trunk_i, z_trunk_ij)
             pred_feature_dict = self._predict(noised_feature_dict, s_i, r_i)

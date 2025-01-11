@@ -13,7 +13,7 @@ shared:
 trainer:
     devices: 1
     max_epochs: 200
-    precision: 32-true # Use 32-bit precision as 16-bit causes instability in rotation flow
+    precision: 16-mixed
     gradient_clip_val: 1.0
     val_check_interval: 0.2
     accumulate_grad_batches: 4
@@ -25,7 +25,7 @@ checkpoint:
 # abflow datamodule settings
 datamodule:
     num_workers: 8
-    batch_size: 8
+    batch_size: 4
     redesign:
         framework: False
         hcdr1: False

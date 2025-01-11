@@ -64,16 +64,19 @@ class ManifoldFlow(ABC):
 
         super().__init__()
 
-    def prior_sample(self, size: torch.Size, device: torch.device) -> torch.Tensor:
+    def prior_sample(
+        self, size: torch.Size, device: torch.device, dtype: torch.dtype
+    ) -> torch.Tensor:
         """
         Sample from the prior distribution.
 
         :param size: The batch shape of the tensors to sample.
         :param device: The device to put the sampled tensor on.
+        :param dtype: The data type of the sampled tensor.
         :return: The sampled point from the prior distribution.
         """
 
-        return self._prior.sample(size, device)
+        return self._prior.sample(size, device, dtype)
 
     def interpolate_path(self, x_1: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """
@@ -84,7 +87,7 @@ class ManifoldFlow(ABC):
         :param t: The interpolation time.
         :return: The interpolated point.
         """
-        x_0 = self.prior_sample(x_1.size()[:-1], x_1.device)
+        x_0 = self.prior_sample(x_1.size()[:-1], x_1.device, x_1.dtype)
         alpha_t, beta_t, _ = self._schedule(t)
         x_t = self.exp_map(x_0, beta_t * self.log_map(x_0, x_1))
 
