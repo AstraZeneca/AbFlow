@@ -141,7 +141,13 @@ class IPAStack(nn.Module):
     """
 
     def __init__(self, c_s: int, c_z: int, n_block: int, params: dict):
-
+        """
+        params contains the following hyperparameters:
+        - n_head: Number of attention heads.
+        - n_query_points: Number of query points.
+        - n_point_values: Number of point values.
+        - dropout_probability: Dropout probability.
+        """
         super().__init__()
 
         self.n_block = n_block

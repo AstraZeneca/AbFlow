@@ -385,6 +385,17 @@ class PairformerStack(nn.Module):
         n_block: int,
         params: dict,
     ):
+        """
+        params contains the following keys:
+        - dropout_rowwise_probabilty: float
+        - dropout_columnwise_probabilty: float
+        - TriangleAttentionStartingNode: dict
+            - n_head: int
+        - TriangleAttentionEndingNode: dict
+            - n_head: int
+        - AttentionPairBias: dict
+            - n_head: int
+        """
 
         super().__init__()
 

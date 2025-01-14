@@ -182,6 +182,7 @@ class OptimalTransportEuclideanFlow(EuclideanFlow):
 
         :param dim: The data dimensionality.
         :param schedule_type: The type of flow schedule to use (linear, exp_decay, inv_exp_growth).
+        :param schedule_params: The parameters for the flow schedule.
         """
 
         super().__init__()
