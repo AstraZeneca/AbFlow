@@ -678,7 +678,9 @@ def get_ptm_score(
     tm_weights = 1 / (1 + (bin_centers[None, None, None, :] / d0[:, :, :, None]) ** 2)
 
     weighted_scores = torch.sum(pae_dist * tm_weights, dim=-1)
-    ptm_scores = torch.sum(weighted_scores * combined_mask, dim=-1)
+    ptm_scores = torch.sum(weighted_scores * combined_mask, dim=-1) / (
+        combined_mask.sum(dim=-1) + 1e-9
+    )
     ptm_scores = torch.amax(ptm_scores, dim=-1)
     return ptm_scores
 
@@ -877,6 +879,15 @@ class AbFlowMetrics(nn.Module):
         metrics["confidence_pae/redesign"] = pred_data_dict["pae_redesign"]
         metrics["confidence_pde/redesign"] = pred_data_dict["pde_redesign"]
         metrics["confidence_ptm/redesign"] = pred_data_dict["ptm_redesign"]
+        metrics["confidence_pae_interaction/redesign"] = pred_data_dict[
+            "pae_interaction_redesign"
+        ]
+        metrics["confidence_pde_interaction/redesign"] = pred_data_dict[
+            "pde_interaction_redesign"
+        ]
+        metrics["confidence_ptm_interaction/redesign"] = pred_data_dict[
+            "ptm_interaction_redesign"
+        ]
 
         # Log likelihood
         metrics["likelihood/redesign"] = get_likelihood(

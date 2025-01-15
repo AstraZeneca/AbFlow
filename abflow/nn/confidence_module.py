@@ -18,7 +18,7 @@ from ..utils.utils import average_data
 
 class ConfidenceModule(nn.Module):
     """
-    Confidence module to predict the plddt score for each residue.
+    Confidence module.
     """
 
     def __init__(
@@ -194,6 +194,37 @@ class ConfidenceModule(nn.Module):
             ],
         )
 
+        pae_interaction_redesign = average_data(
+            pae_per_residue,
+            masks=[
+                pred_data_dict["redesign_mask"][:, :, None],
+                pred_data_dict["antigen_mask"][:, None, :],
+                pred_data_dict["valid_mask"][:, :, None],
+                pred_data_dict["valid_mask"][:, None, :],
+            ],
+        )
+        pde_interaction_redesign = average_data(
+            pde_per_residue,
+            masks=[
+                pred_data_dict["redesign_mask"][:, :, None],
+                pred_data_dict["antigen_mask"][:, None, :],
+                pred_data_dict["valid_mask"][:, :, None],
+                pred_data_dict["valid_mask"][:, None, :],
+            ],
+        )
+        ptm_interaction_redesign = get_ptm_score(
+            p_pae_ij,
+            bin_min=0,
+            bin_max=32,
+            num_bins=64,
+            masks=[
+                pred_data_dict["redesign_mask"][:, :, None],
+                pred_data_dict["antigen_mask"][:, None, :],
+                pred_data_dict["valid_mask"][:, :, None],
+                pred_data_dict["valid_mask"][:, None, :],
+            ],
+        )
+
         return {
             "plddt_per_residue": plddt_per_residue,
             "pde_per_residue": pde_per_residue,
@@ -202,4 +233,7 @@ class ConfidenceModule(nn.Module):
             "pae_redesign": pae_redesign,
             "pde_redesign": pde_redesign,
             "ptm_redesign": ptm_redesign,
+            "pae_interaction_redesign": pae_interaction_redesign,
+            "pde_interaction_redesign": pde_interaction_redesign,
+            "ptm_interaction_redesign": ptm_interaction_redesign,
         }
