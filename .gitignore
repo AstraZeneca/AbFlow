@@ -19,11 +19,16 @@ benchmarks/diffab/
 nohup.out
 wandb/
 data/rabd/pdb/
+data/absci_her2_zs/
+
 config/
+
 scripts/design/
-scripts/analysis/
+scripts/test/
 scripts/circe/
 scripts/hpc/
+
+results/
 
 notebooks/
 evaluation/

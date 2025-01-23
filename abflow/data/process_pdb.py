@@ -12,7 +12,7 @@ from abflow.data.process_pdb import fill_missing_atoms, process_pdb_to_lmdb, pro
 pdb_file = "9c44.pdb"
 
 ## Step 1: Fix PDB file to ensure missing atoms and residues are filled
-fill_missing_atoms(pdb_file)
+fill_missing_atoms(pdb_file, "9c44_fixed.pdb")
 
 ## Step 2: Extract raw ab-ag data from PDB file and SAbDab summary file
 data = process_pdb_to_lmdb(pdb_file, model_id=0, heavy_chain_id="H", light_chain_id="L", antigen_chain_ids=["A"], scheme="chothia")
@@ -61,9 +61,12 @@ from ..nn.modules.features import (
 from ..flow.rotation import rotmat_to_rotvec
 
 
-def fill_missing_atoms(input_pdb: str):
+def fill_missing_atoms(input_pdb: str, output_pdb: str):
     """
-    Use PDBFixer to fill in missing atoms in a PDB file, but do not add missing residues.
+    Use PDBFixer to fill in missing atoms in a PDB file.
+
+    :param input_pdb: Path to the input PDB file.
+    :param output_pdb: Path to save the modified PDB file.
     """
 
     fixer = PDBFixer(filename=input_pdb)
@@ -77,12 +80,10 @@ def fill_missing_atoms(input_pdb: str):
     fixer.addMissingAtoms()
     fixer.addMissingHydrogens(7.0)
 
-    with open(input_pdb, "w") as f:
+    with open(output_pdb, "w") as f:
         PDBFile.writeFile(fixer.topology, fixer.positions, f, keepIds=True)
 
-    print(
-        f"Fixed PDB file with missing atoms filled but no missing residues added saved to: {input_pdb}"
-    )
+    print(f"Fixed PDB file saved to: {output_pdb}")
 
 
 def extract_sequence_from_chain(chain: BiopythonChain) -> str:
@@ -163,6 +164,8 @@ def process_pdb_to_lmdb(
 ) -> Dict[str, Dict]:
     """
     Process a PDB file into a format compatible with process_lmdb_chain.
+    This function select the heavy, light and antigen chains from the PDB file
+    and cut out the variable regions for the antibody chains from N-terminal to C-terminal.
 
     :param pdb_path: Path to the PDB file.
     :param model_id: Index of the model in the PDB file to process.
@@ -194,6 +197,9 @@ def process_pdb_to_lmdb(
             pdb_chain_seq = extract_sequence_from_chain(model[chain_id])
             ab_chain = AbnumberChain(pdb_chain_seq, scheme=scheme)
             extract_chain_data(model[chain_id], data, chain_name, ab_chain)
+            ab_chain_length = len(ab_chain)
+            for key, value in data[chain_name].items():
+                data[chain_name][key] = value[:ab_chain_length]
 
             if chain_name == "heavy":
                 data["heavy_ctype"] = ab_chain.chain_type

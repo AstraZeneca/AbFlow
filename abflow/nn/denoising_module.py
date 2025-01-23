@@ -458,7 +458,6 @@ class DenoisingModule(nn.Module):
         Rollout the denoising module, returning the predicted data dictionary with denoising trajectory.
         """
         pred_data_dict = copy.deepcopy(true_data_dict)
-        pred_data_dict["denoising_trajectory"] = []
 
         true_feature_dict = self._add_features(true_data_dict)
         noised_feature_dict = self._init_features(true_feature_dict)
@@ -476,6 +475,5 @@ class DenoisingModule(nn.Module):
             )
             pred_data_dict_update = self._reconstruct(true_data_dict, pred_feature_dict)
             pred_data_dict.update(pred_data_dict_update)
-            pred_data_dict["denoising_trajectory"].append(pred_data_dict)
 
         return pred_data_dict
