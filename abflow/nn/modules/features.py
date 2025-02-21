@@ -22,7 +22,7 @@ def apply_label_smoothing(
 
 
 def express_coords_in_frames(
-    CA_coords: torch.Tensor, frame_orients: torch.Tensor, normalize: bool = True
+    CA_coords: torch.Tensor, frame_orients: torch.Tensor, normalize: bool = False
 ) -> torch.Tensor:
     """
     Express coordinates in the local frame of each residue.

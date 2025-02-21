@@ -58,7 +58,6 @@ from ..nn.modules.features import (
     CAUnitVectorEmbedding,
     RelativePositionEncoding,
 )
-from ..flow.rotation import rotmat_to_rotvec
 
 
 def fill_missing_atoms(input_pdb: str, output_pdb: str):
@@ -78,7 +77,6 @@ def fill_missing_atoms(input_pdb: str, output_pdb: str):
     fixer.removeHeterogens(True)
     fixer.findMissingAtoms()
     fixer.addMissingAtoms()
-    fixer.addMissingHydrogens(7.0)
 
     with open(output_pdb, "w") as f:
         PDBFile.writeFile(fixer.topology, fixer.positions, f, keepIds=True)
@@ -164,8 +162,8 @@ def process_pdb_to_lmdb(
 ) -> Dict[str, Dict]:
     """
     Process a PDB file into a format compatible with process_lmdb_chain.
-    This function select the heavy, light and antigen chains from the PDB file
-    and cut out the variable regions for the antibody chains from N-terminal to C-terminal.
+    This function selects the heavy, light, and antigen chains from the PDB file
+    and cuts out the variable regions for the antibody chains from N-terminal to C-terminal.
 
     :param pdb_path: Path to the PDB file.
     :param model_id: Index of the model in the PDB file to process.
@@ -185,12 +183,26 @@ def process_pdb_to_lmdb(
     }
 
     data = defaultdict(
-        lambda: {"aa": [], "res_nb": [], "cdr_locations": [], "pos_heavyatom": []}
+        lambda: {
+            "aa": [],
+            "res_nb": [],
+            "cdr_locations": [],
+            "pos_heavyatom": [],
+        }
     )
 
     model = structure[model_id]
     for chain_name, chain_id in chain_map.items():
+
+        if chain_id is None:
+            data[chain_name] = None
+            continue
+
         if chain_name == "antigen":
+            if not chain_id:
+                data[chain_name] = None
+                continue
+
             for antigen_chain_id in chain_id:
                 extract_chain_data(model[antigen_chain_id], data, "antigen")
         else:
@@ -207,6 +219,9 @@ def process_pdb_to_lmdb(
                 data["light_ctype"] = ab_chain.chain_type
 
     for cn in ["heavy", "light", "antigen"]:
+        if data[cn] is None:
+            continue
+
         chain_data = data[cn]
         chain_data["aa"] = torch.tensor(np.array(chain_data["aa"]), dtype=torch.long)
         chain_data["res_nb"] = torch.tensor(
@@ -351,7 +366,7 @@ def add_features(data: Dict[str, torch.Tensor]):
 
     feature_dict["res_type_one_hot"] = res_type_one_hot
     feature_dict["chain_type_one_hot"] = chain_type_one_hot
-    feature_dict["frame_rotations"] = rotmat_to_rotvec(frame_rotations)
+    feature_dict["frame_rotations"] = frame_rotations
     feature_dict["frame_translations"] = frame_translations
     feature_dict["dihedrals"] = dihedrals
     feature_dict["dihedral_trigometry"] = dihedral_trigometry

@@ -717,9 +717,9 @@ def rotquat_to_rotvec(rotquat: torch.Tensor) -> torch.Tensor:
     r = rotquat[..., 0:1]
     v = rotquat[..., 1:]
 
-    theta = 2 * torch.atan2(torch.norm(v, dim=-1), r)
+    theta = 2 * torch.atan2(torch.norm(v, dim=-1)[..., None], r)
     axis = v / (torch.norm(v, dim=-1, keepdim=True) + 1e-7)
-    rotvec = axis * theta[..., None]
+    rotvec = axis * theta
 
     return rotvec
 

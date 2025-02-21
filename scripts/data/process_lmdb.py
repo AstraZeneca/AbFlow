@@ -5,7 +5,7 @@ A saved LMDB database contains the following files:
 - entries_list.pkl: A list of dictionaries containing the entry ID for each complex.
 - structures.lmdb: The LMDB database containing the structure data for each complex.
 
-To use this script, run: python abflow/scripts/process_lmdb.py --path <path_to_data_folder>
+To use this script, run: python scripts/data/process_lmdb.py --path <path_to_data_folder>
 Example command to process sabdab data: python abflow/scripts/data/process_lmdb.py --path /scratch/hz362/datavol/data/sabdab
 """
 
@@ -19,18 +19,23 @@ from tqdm import tqdm
 from concurrent.futures import ProcessPoolExecutor
 from abflow.data.process_pdb import process_lmdb_chain, add_features
 
+
 def read_valid_entries(data_folder):
     entries_path = os.path.join(data_folder, "entries_list.pkl")
     with open(entries_path, "rb") as f:
         all_entries = pickle.load(f)
     return [e for e in all_entries if e and "id" in e]
 
+
 def process_single_entry(args):
     db_id, structure_data = args
     data = pickle.loads(structure_data)
     processed_data = process_lmdb_chain(data)
     processed_data.update(add_features(processed_data))
-    return db_id, zlib.compress(pickle.dumps(processed_data, protocol=pickle.HIGHEST_PROTOCOL))
+    return db_id, zlib.compress(
+        pickle.dumps(processed_data, protocol=pickle.HIGHEST_PROTOCOL)
+    )
+
 
 def process_lmdb(data_folder: str):
     """
@@ -66,7 +71,9 @@ def process_lmdb(data_folder: str):
     # Dynamically pick chunk size (e.g. total_entries/(4*workers)), but at least 1
     chunk_size = max(1, math.ceil(len(valid_entries) / (4 * max_workers)))
 
-    with ProcessPoolExecutor(max_workers=max_workers) as executor, tqdm(total=len(valid_entries)) as pbar:
+    with ProcessPoolExecutor(max_workers=max_workers) as executor, tqdm(
+        total=len(valid_entries)
+    ) as pbar:
         for i in range(0, len(valid_entries), chunk_size):
             chunk = valid_entries[i : i + chunk_size]
             # Read LMDB data in a single transaction for the chunk
@@ -93,6 +100,7 @@ def process_lmdb(data_folder: str):
     output_db.close()
     print("Preprocessing complete. Data saved to:", output_db_path)
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Process a saved LMDB database.")
     parser.add_argument(
@@ -109,8 +117,12 @@ if __name__ == "__main__":
 
     # Some basic checks
     required_files = ["entries_list.pkl", "structures.lmdb"]
-    missing_files = [f for f in required_files if not os.path.exists(os.path.join(data_folder, f))]
+    missing_files = [
+        f for f in required_files if not os.path.exists(os.path.join(data_folder, f))
+    ]
     if missing_files:
-        raise ValueError(f"The following required files are missing in '{data_folder}': {', '.join(missing_files)}")
+        raise ValueError(
+            f"The following required files are missing in '{data_folder}': {', '.join(missing_files)}"
+        )
 
     process_lmdb(data_folder)

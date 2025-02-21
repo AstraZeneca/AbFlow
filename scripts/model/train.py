@@ -17,7 +17,6 @@ import traceback
 from datetime import timedelta
 import pytorch_lightning as pl
 from pytorch_lightning.strategies import DDPStrategy, FSDPStrategy
-from pytorch_lightning.strategies import DDPStrategy, FSDPStrategy
 from pytorch_lightning.callbacks import (
     LearningRateMonitor,
     ModelCheckpoint,

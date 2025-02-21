@@ -19,6 +19,8 @@ import numpy as np
 from abc import ABC, abstractmethod
 from typing import Union
 
+from .rotation import rotvec_to_rotmat
+
 
 class BaseDistribution(ABC):
     """
@@ -230,7 +232,10 @@ class SO3Distribution(BaseDistribution, ABC):
             ..., None
         ]
 
-        return axes * angles
+        rotvec = axes * angles
+        rotmat = rotvec_to_rotmat(rotvec)
+
+        return rotmat
 
 
 class UniformSO3(SO3Distribution):

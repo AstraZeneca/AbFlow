@@ -43,7 +43,7 @@ from .distributions import (
     UniformSO3,
     UniformToric,
 )
-from .rotation import rotvecs_mul, rotvec_inv
+from .rotation import rotmat_inv, rotmats_mul, rotmat_to_rotvec, rotvec_to_rotmat
 
 
 class ManifoldFlow(ABC):
@@ -87,7 +87,7 @@ class ManifoldFlow(ABC):
         :param t: The interpolation time.
         :return: The interpolated point.
         """
-        x_0 = self.prior_sample(x_1.size()[:-1], x_1.device, x_1.dtype)
+        x_0 = self.prior_sample(x_1.size()[:2], x_1.device, x_1.dtype)
         alpha_t, beta_t, _ = self._schedule(t)
         x_t = self.exp_map(x_0, beta_t * self.log_map(x_0, x_1))
 
@@ -234,6 +234,14 @@ class LinearSimplexFlow(SimplexFlow):
 
         return x_base + v
 
+    def tangent_project(self, x: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+        """
+        Project v onto the tangent space at x, i.e. all vectors whose sum is 0.
+        We remove the mean of v (equivalently sum of v / dim).
+        """
+        # sum-of-components must be 0
+        return v - v.mean(dim=-1, keepdim=True)
+
 
 class SO3Flow(ManifoldFlow, ABC):
     """
@@ -275,14 +283,15 @@ class LinearSO3Flow(SO3Flow):
         The logarithmic map is given by the rotation vector of the relative rotation matrix:
         """
 
-        x_base_inv = rotvec_inv(x_base)
-        v = rotvecs_mul(x_base_inv, x_target)
+        x_base_inv = rotmat_inv(x_base)
+        R_rel = rotmats_mul(x_base_inv, x_target)
+        v = rotmat_to_rotvec(R_rel)
 
         return v
 
     def exp_map(self, x_base: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
 
-        x_target = rotvecs_mul(x_base, v)
+        x_target = rotmats_mul(x_base, rotvec_to_rotmat(v))
 
         return x_target
 

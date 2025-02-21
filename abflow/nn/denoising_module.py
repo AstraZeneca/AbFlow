@@ -223,7 +223,7 @@ class DenoisingModule(nn.Module):
         # create a Rigid object for rigid transformations
         # convert translation from angstroms to nanometers
         r_i = create_rigid(
-            rotvec_to_rotmat(noised_feature_dict["frame_rotations"]),
+            noised_feature_dict["frame_rotations"],
             noised_feature_dict["frame_translations"] * ANG_TO_NM_SCALE,
         )
 
@@ -320,7 +320,7 @@ class DenoisingModule(nn.Module):
             "redesign_mask": redesign_mask,
         }
 
-    def _predict(
+    def _predict_vf(
         self,
         noised_feature_dict: dict[str, torch.Tensor],
         s_i: torch.Tensor,
@@ -330,35 +330,24 @@ class DenoisingModule(nn.Module):
         pred_x = self.output_proj(s_i)
 
         res_type_prob_update = pred_x[..., :20]
-        frame_rotations_update = pred_x[..., 20:23]
+        frame_rotations_vf = pred_x[..., 20:23]
         frame_translations_update = pred_x[..., 23:26]
-        dihedrals_update = pred_x[..., 26:]
-
-        # make updates to get the final predicted values
-        res_type_prob = noised_feature_dict["res_type_prob"] + res_type_prob_update
-        frame_rotations = rotvecs_mul(
-            noised_feature_dict["frame_rotations"], frame_rotations_update
-        )
-
+        dihedrals_vf = pred_x[..., 26:]
         # transform the invariant translation outputs to equivalent translation vector fields
-        frame_translations_update = r_i.get_rots().apply(frame_translations_update)
-        frame_translations_update = frame_translations_update * NM_TO_ANG_SCALE
-        frame_translations = (
-            noised_feature_dict["frame_translations"] + frame_translations_update
+        frame_translations_vf = (
+            r_i.get_rots().apply(frame_translations_update) * NM_TO_ANG_SCALE
         )
-        dihedrals = noised_feature_dict["dihedrals"] + dihedrals_update
 
-        # map outputs to manifold
-        res_type_prob = self._sequence_flow.nn_to_manifold(res_type_prob)
-        frame_rotations = self._rotation_flow.nn_to_manifold(frame_rotations)
-        frame_translations = self._translation_flow.nn_to_manifold(frame_translations)
-        dihedrals = self._dihedral_flow.nn_to_manifold(dihedrals)
+        # project sequence update onto the probability simplex
+        res_type_prob_vf = self._sequence_flow.tangent_project(
+            noised_feature_dict["res_type_prob"], res_type_prob_update
+        )
 
         return {
-            "res_type_prob": res_type_prob,
-            "frame_rotations": frame_rotations,
-            "frame_translations": frame_translations,
-            "dihedrals": dihedrals,
+            "sequence_vf": res_type_prob_vf,
+            "rotation_vf": frame_rotations_vf,
+            "translation_vf": frame_translations_vf,
+            "dihedral_vf": dihedrals_vf,
         }
 
     def _reconstruct(
@@ -368,7 +357,7 @@ class DenoisingModule(nn.Module):
     ):
 
         res_type = torch.argmax(pred_feature_dict["res_type_prob"], dim=-1)
-        frame_rotations = rotvec_to_rotmat(pred_feature_dict["frame_rotations"])
+        frame_rotations = pred_feature_dict["frame_rotations"]
         frame_translations = pred_feature_dict["frame_translations"]
         dihedrals = pred_feature_dict["dihedrals"]
         pos_heavyatom = full_atom_reconstruction(
@@ -435,9 +424,7 @@ class DenoisingModule(nn.Module):
             s_trunk_i,
             z_trunk_ij,
         )
-        pred_feature_dict = self._predict(noised_feature_dict, s_i, r_i)
-
-        pred_vf_dict = self._get_vector_fields(noised_feature_dict, pred_feature_dict)
+        pred_vf_dict = self._predict_vf(noised_feature_dict, s_i, r_i)
         true_vf_dict = self._get_vector_fields(noised_feature_dict, true_feature_dict)
         pred_loss_update.update(pred_vf_dict)
         true_loss_update.update(true_vf_dict)
@@ -466,14 +453,11 @@ class DenoisingModule(nn.Module):
         for i in range(num_steps):
             s_i, r_i = self._embed(noised_feature_dict)
             s_i = self.forward(s_i, r_i, s_inputs_i, z_inputs_ij, s_trunk_i, z_trunk_ij)
-            pred_feature_dict = self._predict(noised_feature_dict, s_i, r_i)
-            pred_vf_dict = self._get_vector_fields(
-                noised_feature_dict, pred_feature_dict
-            )
+            pred_vf_dict = self._predict_vf(noised_feature_dict, s_i, r_i)
             noised_feature_dict = self._update_features(
                 noised_feature_dict, pred_vf_dict, d_t
             )
-            pred_data_dict_update = self._reconstruct(true_data_dict, pred_feature_dict)
-            pred_data_dict.update(pred_data_dict_update)
+        pred_data_dict_update = self._reconstruct(true_data_dict, noised_feature_dict)
+        pred_data_dict.update(pred_data_dict_update)
 
         return pred_data_dict
