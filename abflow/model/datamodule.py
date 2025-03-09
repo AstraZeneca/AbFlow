@@ -5,9 +5,10 @@ import os
 import random
 import pandas as pd
 import zlib
+import copy
 
 from torch.utils.data import Dataset, default_collate
-from pytorch_lightning import LightningDataModule
+from lightning import LightningDataModule
 from itertools import chain
 
 from .utils import (
@@ -31,12 +32,15 @@ class AntibodyAntigenDataset(Dataset):
         self.map_size = 250 * 1024**3
         self._load_entries()
         self._load_clusters()
-        self._load_split()
+        if self.config['name'] == 'sabdab':
+            self._load_split_sabdab()
+        else:
+            self._load_split()
 
     @property
     def structure_data_path(self):
         return os.path.join(
-            self.data_path, self.config["name"], "processed_structures.lmdb"
+            self.data_path, self.config["name"], f"abflow_processed_structures_{self.config['name']}_v3.lmdb"
         )
 
     def _load_entries(self):
@@ -64,8 +68,10 @@ class AntibodyAntigenDataset(Dataset):
 
         random.seed(self.config["seed"])
 
+        cluster_name = "cluster_result_clustermode1_cluster.tsv" #if self.config["name"]=="sabdab" else "cluster_result_clustermode2_cluster.tsv"
+
         self.cluster_path = os.path.join(
-            self.data_path, self.config["name"], "cluster_result_cluster.tsv"
+            self.data_path, self.config["name"], cluster_name
         )
 
         clusters, id_to_cluster = {}, {}
@@ -85,6 +91,8 @@ class AntibodyAntigenDataset(Dataset):
         print(f"Number of pdbs in the full dataset: {len(self.id_to_cluster.keys())}")
         print(f"Number of clusters in the full dataset: {len(self.clusters.keys())}")
 
+
+
     def _load_split(self):
 
         random.seed(self.config["seed"])
@@ -99,11 +107,132 @@ class AntibodyAntigenDataset(Dataset):
         rabd_ids = rabd_df["ids"].tolist()
 
         # test cluster ids
-        test_ids = [
-            entry_dict["id"]
-            for entry_dict in self.all_entries
-            if entry_dict is not None and entry_dict["id"][:4] in rabd_ids
-        ]
+        test_ids = []
+        for entry_dict in self.all_entries:
+            if entry_dict is not None:
+                for rabd_id in rabd_ids:
+                    if entry_dict["id"][:4] in rabd_id:
+                        test_ids.append(entry_dict["id"])
+
+
+
+
+        test_clusters = rm_duplicates(
+            [self.id_to_cluster[test_id] for test_id in test_ids]
+        )
+
+        # Get pdb ids from SAbDab
+        sabdab_df = pd.read_csv(
+            os.path.join(
+                f"{self.config['paths']['data']}/sabdab/", "sabdab_summary_all.tsv"
+            ),
+            sep="\t",
+        )
+        sabdab_pdbs = sabdab_df["pdb"].tolist()
+        sabdab_pdbs_unique = set(sabdab_pdbs)
+
+        sabdab_ids = []
+        oas_ids = []
+        for entry_dict in self.all_entries:
+            if entry_dict is not None:
+                pdb4 = entry_dict["id"][:4]
+                if pdb4 in sabdab_pdbs_unique:
+                    sabdab_ids.append(entry_dict["id"])
+                else:
+                    oas_ids.append(entry_dict["id"])
+        sabdab_clusters = rm_duplicates(
+            [self.id_to_cluster[sid] for sid in sabdab_ids if sid in self.id_to_cluster]
+        )
+        oas_clusters = rm_duplicates(
+            [self.id_to_cluster[sid] for sid in oas_ids if sid in self.id_to_cluster]
+        )
+
+        oas_clusters_train_val = [c for c in oas_clusters if c not in test_clusters]
+        sabdab_clusters_train_val = [c for c in sabdab_clusters if c not in test_clusters]
+
+
+        random.shuffle(oas_clusters_train_val)
+        random.shuffle(sabdab_clusters_train_val)
+
+        num_val_cluster_half = int(0.5*self.config["num_val_cluster"])
+
+        val_clusters = oas_clusters_train_val[:num_val_cluster_half] + sabdab_clusters_train_val[:num_val_cluster_half]
+
+        oas_train_clusters = oas_clusters_train_val[num_val_cluster_half:]
+        sabdab_train_clusters = sabdab_clusters_train_val[num_val_cluster_half:]
+
+
+
+        if self.split == "test":
+            self.split_ids = test_ids
+            print(f"{100*'*'}")
+            print(f"Number of samples in test set: {len(self.split_ids)}")
+
+        elif self.split == "val":
+            self.split_ids = list(
+                chain.from_iterable(
+                    self.clusters[c_id]
+                    for c_id in val_clusters
+                    if c_id in self.clusters
+                )
+            )
+            print(f"{100*'*'}")
+            print(f"Number of samples in validation set: {len(self.split_ids)}")
+
+        else:
+            self.split_ids_oas = list(
+                chain.from_iterable(
+                    self.clusters[c_id]
+                    for c_id in oas_train_clusters
+                    if c_id in self.clusters
+                )
+            )
+            self.split_ids_oas_length = len(self.split_ids_oas)
+
+            self.split_ids_sabdab = list(
+                chain.from_iterable(
+                    self.clusters[c_id]
+                    for c_id in sabdab_train_clusters
+                    if c_id in self.clusters
+                )
+            )
+            self.split_ids_sabdab_length = len(self.split_ids_sabdab)
+            print(f"{100*'*'}")
+            print(f"Number of OAS samples in training: {self.split_ids_oas_length}")
+            print(f"Number of SAbDab samples in training: {self.split_ids_sabdab_length}")
+
+
+        print(f"Number of RAbD id: {len(rabd_ids)}")
+        print(f"Number of OAS clusters in training: {len(oas_train_clusters)}")
+        print(f"Number of SAbDab clusters in training: {len(sabdab_train_clusters)}")
+        print(f"Number of clusters in validation: {len(val_clusters)}")
+        print(f"Number of clusters in test: {len(test_clusters)}")
+
+
+    def _load_split_sabdab(self):
+
+        random.seed(self.config["seed"])
+
+        # Get pdb ids in RABD
+        rabd_df = pd.read_csv(
+            f"{self.config['paths']['data']}/rabd/rabd.csv",
+            header=None,
+            usecols=[0],
+            names=["ids"],
+        )
+        rabd_ids = rabd_df["ids"].tolist()
+
+        # test cluster ids
+        test_ids = []
+        for entry_dict in self.all_entries:
+            if entry_dict is not None:
+                for rabd_id in rabd_ids:
+                    if entry_dict["id"][:4] in rabd_id:
+                        test_ids.append(entry_dict["id"])
+
+
+
+
         test_clusters = rm_duplicates(
             [self.id_to_cluster[test_id] for test_id in test_ids]
         )
@@ -164,12 +293,23 @@ class AntibodyAntigenDataset(Dataset):
 
     def __len__(self):
         """Returns number of samples in the data"""
-        length = len(self.split_ids)
+        length = len(self.split_ids) if self.split in ["test", "val"] or self.config["name"]=='sabdab' else self.split_ids_oas_length
         return length
 
     def __getitem__(self, idx: int):
-        structure_id = self.split_ids[idx]
-        item = self._get_data_from_id(structure_id)
+        if self.split in ["test", "val"] or self.config["name"]=='sabdab':
+            structure_id = self.split_ids[idx]
+            item = self._get_data_from_id(structure_id)
+        else:
+            coin_flip = random.randint(0, 1)
+
+            if coin_flip==0:
+                structure_id = self.split_ids_oas[idx]
+            else:
+                structure_id = self.split_ids_sabdab[idx % self.split_ids_sabdab_length]
+            
+            item = self._get_data_from_id(structure_id)
+            
         return item
 
     def _get_data_from_id(self, id: str):
@@ -208,6 +348,7 @@ class AntibodyAntigenDataModule(LightningDataModule):
     def __init__(self, config: dict):
         super().__init__()
 
+        self.config = config
         self._train_dataset = AntibodyAntigenDataset(config["dataset"], split="train")
         self._val_dataset = AntibodyAntigenDataset(config["dataset"], split="val")
         self._test_dataset = AntibodyAntigenDataset(config["dataset"], split="test")
@@ -221,22 +362,37 @@ class AntibodyAntigenDataModule(LightningDataModule):
     def __repr__(self):
         return f"{self.__class__.__name__}(batch_size={self._batch_size})"
 
-    def collate(
-        self, data_list: list[dict[str, torch.Tensor]]
-    ) -> dict[str, torch.Tensor]:
+    def collate(self, data_list: list[dict[str, torch.Tensor]], custom_redesign_mask: torch.Tensor = None) -> dict[str, torch.Tensor]:
         """
         Combines a list of dictionaries into a single dictionary with an additional batch dimension.
         """
 
-        for data in data_list:
+        for i, data in enumerate(data_list):
+
+            # Delete string based entries
+            for cdr_seq in ["H1_seq", "L1_seq", "H2_seq", "L2_seq", "H3_seq", "L3_seq"]:
+                if cdr_seq in data:
+                    del data[cdr_seq]
+
             data.update(get_redesign_mask(data, self._redesign))
-            data.update(
-                crop_data(
-                    data,
-                    max_crop_size=self._max_crop_size,
-                    antigen_crop_size=self._antigen_crop_size,
+            
+            if custom_redesign_mask is not None:
+                data['redesign_mask'][:len(custom_redesign_mask)] = copy.deepcopy(custom_redesign_mask)
+
+            try:
+                data.update(
+                    crop_data(
+                        data,
+                        max_crop_size=self._max_crop_size,
+                        antigen_crop_size=self._antigen_crop_size,
+                        random_sample_sizes=self.config['random_sample_sizes']
+                    )
                 )
-            )
+            except Exception as e:
+                print(f"There is a problem with the sample: {data['region_index'], data['redesign_mask']}")
+                print(f"Error: {e}")
+                exit()
+                
             data.update(
                 center_complex(
                     data["pos_heavyatom"],
@@ -244,6 +400,7 @@ class AntibodyAntigenDataModule(LightningDataModule):
                     data["redesign_mask"],
                 )
             )
+            
             data.update(pad_data(data, self._max_crop_size))
 
         batch = default_collate(data_list)
@@ -279,6 +436,7 @@ class AntibodyAntigenDataModule(LightningDataModule):
             batch_size=self._batch_size,
             pin_memory=True,
             persistent_workers=True,
+            prefetch_factor=6,
         )
 
     def val_dataloader(self) -> torch.utils.data.DataLoader:

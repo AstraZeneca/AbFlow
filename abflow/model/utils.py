@@ -1,4 +1,7 @@
+import copy
+import random
 import torch
+import torch.nn.functional as F
 from ..constants import region_to_index
 
 
@@ -53,110 +56,137 @@ def crop_complex(
     redesign_mask: torch.Tensor,
     pos_heavyatom: torch.Tensor,
     max_crop_size: int,
-    antigen_crop_size: int,
+    antigen_crop_max: int,
+    antigen_crop_min: int = 20,
+    antibody_non_cdr_min: int = 20,
+    random_sample_sizes: bool = False,
 ) -> torch.Tensor:
     """
-    Generate a mask for cropping the complex based on the proximity between redesign CDRs and antigen residues.
+    Context selection with minimum guarantees and efficient sampling.
+    
+    Args:
+        region_index: Array of indices representing different regions in the structure.
+        redesign_mask: Boolean array indicating which residues are part of the redesign.
+        pos_heavyatom: Array containing atomic coordinates of heavy atoms e.g., (N, CA, C).
+        max_crop_size: Maximum number of residues to select for context.
+        antigen_crop_max: Maximum number of antigen residues to include in context. Defaults to 40.
+        antigen_crop_min: Minimum number of antigen residues to ensure coverage. Defaults to 30.
+        antibody_non_cdr_min: Minimum number of non-CDR residues for the antibody arm. Defaults to 50.
+        random_sample_sizes: Whether to randomly sample sizes within specified bounds. Defaults to False.
 
-    This function creates a crop mask by first selecting redesign CDR residues.
-    It then selects the closest antigen residues up to `antigen_crop_size`.
-    Finally, it fills the mask up to `max_crop_size` with the closest remaining residues.
-
-    :param region_index: A tensor of shape (N_res,) containing the CDR index for each residue.
-    :param redesign_mask: A tensor of shape (N_res,) indicating which residues to redesign (True) and which to fix (False).
-    :param pos_heavyatom: A tensor of shape (N_res, 15, 3) containing the position of the heavy atoms for each residue.
-    :param max_crop_size: Maximum number of residues to be marked as True in the crop mask.
-    :param antigen_crop_size: Number of antigen residues to be marked as True in the crop mask.
-    :return: A tensor of shape (N_res,) representing the crop mask with selected residues marked as True.
+    Returns:
+        torch.Tensor: Boolean mask array with same shape as `region_index`, indicating selected residues
+                      that contribute to the context (True) or are excluded (False).
     """
+    # TODO: If we are re-designing only one loop, and if it does not exist in a sample, cropping might fail. 
+    # When we can not find the region of interest (redesign_mask is all False), we should randomly select an existing region in the sample to redesign.
 
-    redesign_cdr_mask = (
-        (redesign_mask == True)
-        & (region_index != region_to_index["antigen"])
-        & (region_index != region_to_index["framework"])
-    )
-    cdr_indices = torch.where(redesign_cdr_mask == True)[0]
-    coords = pos_heavyatom[:, 1]
-    antigen_mask = region_index == region_to_index["antigen"]
+    redesign_mask_c = copy.deepcopy(redesign_mask)
+    antibody_non_cdr_max = max_crop_size - antigen_crop_max
+    
+    # Get region indices from global mapping
+    antigen_idx = region_to_index["antigen"]
+    device = region_index.device
 
-    anchor_points = []
-    i = 0
+    # Identify valid context regions (never include redesign_mask in context)
+    antigen_mask = region_index == antigen_idx
+    antibody_mask = ~antigen_mask
+    antibody_non_redesign_mask = antibody_mask & ~redesign_mask_c
 
-    while i < len(cdr_indices):
-        start = i
-        while i < len(cdr_indices) - 1 and cdr_indices[i] + 1 == cdr_indices[i + 1]:
-            i += 1
-        end = i
+    # Initialize mask with redesign regions (target)
+    new_mask = redesign_mask_c.clone()
+    selected_count = int(new_mask.sum())
 
-        # Add anchors: start, middle, and end
-        anchor_points.append(cdr_indices[start])
-        anchor_points.append(cdr_indices[(start + end) // 2])
-        anchor_points.append(cdr_indices[end])
+    # Early exit if crop already full or no context needed
+    if selected_count >= max_crop_size or max_crop_size == 0:
+        return new_mask
 
-        i += 1
+    # 1. Select antigen context (epitope) 
+    antigen_coords = pos_heavyatom[antigen_mask, 1]  # CA atoms
+    antibody_coords = pos_heavyatom[antibody_non_redesign_mask, 1]
+    design_coords = pos_heavyatom[redesign_mask_c, 1]
 
-    # Calculate distances for all anchor points
-    all_distances = []
-    for anchor in anchor_points:
-        distances = torch.norm(coords - coords[anchor], dim=1)
-        all_distances.append(distances.unsqueeze(0))
+    # Calculate antigen distances to redesign_mask regions to find the correct pocket 
+    # TODO: Consider the possibility of data leakage, but this is only used for extracting the pocket
+    if antigen_coords.shape[0] > 0 and antibody_coords.shape[0] > 0:
+        dists = torch.cdist(antigen_coords, design_coords).min(dim=1).values
+    else:
+        dists = torch.full((antigen_coords.shape[0],), float('inf'), device=device)
 
-    all_distances = torch.cat(all_distances, dim=0).min(dim=0).values
+    # Determine antigen selection parameters
+    available_antigens = antigen_mask.sum().item()
+    max_antigen = min(antigen_crop_max, available_antigens, max_crop_size - selected_count)
+    min_antigen = min(antigen_crop_min, max_antigen) if available_antigens > 0 else 0
+    
+    # Sample actual antigen size
+    if random_sample_sizes and (max_antigen > min_antigen):
+        actual_antigen = torch.randint(min_antigen, max_antigen + 1, (), device=device).item()
+    else:
+        actual_antigen = max_antigen
 
-    # Separate antigen and non-antigen distances
-    antigen_distances = all_distances[antigen_mask == True]
-    antigen_indices = torch.where(antigen_mask == True)[0]
+    # Select closest antigens that meet minimum requirement
+    if actual_antigen > 0:
+        _, antigen_sel = torch.topk(-dists, actual_antigen)
+        antigen_indices = torch.where(antigen_mask)[0][antigen_sel]
+        new_mask[antigen_indices] = True
+        selected_count += actual_antigen
 
-    non_antigen_distances = all_distances[
-        (antigen_mask == False) & (redesign_mask == False)
-    ]
-    non_antigen_indices = torch.where(
-        (antigen_mask == False) & (redesign_mask == False)
-    )[0]
+    # 2. Select antibody non-CDR context 
+    remaining_budget = max_crop_size - selected_count
+    if remaining_budget <= 0:
+        return new_mask
 
-    # Initialize the new mask with the original redesign CDR mask
-    new_mask = redesign_mask.clone()
-    selected_indices = set(new_mask.nonzero(as_tuple=True)[0].tolist())
-    selected_count = len(selected_indices)
+    # Calculate distances from non-redesign antibody to selected antigens
+    if actual_antigen > 0 and antigen_indices.numel() > 0:
+        ref_coords = pos_heavyatom[antigen_indices, 1]
+        ab_dists = torch.cdist(antibody_coords, ref_coords).min(dim=1).values
+    else:  # Fallback to geometric center
+        center = antibody_coords.mean(dim=0, keepdim=True)
+        ab_dists = torch.cdist(antibody_coords, center).squeeze()
 
-    # Select the closest antigen residues
-    if antigen_crop_size > 0:
-        available_antigen_indices = len(antigen_indices)
-        antigen_crop_size = min(antigen_crop_size, available_antigen_indices)
-        if antigen_crop_size > 0:
-            antigen_nearest_indices = antigen_indices[
-                torch.topk(-antigen_distances, antigen_crop_size, largest=True).indices
-            ]
-            for idx in antigen_nearest_indices.tolist():
-                if selected_count >= max_crop_size:
-                    break
-                if idx not in selected_indices:
-                    new_mask[idx] = True
-                    selected_indices.add(idx)
-                    selected_count += 1
+    # Determine antibody selection parameters
+    available_antibody = antibody_non_redesign_mask.sum().item()
+    max_antibody = min(antibody_non_cdr_max, available_antibody, remaining_budget)
+    min_antibody = min(antibody_non_cdr_min, max_antibody) if available_antibody > 0 else 0
+    
+    # Sample actual antibody size
+    if random_sample_sizes and (max_antibody > min_antibody):
+        actual_antibody = torch.randint(min_antibody, max_antibody + 1, (), device=device).item()
+    else:
+        actual_antibody = max_antibody
 
-    # Select the remaining residues up to max_crop_size
-    remaining_size = max_crop_size - selected_count
-    if remaining_size > 0:
-        available_non_antigen_indices = len(non_antigen_indices)
-        remaining_size = min(remaining_size, available_non_antigen_indices)
+    # Select closest antibody non-CDR residues
+    if actual_antibody > 0:
+        _, ab_sel = torch.topk(-ab_dists, actual_antibody)
+        ab_indices = torch.where(antibody_non_redesign_mask)[0][ab_sel]
+        new_mask[ab_indices] = True
+        selected_count += actual_antibody
 
-        if remaining_size > 0:
-            non_antigen_nearest_indices = non_antigen_indices[
-                torch.topk(-non_antigen_distances, remaining_size, largest=True).indices
-            ]
-            for idx in non_antigen_nearest_indices.tolist():
-                if selected_count >= max_crop_size:
-                    break
-                if idx not in selected_indices:
-                    new_mask[idx] = True
-                    selected_indices.add(idx)
-                    selected_count += 1
+    # 3. Fill remaining budget with closest other residues
+    remaining = max_crop_size - selected_count
+    if remaining > 0:
+        other_mask = ~antigen_mask & ~antibody_non_redesign_mask & ~new_mask
+        other_coords = pos_heavyatom[other_mask, 1]
+        
+        if other_coords.shape[0] > 0:
+            # Calculate distances to already selected context
+            context_coords = pos_heavyatom[new_mask, 1]
+            dists = torch.cdist(other_coords, context_coords).min(dim=1).values
+            other_sel = torch.topk(-dists, remaining).indices
+            new_mask[torch.where(other_mask)[0][other_sel]] = True
 
     return new_mask
 
 
-def crop_data(data: dict, max_crop_size: int, antigen_crop_size: int) -> dict:
+def crop_data(
+    data: dict,
+    max_crop_size: int,
+    antigen_crop_size: int,
+    random_sample_sizes: bool = False,
+    compute_pocket: bool = True,
+    pocket_indices: list[int] = None,
+    threshold: int = 10,
+) -> dict:
     """
     Crop the data dict based on the crop mask, including special handling for pairwise features.
     """
@@ -166,10 +196,13 @@ def crop_data(data: dict, max_crop_size: int, antigen_crop_size: int) -> dict:
         data["pos_heavyatom"],
         max_crop_size,
         antigen_crop_size,
+        random_sample_sizes=random_sample_sizes,
     )
+
     crop_indices = crop_mask.nonzero(as_tuple=True)[0]
 
     cropped_data = {}
+
     for key, value in data.items():
         if isinstance(value, torch.Tensor):
             if value.ndim >= 2 and value.shape[0] == value.shape[1]:  # Pairwise feature
@@ -178,6 +211,46 @@ def crop_data(data: dict, max_crop_size: int, antigen_crop_size: int) -> dict:
                 cropped_data[key] = value[crop_mask]
         else:
             cropped_data[key] = value
+
+    # Add new 'pocket' feature if enabled.
+    if compute_pocket:
+        device = data["region_index"].device
+        full_N = data["region_index"].shape[0]
+        # Initialize full pocket mask to zeros.
+        pocket_full = torch.zeros(full_N, dtype=torch.bool, device=device)
+        antigen_idx = region_to_index["antigen"]
+        antigen_mask = data["region_index"] == antigen_idx
+
+
+        if pocket_indices is not None:
+            # User provides explicit 1-indexed indices among antigen residues.
+            antigen_idx_list = torch.where(antigen_mask)[0]  # absolute indices of antigen residues
+            # Ensure that the user indices are valid given the number of antigen residues.
+            for idx in pocket_indices:
+                antigen_relative_idx = idx - 1  # convert from 1-indexed to 0-indexed
+                if antigen_relative_idx < antigen_idx_list.numel():
+                    pos = antigen_idx_list[antigen_relative_idx]
+                    pocket_full[pos] = True
+
+        else:
+            # Compute distances: for each antigen residue, if its CA atom is within 10 Å of any antibody residue.
+            if antigen_mask.sum() > 0:
+                antigen_coords = data["pos_heavyatom"][antigen_mask, 1]  # CA coordinates for antigen residues
+                antibody_mask = ~antigen_mask  # all non-antigen residues (assumed antibody)
+                if antibody_mask.sum() > 0:
+                    antibody_coords = data["pos_heavyatom"][antibody_mask, 1]
+                    dists = torch.cdist(antigen_coords, antibody_coords)
+                    min_dists = dists.min(dim=1).values
+                    threshold_instance = random.randint(4, threshold)
+                    pocket_vals = min_dists < threshold_instance  # e.g., threshold at 10 Å
+                else:
+                    pocket_vals = torch.zeros((antigen_coords.shape[0],), dtype=torch.bool, device=device)
+                antigen_indices = torch.where(antigen_mask)[0]
+                pocket_full[antigen_indices] = pocket_vals
+
+        # Crop the pocket mask using the same crop_mask.
+        cropped_data["pocket"] = pocket_full[crop_mask]
+
     return cropped_data
 
 
@@ -211,6 +284,7 @@ def center_complex(
     return {
         "pos_heavyatom": centered_pos_heavyatom,
         "frame_translations": centered_frame_translations,
+        "centroid": centroid,
     }
 
 
@@ -234,6 +308,9 @@ def pad_data(data: dict, max_res: int) -> dict:
     padded_data["valid_mask"] = valid_mask
 
     for key, value in data.items():
+        if key in ["pos_scale", "H1_seq", "L1_seq", "H2_seq", "L2_seq", "H3_seq", "L3_seq"]:
+            continue
+
         if isinstance(value, torch.Tensor):
             padding = max_res - value.size(0)
             if padding > 0:
@@ -259,3 +336,30 @@ def pad_data(data: dict, max_res: int) -> dict:
             padded_data[key] = value
 
     return padded_data
+
+
+def adjust_mask_regions(mask: torch.Tensor, delta: int, enlarge: bool = True) -> torch.Tensor:
+    """
+
+    Parameters:
+      mask (torch.Tensor): A boolean tensor of shape (B, L), where B is batch size
+                           and L is the sequence length.
+      delta (int): The number of positions to enlarge or shrink from each side.
+      enlarge (bool): Whether to enlarge (True) or shrink (False) the regions.
+    
+    Returns:
+      torch.Tensor: The adjusted mask of shape (B, L) as a boolean tensor.
+    """
+    mask_float = mask.float().unsqueeze(1)
+    kernel_size = 2 * delta + 1
+
+    if enlarge:
+        dilated = F.max_pool1d(mask_float, kernel_size=kernel_size, stride=1, padding=delta)
+        adjusted_mask = dilated.squeeze(1).bool()
+    else:
+        weight = torch.ones((1, 1, kernel_size), device=mask.device)
+        window_sum = F.conv1d(mask_float, weight=weight, bias=None, stride=1, padding=delta)
+        eroded = (window_sum == float(kernel_size)).float()
+        adjusted_mask = eroded.squeeze(1).bool()
+
+    return adjusted_mask

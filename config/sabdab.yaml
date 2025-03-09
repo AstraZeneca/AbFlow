@@ -2,16 +2,18 @@
 
 # wandb settings
 project_name: flow_matching
-model_name: all_atom_de_novo
+model_name: abflow
 
 # shared settings
 shared:
-    design_mode: &design_mode ["sequence", "backbone", "sidechain"]
+    design_mode: &design_mode ["sequence", "backbone"] # Options: ["sequence", "backbone", "sidechain"]
     seed: &seed 2025
+    confidence: &confidence False
+    dataset2use: &dataset2use sabdab
 
 # training settings
 trainer:
-    devices: 1
+    devices: 8
     max_epochs: 200
     precision: 32-true
     gradient_clip_val: 1.0
@@ -20,48 +22,54 @@ trainer:
     log_every_n_steps: 100
 checkpoint:
     path: null
-    load_optimizer: False
+    load_optimizer: True # False if you need only the model
 
 # abflow datamodule settings
 datamodule:
-    num_workers: 8
-    batch_size: 4
+    num_workers: 16
+    batch_size: 2
     redesign:
         framework: False
-        hcdr1: False
-        hcdr2: False
+        hcdr1: True
+        hcdr2: True
         hcdr3: True
         lcdr1: True
-        lcdr2: False
-        lcdr3: False
-    max_crop_size: 180
-    antigen_crop_size: 60
+        lcdr2: True
+        lcdr3: True
+    max_crop_size: 300
+    antigen_crop_size: 100
+    random_sample_sizes: False
     dataset:
-        name: sabdab
+        name: *dataset2use
         seed: *seed
         num_val_cluster: 10
         paths:
-            data: /scratch/hz362/datavol/data/
-            model: /scratch/hz362/datavol/model/
+            data: /home/jovyan/abflow-datavol/data 
+            model: /home/jovyan/abflow-datavol/checkpoints
 
 # abflow model settings
 model:
     loss_weighting:
-        sequence_vf_loss: 100.0
+        sequence_vf_loss: 1000.0
         translation_vf_loss: 1.0
-        rotation_vf_loss: 10.0
+        rotation_vf_loss: 100.0
         dihedral_vf_loss: 10.0
-        distogram_loss: 1.0
-        confidence_lddt_loss: 1.0
-        confidence_de_loss: 1.0
-        confidence_ae_loss: 1.0
+        distogram_loss: 10.0
+        confidence_lddt_loss: 1.
+        confidence_de_loss: 1.
+        confidence_ae_loss: 1.
     learning_rate: 0.0001
+    loss_combination_method: mvdr # mvdr, static
     design_mode: *design_mode
     seed: *seed
+    confidence: *confidence
+    dataset_name: *dataset2use
 
 # abflow network settings
 network:
+    is_training: True
     design_mode: *design_mode
+    confidence: *confidence
     c_s: 192 # default: 384
     c_z: 64 # default: 128
     n_condition_module_blocks: 8 # default: 48

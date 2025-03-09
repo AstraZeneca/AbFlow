@@ -1,4 +1,6 @@
 import torch
+import random
+import numpy as np
 
 from ..model.model import AbFlow
 from ..model.network import FlowPrediction
@@ -30,3 +32,30 @@ def setup_model(
         model_instance = AbFlow(network=network_instance, **config["model"])
 
     return model_instance, datamodule_instance
+
+
+
+def set_seed(seed: int):
+    """
+    Sets the seed for reproducibility across various libraries.
+    
+    Parameters:
+        seed (int): The seed value to use.
+    """
+    # Set seed for Python's random module
+    random.seed(seed)
+    
+    # Set seed for NumPy
+    np.random.seed(seed)
+    
+    # Set seed for PyTorch on CPU
+    torch.manual_seed(seed)
+    
+    # If using GPU, set seeds for all GPUs
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+    
+    # Ensure that CUDA's convolution algorithms are deterministic
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False

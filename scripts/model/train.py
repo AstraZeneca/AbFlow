@@ -15,25 +15,16 @@ import traceback
 
 
 from datetime import timedelta
-import pytorch_lightning as pl
-from pytorch_lightning.strategies import DDPStrategy, FSDPStrategy
-from pytorch_lightning.callbacks import (
-    LearningRateMonitor,
-    ModelCheckpoint,
-    TQDMProgressBar,
-)
-from pytorch_lightning.loggers import CSVLogger, WandbLogger
+import lightning as L
+from lightning.pytorch.strategies import DDPStrategy
+from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint, TQDMProgressBar
+from lightning.pytorch.loggers import CSVLogger, WandbLogger
 
-from abflow.utils.training import setup_model
+from abflow.utils.training import setup_model, set_seed
 from abflow.utils.arguments import get_arguments, get_config, print_config_summary
-
-# Set the NCCL blocking wait environment variable
-# os.environ["NCCL_BLOCKING_WAIT"] = "1"
-# os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
-
-
 from torch.profiler import ProfilerActivity
 from pytorch_lightning.profilers import PyTorchProfiler
+
 
 
 # Define a short schedule (adjust wait/warmup/active as needed)
@@ -43,7 +34,6 @@ schedule = torch.profiler.schedule(
     active=3,  # Number of steps to actively profile
     repeat=1,
 )
-
 
 profiler = PyTorchProfiler(
     dirpath=".",  # Directory to save profiling traces
@@ -59,13 +49,13 @@ profiler = PyTorchProfiler(
     with_stack=True,  # Collect stack traces
 )
 
-
 def train(config: dict):
     """Function for training and saving the model."""
     # Save the config file to keep a record of the settings
     results_dir = (
-        f"{config['datamodule']['dataset']['paths']['model']}/{config['model_name']}"
+        f"{config['datamodule']['dataset']['paths']['model']}/{config['model_name']}_{config['datamodule']['dataset']['name']}_{'_'.join(config['shared']['design_mode'])}"
     )
+
     if not os.path.exists(results_dir):
         os.makedirs(results_dir)
     with open(results_dir + "/config.yaml", "w") as config_file:
@@ -80,15 +70,26 @@ def train(config: dict):
     lr_monitor = LearningRateMonitor(logging_interval="step")
     callbacks = [lr_monitor]
 
+
     # Model checkpoint
-    checkpoint_callback = ModelCheckpoint(
-        dirpath=results_dir,
-        filename="{epoch:02d}",
-        save_top_k=1,
-        verbose=True,
-        every_n_epochs=1,
-        monitor=None,
-    )
+    if config['datamodule']['dataset']['name'] == 'sabdab':
+        checkpoint_callback = ModelCheckpoint(
+            dirpath=results_dir,
+            filename="{epoch:02d}",
+            save_top_k=-1,
+            verbose=True,
+            every_n_epochs=5,
+            monitor=None,
+        )
+
+    else:
+        checkpoint_callback = ModelCheckpoint(
+            dirpath=results_dir,
+            filename="checkpoint-{step}",
+            save_top_k=-1,
+            every_n_train_steps=2000,
+        )
+
     callbacks.append(checkpoint_callback)
 
     # Progress bar
@@ -101,14 +102,13 @@ def train(config: dict):
     )
 
     # Trainer
-    trainer = pl.Trainer(
-        devices=config["trainer"]["devices"],
+    trainer = L.Trainer(
+        devices=8,
         accelerator="gpu",
         strategy=DDPStrategy(
-            timeout=timedelta(seconds=15400), find_unused_parameters=True
+            timeout=timedelta(seconds=15400), find_unused_parameters=True,
         ),
-        precision=config["trainer"]["precision"],
-        # max_steps=10,
+        precision='bf16',
         max_epochs=config["trainer"]["max_epochs"],
         accumulate_grad_batches=config["trainer"]["accumulate_grad_batches"],
         logger=logger,
@@ -140,6 +140,8 @@ if __name__ == "__main__":
     config = get_config(args)
     # Summary of the config
     print_config_summary(config, args)
+    # Set the seed
+    set_seed(config['shared']['seed'])
 
     # ----- Run Training
     try:

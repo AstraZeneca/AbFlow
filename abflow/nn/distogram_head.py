@@ -30,7 +30,7 @@ class DistogramHead(nn.Module):
         p_distogram_ij = self.linear_no_bias_d(
             z_ij + rearrange(z_ij, "b i j d -> b j i d")
         )
-        p_distogram_ij = F.softmax(p_distogram_ij, dim=-1)
+        # p_distogram_ij = F.softmax(p_distogram_ij, dim=-1)
 
         return p_distogram_ij
 
@@ -38,5 +38,6 @@ class DistogramHead(nn.Module):
 
         p_distogram_ij = self(z_ij)
         CB_distogram = self.cb_distogram_embedding(true_CB_coords)
+        CB_distogram = CB_distogram.argmax(dim=-1)
 
         return {"distogram": p_distogram_ij}, {"distogram": CB_distogram}

@@ -18,7 +18,6 @@ import math
 import numpy as np
 from abc import ABC, abstractmethod
 from typing import Union
-
 from .rotation import rotvec_to_rotmat
 
 
@@ -224,7 +223,7 @@ class SO3Distribution(BaseDistribution, ABC):
         self, size: torch.Size, device: torch.device, dtype: torch.dtype
     ) -> torch.Tensor:
         """
-        Samples one or more rotation matrices according to `size`, returned as a tensor of shape `size + (3, 3)`.
+        Samples one or more rotation matrix according to `size`, returned as a tensor of shape `size + (, 3, 3)`.
         """
 
         axes = torch.as_tensor(self.sample_axis(size), dtype=dtype, device=device)
@@ -274,8 +273,7 @@ class UniformToric(ToricDistribution):
     def sample(
         self, size: torch.Size, device: torch.device, dtype: torch.dtype
     ) -> torch.Tensor:
-        x_0 = (
-            torch.rand(size + (self.dim,), device=device, dtype=dtype) * 2 * math.pi
-            - math.pi
-        )
+
+        x_0 = torch.rand(size + (self.dim,), device=device, dtype=dtype) * 2 * math.pi
+        
         return x_0

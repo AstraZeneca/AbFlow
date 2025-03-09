@@ -11,7 +11,7 @@ from einops import rearrange
 
 from ...rigid import Rigid
 from .pairformer import Transition
-
+from ...flow.rotation import rot6d_mul_vec
 
 class InvariantPointAttention(nn.Module):
     """
@@ -54,6 +54,7 @@ class InvariantPointAttention(nn.Module):
             n_head * c_z + hc + n_head * n_point_values * 3 + n_head * n_point_values,
             c_s,
         )
+
 
     def forward(
         self,
@@ -98,7 +99,7 @@ class InvariantPointAttention(nn.Module):
 
         b_h_ij = self.linear_no_bias_b(z_ij)
 
-        rigid_hp_i = rigid_i.unsqueeze(-1).unsqueeze(-1)
+        rigid_hp_i = rigid_i.unsqueeze(-2).unsqueeze(-2)
         a_s_h_ij = (
             1 / self.c_hidden**0.5 * torch.einsum("bihd,bjhd->bijh", q_h_i, k_h_i)
         )
@@ -133,7 +134,6 @@ class InvariantPointAttention(nn.Module):
         )
 
         return s_hat_i
-
 
 class IPAStack(nn.Module):
     """
@@ -178,5 +178,4 @@ class IPAStack(nn.Module):
             # Transition
             s_i = s_i + self.trunk[f"transition_{b}"](s_i)
             s_i = self.trunk[f"layer_norm_2_{b}"](self.dropout(s_i))
-
-        return s_i
+        return s_i 

@@ -148,6 +148,7 @@ chi_angles_mask = {
     AminoAcid3.VAL: [True, False, False, False],
 }
 
+
 restype_to_heavyatom_names = {
     AminoAcid3.ALA: ["N", "CA", "C", "O", "CB", "", "", "", "", "", "", "", "", "", "OXT"],
     AminoAcid3.ARG: ["N", "CA", "C", "O", "CB", "CG", "CD", "NE", "CZ", "NH1", "NH2", "", "", "", "OXT"],
