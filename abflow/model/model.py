@@ -1,15 +1,17 @@
+import copy
 import torch
 import random
 import numpy as np
 
 from typing import Optional, Dict, List
 from torch import nn
-from pytorch_lightning import LightningModule
+from lightning import LightningModule
 
 from .loss import AbFlowLoss
 from .metrics import AbFlowMetrics
 from ..constants import initialize_ddp_constants
-
+from ..flow.rotation import rotvec_to_rotmat
+from  ..model.utils import adjust_mask_regions
 
 def seed_everything_temporarily(seed: int):
     """
@@ -49,6 +51,9 @@ class AbFlow(LightningModule):
         design_mode: List[str],
         learning_rate: float = 1e-4,
         seed: Optional[int] = 2025,
+        is_compile: bool = True,
+        loss_combination_method: str ='all',
+        confidence: bool =False,
     ):
         """
         Initialize the AbFlow model.
@@ -60,9 +65,22 @@ class AbFlow(LightningModule):
         param seed: The random seed used for reproducibility. Defaults to 2025.
         """
         super().__init__()
-        self._loss = AbFlowLoss(design_mode=design_mode, loss_weights=loss_weighting)
+        self._loss = AbFlowLoss(design_mode=design_mode, 
+                                loss_weights=loss_weighting,
+                                loss_combination_method=loss_combination_method,
+                                confidence = confidence,
+                                )
+
+        self.loss_weighting_copy = copy.deepcopy(loss_weighting)
         self._metrics = AbFlowMetrics()
         self._network = network
+        self.compile = is_compile
+        self.loss_dict_means = None
+        
+        if self.compile:
+            torch._dynamo.config.cache_size_limit = 128
+            torch._dynamo.config.accumulated_cache_size_limit = 128
+            self._network = torch.compile(self._network, mode='reduce-overhead')
 
         self._learning_rate = learning_rate
         self._seed = seed
@@ -88,13 +106,26 @@ class AbFlow(LightningModule):
         """
         Training step with less frequent logging for speed.
         """
+        
+        rnum = random.randint(0, 1)
+        if rnum==0:
+            batch['redesign_mask'] = adjust_mask_regions(batch['redesign_mask'], delta=2, enlarge=True)
+        else:
+            batch['redesign_mask'] = adjust_mask_regions(batch['redesign_mask'], delta=2, enlarge=False)
 
         pred_loss_dict, true_loss_dict = self._network.get_loss_terms(batch)
-        cumulative_loss, loss_dict = self._loss(pred_loss_dict, true_loss_dict)
+        cumulative_loss, loss_dict = self._loss(pred_loss_dict, true_loss_dict, self.global_step)
 
-        loss_dict_means = {f"train/{k}": v.mean() for k, v in loss_dict.items()}
+
+        if self.loss_dict_means is None:
+            self.loss_dict_means = {f"train/{k}": [v.float().cpu().numpy()] for k, v in loss_dict.items()}
+        else:
+            self.loss_dict_means = {f"train/{k}": self.loss_dict_means[f"train/{k}"] + [v.float().cpu().numpy()] for k, v in loss_dict.items()}
+
+        ave_loss_dict_means = {k: sum(v[-1:])/1 for k, v in self.loss_dict_means.items()}
+
         self.log_dict(
-            loss_dict_means,
+            ave_loss_dict_means,
             on_step=True,
             on_epoch=True,
             prog_bar=True,
@@ -109,11 +140,15 @@ class AbFlow(LightningModule):
         """
         Perform a single training step.
         """
+        
+        if self.compile:
+            pred_loss_dict, true_loss_dict = self._network._orig_mod.get_loss_terms(batch)
+        else:
+            pred_loss_dict, true_loss_dict = self._network.get_loss_terms(batch)
 
-        pred_loss_dict, true_loss_dict = self._network.get_loss_terms(batch)
-        cumulative_loss, loss_dict = self._loss(pred_loss_dict, true_loss_dict)
+        cumulative_loss, loss_dict = self._loss(pred_loss_dict, true_loss_dict, self.current_epoch)
 
-        loss_dict_means = {f"train/{k}": v.mean() for k, v in loss_dict.items()}
+        loss_dict_means = {f"train/{k}": v for k, v in loss_dict.items()}
         self.log_dict(
             loss_dict_means,
             on_step=True,
@@ -123,23 +158,6 @@ class AbFlow(LightningModule):
         )
 
         return cumulative_loss
-
-    def validation_step(
-        self, batch: Dict[str, torch.Tensor], batch_idx: int
-    ) -> Dict[str, torch.Tensor]:
-        """
-        Perform a single validation step on losses.
-        """
-        if batch_idx == 0:
-            self.val_first_batch = batch
-
-        pred_loss_dict, true_loss_dict = self._network.get_loss_terms(batch)
-        _, loss_dict = self._loss(pred_loss_dict, true_loss_dict)
-
-        self.val_loss_outputs.append(loss_dict)
-        return {
-            "val_loss": loss_dict.get("total_loss", torch.zeros(1, device=self.device))
-        }
 
     def on_validation_epoch_end(self) -> None:
 
@@ -170,9 +188,9 @@ class AbFlow(LightningModule):
             metrics_means = {f"val/{k}": v.mean() for k, v in metrics_dict.items()}
             self.log_dict(
                 metrics_means,
-                on_step=False,
+                on_step=True,
                 on_epoch=True,
-                prog_bar=False,
+                prog_bar=True,
                 sync_dist=False,
             )
 
@@ -183,9 +201,9 @@ class AbFlow(LightningModule):
         Perform a single test step.
         """
         pred_loss_dict, true_loss_dict = self._network.get_loss_terms(batch)
-        _, loss_dict = self._loss(pred_loss_dict, true_loss_dict)
+        _, loss_dict = self._loss(pred_loss_dict, true_loss_dict, self.current_epoch)
 
-        loss_dict_means = {f"test/{k}": v.mean() for k, v in loss_dict.items()}
+        loss_dict_means = {f"test/{k}": v for k, v in loss_dict.items()}
         self.log_dict(
             loss_dict_means,
             on_step=False,
@@ -207,7 +225,7 @@ class AbFlow(LightningModule):
 
     @torch.no_grad()
     def _generate_complexes(
-        self, true_data_dict: Dict[str, torch.Tensor], seed: Optional[int] = None
+        self, true_data_dict: Dict[str, torch.Tensor], seed: Optional[int] = None, is_training: bool = True,
     ) -> Dict[str, torch.Tensor]:
         """
         Single call to redesign CDR loops for the bound antibody/ag complex template,
@@ -215,9 +233,9 @@ class AbFlow(LightningModule):
         """
         if seed is not None:
             old_states = seed_everything_temporarily(seed)
-            pred_data_dict = self._network.inference(true_data_dict)
+            pred_data_dict = self._network.inference(true_data_dict, is_training=is_training)
             restore_seed_everything(old_states)
         else:
-            pred_data_dict = self._network.inference(true_data_dict)
+            pred_data_dict = self._network.inference(true_data_dict, is_training=is_training)
 
         return pred_data_dict

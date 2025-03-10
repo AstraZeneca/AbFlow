@@ -17,12 +17,12 @@ from .constants import (
     get_heavy_atom_constants,
 )
 
-
 def get_frames_and_dihedrals(
     pos_heavyatom: torch.Tensor, res_type: torch.Tensor
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
-    Convert full heavy atom coordinates to backbone frames and sidechain dihedrals.
+    Convert heavy atom coordinates to backbone frames and dihedrals robustly,
+    even when the coordinates are very noisy.
 
     :param pos_heavyatom: Heavy atom coordinates of shape (N_batch, N_res, 15, 3)
     :param res_type: Amino acid type indices of shape (N_batch, N_res)
@@ -31,15 +31,18 @@ def get_frames_and_dihedrals(
         - frame_translations: (N_batch, N_res, 3)
         - dihedrals: (N_batch, N_res, 5) -> 4 sidechain dihedrals + 1 psi angle
     """
-
-    # Backbone frames
+    # Sanitize coordinates to remove any NaN or infinite values.
+    pos_heavyatom = torch.nan_to_num(pos_heavyatom, nan=0.0, posinf=0.0, neginf=0.0)
+    
+    # Backbone frames computed from CA->C and CA->N vectors.
     CA_C_vector = pos_heavyatom[:, :, 2] - pos_heavyatom[:, :, 1]
     CA_N_vector = pos_heavyatom[:, :, 0] - pos_heavyatom[:, :, 1]
+    
     CA_vector = pos_heavyatom[:, :, 1]
     frame_rotations = create_rotation_matrix(v1=CA_C_vector, v2=CA_N_vector)
-    frame_translations = CA_vector
+    frame_translations = torch.nan_to_num(CA_vector, nan=0.0, posinf=0.0, neginf=0.0)
 
-    # Prepare sidechain dihedrals
+    # Prepare sidechain dihedrals (4 dihedrals per residue)
     N_batch, N_res = res_type.shape
     sidechain_dihedrals = torch.zeros(
         N_batch, N_res, 4, device=pos_heavyatom.device, dtype=pos_heavyatom.dtype
@@ -56,23 +59,29 @@ def get_frames_and_dihedrals(
                     for atom_name in four_atom_names
                 ]
                 coords_4 = pos_heavyatom[b, r, atom_indices, :]
-                dihed_val = get_dihedrals(coords_4)
-                sidechain_dihedrals[b, r, i] = dihed_val
+                sidechain_dihedrals[b, r, i] = get_dihedrals(coords_4)
 
-    # Compute psi dihedral
-    psi_dihedrals = get_dihedrals(pos_heavyatom[:, :, :4, :])
+    # Compute psi dihedral using CA(i), C(i), N(i+1), CA(i+1)
+    psi_dihedrals = torch.zeros(N_batch, N_res, device=pos_heavyatom.device, dtype=pos_heavyatom.dtype)
+    if N_res > 1:
+        psi_coords = torch.stack([
+            pos_heavyatom[:, :-1, 1, :],  # CA(i)
+            pos_heavyatom[:, :-1, 2, :],  # C(i)
+            pos_heavyatom[:, 1:, 0, :],   # N(i+1)
+            pos_heavyatom[:, 1:, 1, :],   # CA(i+1)
+        ], dim=-2)
+        psi_dihedrals[:, :-1] = get_dihedrals(psi_coords)
 
-    # Combine sidechain dihedrals + psi
+    # Combine sidechain dihedrals and psi angle into a single tensor.
     dihedrals = torch.cat([sidechain_dihedrals, psi_dihedrals.unsqueeze(-1)], dim=-1)
     return frame_rotations, frame_translations, dihedrals
-
 
 def full_atom_reconstruction(
     frame_rotations: torch.Tensor,
     frame_translations: torch.Tensor,
     dihedrals: torch.Tensor,
     res_type: torch.Tensor,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> torch.Tensor:
     """
     Reconstruct full atomic coordinates from backbone frames and dihedrals.
     See AlphaFold2 Supplementary Algorithm 24 for details.

@@ -158,41 +158,53 @@ def get_rmsd(
 ) -> torch.Tensor:
     """
     Calculate the root mean squared error (RMSD) between predicted and true coordinates.
-    In the redesign case, no framework alignment is needed as the framework of true and pred are already aligned.
-    RMSD is calculated as:
-
-    \[
-    \text{RMSD} = \sqrt{\frac{1}{N} \sum_{i=1}^{N} \left( \text{pred\_coord}_i - \text{true\_coord}_i \right)^2}
-    \]
-
-    :param pred_coords: List of predicted coordinates, each shape (N_batch, N_res, 3).
-    :param true_coords: List of true coordinates, each shape (N_batch, N_res, 3).
-    :param masks: List of masks to apply, each shape (N_batch, N_res).
-    :param alignment_masks: List of masks to apply for alignment, each shape (N_batch, N_res).
-
+    In the redesign case, we want to align the predicted and true tensors using valid positions 
+    outside the redesign region, then compute the RMSD only on the redesign region.
+    
+    If `alignment_masks` is not provided, it is computed from the provided masks.
+    The caller should supply a list of masks where:
+      - masks[0] is the redesign mask (True for positions in the redesign region)
+      - masks[1] is the valid mask (True for positions that are valid)
+    
+    The alignment mask is computed as:
+        alignment_mask = valid_mask & (~redesign_mask)
+    
+    :param pred_coords: List of predicted coordinates, each with shape (N_batch, N_res, 3).
+    :param true_coords: List of true coordinates, each with shape (N_batch, N_res, 3).
+    :param masks: List of masks to apply. Expected to include at least the redesign and valid masks.
+    :param alignment_masks: Optional list of masks to use for alignment.
     :return: RMSD score, shape (N_batch,).
     """
-
+    # Combine coordinate components (e.g., x, y, z parts)
     pred_coord = combine_coords(*pred_coords)
     true_coord = combine_coords(*true_coords)
+
+    # Expand masks to match the combined coordinate shape if provided.
     if masks is not None:
         masks = [
-            torch.repeat_interleave(mask, len(pred_coords), dim=-1) for mask in masks
-        ]
-    if alignment_masks is not None:
-        alignment_masks = [
             torch.repeat_interleave(mask, len(pred_coords), dim=-1)
-            for mask in alignment_masks
+            for mask in masks
         ]
-        pred_coord, true_coord = kabsch_alignment(
-            pred_coord, true_coord, alignment_masks
-        )
 
+    # If no alignment masks are provided, compute them using valid positions outside redesign.
+    if alignment_masks is None and masks is not None and len(masks) >= 2:
+        redesign_mask = masks[0]  # Expected to be the redesign region mask
+        valid_mask = masks[1]     # Expected to be the valid positions mask
+        # Alignment should use only valid positions that are not part of the redesign region.
+        alignment_mask = valid_mask & (~redesign_mask)
+        alignment_masks = [alignment_mask]
+
+    # Perform Kabsch alignment if alignment_masks are provided.
+    if alignment_masks is not None:
+        pred_coord, true_coord = kabsch_alignment(pred_coord, true_coord, alignment_masks)
+
+    # Compute squared distances over all positions.
     sq_distance = torch.sum((pred_coord - true_coord) ** 2, dim=-1)
+
+    # Average the squared distances over the positions defined by the (redesign) masks.
     mean_sq_distance = average_data(sq_distance, masks=masks)
     rmsd = torch.sqrt(mean_sq_distance)
     return rmsd
-
 
 def get_tm_score(
     pred_coord: torch.Tensor,
@@ -516,14 +528,14 @@ def get_sidechain_mae(
     return sidechain_mae
 
 
-def get_lddt(
+def get_lddt_de(
     pred_coord: torch.Tensor,
     true_coord: torch.Tensor,
     distance_cutoff: float = 15.0,
 ):
     """
-    Compute the lDDT (Local Distance Difference Test) score for each residue.
-    Typically the atom is residue CA atom. Ground truth lDDT is used in confidence plddt loss.
+    Compute the lDDT (Local Distance Difference Test) score for each residue as well as the absolute distance error between predicted and true distance matrix.
+    Typically the atom is residue CA atom. Ground truth lDDT is used in confidence plddt and  pde losses.
 
     The lDDT score for an atom \( i \) is calculated using the formula:
 
@@ -539,38 +551,57 @@ def get_lddt(
     :param true_coord: Ground truth atom coords, shape (N_batch, N_res, 3).
     :param distance_cutoff: Distance cutoff for local region.
     :return: torch.Tensor: lDDT scores for each atom, shape (N_batch, N_res).
+             torch.Tensor: Distance error for pairs of residues in each complex, shape (N_batch, N_res, N_res).
     """
-    d_dist = torch.cdist(pred_coord, true_coord, p=2)
-    d_dist_gt = torch.cdist(true_coord, true_coord, p=2)
+
+
+    # Compute pairwise distances
+    d_dist = torch.cdist(pred_coord, true_coord, p=2)  # Shape: (N_batch, N_res, N_res)
+    d_dist_gt = torch.cdist(true_coord, true_coord, p=2)  # Shape: (N_batch, N_res, N_res)
+
+    # Compute distance error
+    d_dist_pred = torch.cdist(pred_coord, pred_coord, p=2)
+    distance_error = torch.abs(d_dist_pred - d_dist_gt)
+
+    # Get dimensions
     N_batch, N_res, _ = pred_coord.shape
+
+    # Initialize lDDT scores
     lddt_scores = torch.zeros(
         N_batch, N_res, device=pred_coord.device, dtype=pred_coord.dtype
     )
 
+    # Define thresholds
     thresholds = torch.tensor(
         [0.5, 1.0, 2.0, 4.0], device=pred_coord.device, dtype=pred_coord.dtype
     )
 
-    d_dist_gt_cpu = d_dist_gt.detach().cpu().numpy()
-    d_dist_cpu = d_dist.detach().cpu().numpy()
-
+    # Compute lDDT scores
     for batch in range(N_batch):
         for i in range(N_res):
-            valid_indices = np.nonzero((d_dist_gt_cpu[batch, i] < distance_cutoff))[0]
-            if len(valid_indices) == 0:
-                continue
+            # Find valid indices within the distance cutoff
+            valid_indices = torch.nonzero(d_dist_gt[batch, i] < distance_cutoff).squeeze(-1)
 
-            lddt_i = 0.0
-            for j in valid_indices:
-                d_dist_ij = d_dist_cpu[batch, i, j]
-                lddt_ij = (d_dist_ij < thresholds.cpu().numpy()).astype(float).mean()
-                lddt_i += lddt_ij
+            if valid_indices.numel() == 0:
+                continue  # Skip if no valid indices
 
-            lddt_scores[batch, i] = (lddt_i / len(valid_indices)) * 100
+            # Compute absolute differences between predicted and ground truth distances
+            d_dist_ij = d_dist[batch, i, valid_indices]  # Shape: (|R_i|,)
+            d_dist_gt_ij = d_dist_gt[batch, i, valid_indices]  # Shape: (|R_i|,)
+            diff = torch.abs(d_dist_ij - d_dist_gt_ij)  # Shape: (|R_i|,)
 
-    return lddt_scores
+            # Compare differences to thresholds and compute the indicator function
+            indicator = (diff.unsqueeze(-1) < thresholds).float()  # Shape: (|R_i|, 4)
+            lddt_ij = indicator.mean(dim=-1)  # Shape: (|R_i|,)
+
+            # Average over valid pairs and scale by 100
+            lddt_scores[batch, i] = lddt_ij.mean() * 100
+
+    return lddt_scores, distance_error
 
 
+# TODO: Combine this with get_lddt since they are computing the same tensors
+# Update has been made to the get_lddt, which is renamed to get_lddt_de
 def get_distance_error(pred_coord: torch.Tensor, true_coord: torch.Tensor):
     """
     Compute the absolute distance error between predicted and true distance matrix.
@@ -712,7 +743,7 @@ class AbFlowMetrics(nn.Module):
         super().__init__()
 
     def forward(self, pred_data_dict: dict, true_data_dict: dict):
-
+        
         metrics = {}
 
         # Sequence metrics
@@ -875,19 +906,20 @@ class AbFlowMetrics(nn.Module):
         )
 
         # Confidence metrics
-        metrics["confidence_plddt/redesign"] = pred_data_dict["plddt_redesign"]
-        metrics["confidence_pae/redesign"] = pred_data_dict["pae_redesign"]
-        metrics["confidence_pde/redesign"] = pred_data_dict["pde_redesign"]
-        metrics["confidence_ptm/redesign"] = pred_data_dict["ptm_redesign"]
-        metrics["confidence_pae_interaction/redesign"] = pred_data_dict[
-            "pae_interaction_redesign"
-        ]
-        metrics["confidence_pde_interaction/redesign"] = pred_data_dict[
-            "pde_interaction_redesign"
-        ]
-        metrics["confidence_ptm_interaction/redesign"] = pred_data_dict[
-            "ptm_interaction_redesign"
-        ]
+        if "plddt_redesign" in pred_data_dict:
+            metrics["confidence_plddt/redesign"] = pred_data_dict["plddt_redesign"]
+            metrics["confidence_pae/redesign"] = pred_data_dict["pae_redesign"]
+            metrics["confidence_pde/redesign"] = pred_data_dict["pde_redesign"]
+            metrics["confidence_ptm/redesign"] = pred_data_dict["ptm_redesign"]
+            metrics["confidence_pae_interaction/redesign"] = pred_data_dict[
+                "pae_interaction_redesign"
+            ]
+            metrics["confidence_pde_interaction/redesign"] = pred_data_dict[
+                "pde_interaction_redesign"
+            ]
+            metrics["confidence_ptm_interaction/redesign"] = pred_data_dict[
+                "ptm_interaction_redesign"
+            ]
 
         # Log likelihood
         metrics["likelihood/redesign"] = get_likelihood(

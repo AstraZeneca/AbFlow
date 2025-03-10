@@ -7,8 +7,7 @@ from einops import rearrange
 from .modules.features import BinnedOneHotEmbedding
 from .modules.pairformer import PairformerStack
 from ..model.metrics import (
-    get_lddt,
-    get_distance_error,
+    get_lddt_de,
     get_alignment_error,
     average_bins,
     get_ptm_score,
@@ -30,6 +29,9 @@ class ConfidenceModule(nn.Module):
     ):
 
         super().__init__()
+
+        self.linear_no_bias_z_hat = nn.Linear(c_z, c_z, bias=False)
+        self.layer_norm_z_hat = nn.LayerNorm(c_z)
 
         self.linear_no_bias_s_i = nn.Linear(c_s, c_z, bias=False)
         self.linear_no_bias_s_j = nn.Linear(c_s, c_z, bias=False)
@@ -99,12 +101,10 @@ class ConfidenceModule(nn.Module):
         s_i = s_i + s_post_i
         z_ij = z_ij + z_post_ij
 
-        p_pae_ij = F.softmax(self.linear_no_bias_pae(z_ij), dim=-1)
-        p_pde_ij = F.softmax(
-            self.linear_no_bias_pde(z_ij + rearrange(z_ij, "b i j d -> b j i d")),
-            dim=-1,
-        )
-        p_plddt_i = F.softmax(self.linear_no_bias_plddt(s_i), dim=-1)
+        p_pae_ij = self.linear_no_bias_pae(z_ij)
+        p_pde_ij = self.linear_no_bias_pde(z_ij + rearrange(z_ij, "b i j d -> b j i d"))
+        p_plddt_i = self.linear_no_bias_plddt(s_i)
+
 
         return p_pae_ij, p_pde_ij, p_plddt_i
 
@@ -123,8 +123,7 @@ class ConfidenceModule(nn.Module):
         p_pae_ij, p_pde_ij, p_plddt_i = self.forward(
             s_inputs_i, z_inputs_ij, s_i, z_ij, CA_pred_coords
         )
-        lddt_per_residue = get_lddt(CA_pred_coords, CA_true_coords)
-        de_per_residue = get_distance_error(CA_pred_coords, CA_true_coords)
+        lddt_per_residue, de_per_residue = get_lddt_de(CA_pred_coords, CA_true_coords)
         ae_per_residue = get_alignment_error(frame_coords_pred_i, frame_coords_true_i)
 
         p_lddt_i = self.lddt_binned_one_hot(lddt_per_residue)
@@ -136,9 +135,9 @@ class ConfidenceModule(nn.Module):
             "de_one_hot": p_pde_ij,
             "ae_one_hot": p_pae_ij,
         }, {
-            "lddt_one_hot": p_lddt_i,
-            "de_one_hot": p_de_i,
-            "ae_one_hot": p_ae_i,
+            "lddt_one_hot": p_lddt_i.argmax(dim=-1),
+            "de_one_hot": p_de_i.argmax(dim=-1),
+            "ae_one_hot": p_ae_i.argmax(dim=-1),
         }
 
     def predict(

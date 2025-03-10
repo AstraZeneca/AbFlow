@@ -112,10 +112,10 @@ def combine_coords(*coord_args: list[torch.Tensor], coord_dim: int = 3) -> torch
     return combined_coords
 
 
-def create_rigid(rots: torch.Tensor, trans: torch.Tensor) -> Rigid:
+def create_rigid(rot6d: torch.Tensor, trans: torch.Tensor) -> Rigid:
     """
     Create a Rigid object from rotation matrices and translations.
     """
 
-    rots = Rotation(rot_mats=rots)
+    rots = Rotation(rot6d=rot6d)
     return Rigid(rots=rots, trans=trans)

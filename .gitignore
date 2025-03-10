@@ -8,12 +8,15 @@ build/
 __pycache__/
 
 # ignore all files ending with .job
+*.txt
 *.job
 *.lmdb
 *.lmdb-lock
 .nfs*
 
 # Ignore all unuseful files
+benchmark.py
+benchmark2.py
 benchmarks/diffab/
 8gpu_cluster.yaml
 nohup.out

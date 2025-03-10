@@ -33,6 +33,8 @@ class FlowPrediction(nn.Module):
         label_smoothing: float = 0.0,
         max_time_clamp: float = 0.995,
         network_params: dict = None,
+        confidence: bool = False,
+        is_training: bool = True,
     ):
         """
         Initialize the FlowPrediction network.
@@ -58,6 +60,7 @@ class FlowPrediction(nn.Module):
 
         super().__init__()
 
+        self.confidence = confidence
         self.mini_rollout_steps = mini_rollout_steps
         self.full_rollout_steps = full_rollout_steps
 
@@ -79,12 +82,13 @@ class FlowPrediction(nn.Module):
             max_time_clamp=max_time_clamp,
             network_params=network_params,
         )
-        self.confidence_module = ConfidenceModule(
-            c_s=c_s,
-            c_z=c_z,
-            n_block=n_confidence_module_blocks,
-            network_params=network_params,
-        )
+        if self.confidence:
+            self.confidence_module = ConfidenceModule(
+                c_s=c_s,
+                c_z=c_z,
+                n_block=n_confidence_module_blocks,
+                network_params=network_params,
+            )
 
     def get_loss_terms(
         self,
@@ -114,32 +118,35 @@ class FlowPrediction(nn.Module):
         )
         pred_loss_dict.update(pred_loss_update)
         true_loss_dict.update(true_loss_update)
-        # denoising module one forward pass
+        
         pred_loss_update, true_loss_update = self.denoising_module.get_loss_terms(
             true_data_dict, s_inputs_i, z_inputs_ij, s_i, z_ij
         )
         pred_loss_dict.update(pred_loss_update)
         true_loss_dict.update(true_loss_update)
-        # denoising module mini rollout
-        pred_data_dict = self.denoising_module.rollout(
-            true_data_dict,
-            s_inputs_i,
-            z_inputs_ij,
-            s_i,
-            z_ij,
-            num_steps=self.mini_rollout_steps,
-        )
-        # confidence module - binned plddt, pae, ptm
-        pred_loss_update, true_loss_update = self.confidence_module.get_loss_terms(
-            s_inputs_i,
-            z_inputs_ij,
-            s_i,
-            z_ij,
-            pred_data_dict["pos_heavyatom"][:, :, :3, :],
-            true_data_dict["pos_heavyatom"][:, :, :3, :],
-        )
-        pred_loss_dict.update(pred_loss_update)
-        true_loss_dict.update(true_loss_update)
+
+        if self.confidence:
+
+            # denoising module mini rollout
+            pred_data_dict = self.denoising_module.rollout(
+                true_data_dict,
+                s_inputs_i,
+                z_inputs_ij,
+                s_i,
+                z_ij,
+                num_steps=self.mini_rollout_steps,
+            )
+            
+            pred_loss_update, true_loss_update = self.confidence_module.get_loss_terms(
+                s_inputs_i,
+                z_inputs_ij,
+                s_i,
+                z_ij,
+                pred_data_dict["pos_heavyatom"][:, :, :3, :],
+                true_data_dict["pos_heavyatom"][:, :, :3, :],
+            )
+            pred_loss_dict.update(pred_loss_update)
+            true_loss_dict.update(true_loss_update)
 
         true_loss_dict["redesign_mask"] = true_data_dict["redesign_mask"].clone()
         true_loss_dict["valid_mask"] = true_data_dict["valid_mask"].clone()
@@ -150,9 +157,10 @@ class FlowPrediction(nn.Module):
     def inference(
         self,
         true_data_dict: dict[str, torch.Tensor],
+        is_training: bool = True,
     ):
         # condition module with recycling
-        s_inputs_i, z_inputs_ij, s_i, z_ij = self.condition_module(true_data_dict)
+        s_inputs_i, z_inputs_ij, s_i, z_ij = self.condition_module(true_data_dict, is_training=is_training)
 
         # denoising module full rollout
         pred_data_dict = self.denoising_module.rollout(
@@ -164,14 +172,15 @@ class FlowPrediction(nn.Module):
             num_steps=self.full_rollout_steps,
         )
         # confidence module - per residue level confidence scores
-        pred_data_update = self.confidence_module.predict(
-            pred_data_dict,
-            s_inputs_i,
-            z_inputs_ij,
-            s_i,
-            z_ij,
-            pred_data_dict["pos_heavyatom"][:, :, :3, :],
-        )
-        pred_data_dict.update(pred_data_update)
+        if self.confidence:
+            pred_data_update = self.confidence_module.predict(
+                pred_data_dict,
+                s_inputs_i,
+                z_inputs_ij,
+                s_i,
+                z_ij,
+                pred_data_dict["pos_heavyatom"][:, :, :3, :],
+            )
+            pred_data_dict.update(pred_data_update)
 
         return pred_data_dict

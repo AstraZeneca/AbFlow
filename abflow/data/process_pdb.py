@@ -67,7 +67,6 @@ def fill_missing_atoms(input_pdb: str, output_pdb: str):
     :param input_pdb: Path to the input PDB file.
     :param output_pdb: Path to save the modified PDB file.
     """
-
     fixer = PDBFixer(filename=input_pdb)
 
     fixer.findMissingResidues()
@@ -105,7 +104,6 @@ def extract_chain_data(
     """
     Extract relevant data for a single chain and assign CDR regions using AbNumber.
     """
-
     for residue in chain:
         if not isinstance(residue, Residue):
             continue
@@ -162,7 +160,7 @@ def process_pdb_to_lmdb(
 ) -> Dict[str, Dict]:
     """
     Process a PDB file into a format compatible with process_lmdb_chain.
-    This function selects the heavy, light, and antigen chains from the PDB file
+    This function selects the heavy, light and antigen chains from the PDB file
     and cuts out the variable regions for the antibody chains from N-terminal to C-terminal.
 
     :param pdb_path: Path to the PDB file.
@@ -183,17 +181,11 @@ def process_pdb_to_lmdb(
     }
 
     data = defaultdict(
-        lambda: {
-            "aa": [],
-            "res_nb": [],
-            "cdr_locations": [],
-            "pos_heavyatom": [],
-        }
+        lambda: {"aa": [], "res_nb": [], "cdr_locations": [], "pos_heavyatom": []}
     )
 
     model = structure[model_id]
     for chain_name, chain_id in chain_map.items():
-
         if chain_id is None:
             data[chain_name] = None
             continue
@@ -219,14 +211,13 @@ def process_pdb_to_lmdb(
                 data["light_ctype"] = ab_chain.chain_type
 
     for cn in ["heavy", "light", "antigen"]:
+        
         if data[cn] is None:
             continue
 
         chain_data = data[cn]
         chain_data["aa"] = torch.tensor(np.array(chain_data["aa"]), dtype=torch.long)
-        chain_data["res_nb"] = torch.tensor(
-            np.array(chain_data["res_nb"]), dtype=torch.long
-        )
+        chain_data["res_nb"] = torch.tensor(np.array(chain_data["res_nb"]), dtype=torch.long)
         chain_data["cdr_locations"] = torch.tensor(
             np.array(chain_data["cdr_locations"]), dtype=torch.long
         )
@@ -252,7 +243,6 @@ def process_lmdb_chain(data: dict) -> dict:
         - antibody_mask: A tensor of shape (N_res,) indicating which residues are part of the antibody (True) and otherwise (False).
         - antigen_mask: A tensor of shape (N_res,) indicating which residues are part of the antigen (True) and otherwise (False).
     """
-
     res_type_list = []
     chain_type_list = []
     chain_id_list = []
@@ -262,32 +252,35 @@ def process_lmdb_chain(data: dict) -> dict:
 
     chain_names = ["heavy", "light", "antigen"]
     chain_id_counter = 0
+    L1_seq, L2_seq, L3_seq = None, None, None
+    H1_seq, H2_seq, H3_seq = None, None, None
 
     for chain_name in chain_names:
         chain_data = data.get(chain_name)
+
         if chain_data is not None:
             res_type_list.append(chain_data["aa"])
             if chain_name == "light":
+                if "L3_seq" in chain_data:
+                    L1_seq, L2_seq, L3_seq = chain_data["L1_seq"], chain_data["L2_seq"], chain_data["L3_seq"]
+
                 if data["light_ctype"] == "K":
                     chain_type_list.append(
-                        torch.full_like(
-                            chain_data["aa"], chain_id_to_index["light_kappa"]
-                        )
+                        torch.full_like(chain_data["aa"], chain_id_to_index["light_kappa"])
                     )
                 elif data["light_ctype"] == "L":
                     chain_type_list.append(
-                        torch.full_like(
-                            chain_data["aa"], chain_id_to_index["light_lambda"]
-                        )
+                        torch.full_like(chain_data["aa"], chain_id_to_index["light_lambda"])
                     )
                 else:
                     # Kappa is more common than lambda in humans (approximately 2:1), so make it a default option when not sure.
                     chain_type_list.append(
-                        torch.full_like(
-                            chain_data["aa"], chain_id_to_index["light_kappa"]
-                        )
+                        torch.full_like(chain_data["aa"], chain_id_to_index["light_kappa"])
                     )
             else:
+                if chain_name == "heavy" and "H3_seq" in chain_data:
+                    H1_seq, H2_seq, H3_seq = chain_data["H1_seq"], chain_data["H2_seq"], chain_data["H3_seq"]
+
                 chain_type_list.append(
                     torch.full_like(chain_data["aa"], chain_id_to_index[chain_name])
                 )
@@ -323,6 +316,12 @@ def process_lmdb_chain(data: dict) -> dict:
         "pos_heavyatom": pos_heavyatom,
         "antibody_mask": antibody_mask,
         "antigen_mask": antigen_mask,
+        "H1_seq": H1_seq,
+        "H2_seq": H2_seq,
+        "H3_seq": H3_seq,
+        "L1_seq": L1_seq,
+        "L2_seq": L2_seq,
+        "L3_seq": L3_seq,
     }
 
 
@@ -330,7 +329,6 @@ def add_features(data: Dict[str, torch.Tensor]):
     """
     Add additional preprocessed features to the processed data dictionary for input to AbFlow.
     """
-
     feature_dict = {}
 
     res_type_ont_hot_enc = OneHotEmbedding(20)
@@ -359,9 +357,7 @@ def add_features(data: Dict[str, torch.Tensor]):
         data["pos_heavyatom"][:, 4, :],  # Retain original CB coordinates for others
     )
     cb_distogram = cb_distogram_enc(modified_pos_heavyatom[:, 4, :])
-    ca_unit_vectors = ca_unit_vector_enc(
-        data["pos_heavyatom"][:, 1, :], frame_rotations
-    )
+    ca_unit_vectors = ca_unit_vector_enc(data["pos_heavyatom"][:, 1, :], frame_rotations)
     rel_positions = rel_pos_enc(data["res_index"], data["chain_id"])
 
     feature_dict["res_type_one_hot"] = res_type_one_hot

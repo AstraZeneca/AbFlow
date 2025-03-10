@@ -36,7 +36,7 @@ def express_coords_in_frames(
 
     if normalize:
         CA_CA_norm = torch.norm(CA_CA, dim=-1, keepdim=True)
-        CA_CA = CA_CA / (CA_CA_norm + 1e-10)
+        CA_CA = CA_CA / (CA_CA_norm + 1e-8)
 
     frame_orients_inv = rearrange(frame_orients, "... m n -> ... n m")
     CA_vectors = torch.einsum("... m n,... j n->... j m", frame_orients_inv, CA_CA)

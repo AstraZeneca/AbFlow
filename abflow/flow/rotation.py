@@ -49,6 +49,7 @@ rotquat = rotvec_to_rotquat(rotvec)
 """
 
 import torch
+import torch.nn.functional as F
 import numpy as np
 from functools import lru_cache, wraps
 from einops import rearrange
@@ -98,6 +99,50 @@ def enforce_float32(func):
 
 
 @enforce_float32
+def rot6d_to_rotmat(rot6d: torch.Tensor) -> torch.Tensor:
+    """Convert 6D rotation representation to 3x3 rotation matrix"""
+
+    a1 = rot6d[..., :3]
+    a2 = rot6d[..., 3:]
+    
+    # Gram-Schmidt orthogonalization
+    e1 = F.normalize(a1, dim=-1)
+    e2 = a2 - (e1 * a2).sum(dim=-1, keepdim=True) * e1
+    e2 = F.normalize(e2, dim=-1)
+
+    e3 = torch.cross(e1, e2, dim=-1)
+    
+    return torch.stack([e1, e2, e3], dim=-1)
+
+@enforce_float32
+def rotmat_to_rot6d(rotmat: torch.Tensor) -> torch.Tensor:
+    """Convert rotation matrix to 6D representation"""
+    return rotmat[..., :2, :].reshape(*rotmat.shape[:-2], 6)
+
+@enforce_float32
+def rot6d_mul(rot6d_1: torch.Tensor, rot6d_2: torch.Tensor) -> torch.Tensor:
+    """Compose two 6D rotations"""
+    rotmat_1 = rot6d_to_rotmat(rot6d_1)
+    rotmat_2 = rot6d_to_rotmat(rot6d_2)
+    return rotmat_to_rot6d(torch.einsum('...ij,...jk->...ik', rotmat_1, rotmat_2))
+
+@enforce_float32
+def rot6d_inv(rot6d: torch.Tensor) -> torch.Tensor:
+    """Invert 6D rotation"""
+    rotmat = rot6d_to_rotmat(rot6d)
+    return rotmat_to_rot6d(rotmat.transpose(-1, -2))
+
+
+
+@enforce_float32
+def rot6d_mul_vec(rot6d: torch.Tensor, vec: torch.Tensor) -> torch.Tensor:
+    """Rotate vector using 6D representation"""
+    rotmat = rot6d_to_rotmat(rot6d)
+    return torch.einsum('...ij,...j->...i', rotmat, vec)
+
+
+
+@enforce_float32
 def rotmat_inv(rotmat: torch.Tensor) -> torch.Tensor:
     """
     Invert a rotation matrix by taking its transpose.
@@ -143,72 +188,6 @@ def rotvec_inv(rotvec: torch.Tensor) -> torch.Tensor:
     rotvec_inv = -rotvec
     return rotvec_inv
 
-
-@enforce_float32
-def rotmats_mul(rotmat1: torch.Tensor, rotmat2: torch.Tensor) -> torch.Tensor:
-    """
-    Performs matrix multiplication of two rotation matrix tensors. Written
-    out by hand to avoid AMP downcasting.
-
-    Formula:
-        R = R1 * R2
-        [R]_ij = sum_k R1_ik * R2_kj
-
-    :param rotmat1: First rotation matrix tensor of shape [..., 3, 3].
-    :param rotmat2: Second rotation matrix tensor of shape [..., 3, 3].
-    :return: Resultant rotation matrix tensor of shape [..., 3, 3].
-    """
-
-    def row_mul(i):
-        return torch.stack(
-            [
-                rotmat1[..., i, 0] * rotmat2[..., 0, 0]
-                + rotmat1[..., i, 1] * rotmat2[..., 1, 0]
-                + rotmat1[..., i, 2] * rotmat2[..., 2, 0],
-                rotmat1[..., i, 0] * rotmat2[..., 0, 1]
-                + rotmat1[..., i, 1] * rotmat2[..., 1, 1]
-                + rotmat1[..., i, 2] * rotmat2[..., 2, 1],
-                rotmat1[..., i, 0] * rotmat2[..., 0, 2]
-                + rotmat1[..., i, 1] * rotmat2[..., 1, 2]
-                + rotmat1[..., i, 2] * rotmat2[..., 2, 2],
-            ],
-            dim=-1,
-        )
-
-    rotmats = torch.stack(
-        [
-            row_mul(0),
-            row_mul(1),
-            row_mul(2),
-        ],
-        dim=-2,
-    )
-
-    return rotmats
-
-
-@enforce_float32
-def rotvecs_mul(rotvec1: torch.Tensor, rotvec2: torch.Tensor) -> torch.Tensor:
-    """
-    Multiply two rotations represented as rotation vectors (axis-angle) by converting
-    them to rotation matrices, multiplying the matrices, and converting back to a
-    rotation vector.
-
-    Rotation vectors represent rotations as an axis and an angle, but the composition
-    (multiplication) of two rotations cannot be done directly in this representation.
-
-    :param rotvec1: First rotation vector tensor of shape [..., 3].
-    :param rotvec2: Second rotation vector tensor of shape [..., 3].
-    :return: Resultant rotation vector tensor of shape [..., 3].
-    """
-
-    rotmat1 = rotvec_to_rotmat(rotvec1)
-    rotmat2 = rotvec_to_rotmat(rotvec2)
-
-    rotmats = rotmats_mul(rotmat1, rotmat2)
-    rotvecs = rotmat_to_rotvec(rotmats)
-
-    return rotvecs
 
 
 @enforce_float32
@@ -583,122 +562,145 @@ def skewmat_exponential_map(
 
 
 @enforce_float32
-def rotmat_to_rotvec(rotmat: torch.Tensor) -> torch.Tensor:
-    """
-    Convert a batch of rotation matrices to rotation vectors (logarithmic map from SO(3) to so(3)).
-    The standard logarithmic map can be derived from Rodrigues' formula via Taylor approximation
-    (in this case operating on the vector coefficients of the skew so(3) basis).
-
-    Formula:
-
-
-    ..math ::
-
-        \left[\log(\mathbf{R})\right]^\lor = \frac{\theta}{2\sin(\theta)} \left[\mathbf{R} - \mathbf{R}^\top\right]^\lor
-
-    This formula has problems at 1) angles theta close or equal to zero and 2) at angles close and
-    equal to pi.
-
-    To improve numerical stability for case 1), the angle term at small or zero angles is
-    approximated by its truncated Taylor expansion:
-
-    .. math ::
-
-        \left[\log(\mathbf{R})\right]^\lor \approx \frac{1}{2} (1 + \frac{\theta^2}{6}) \left[\mathbf{R} - \mathbf{R}^\top\right]^\lor
-
-    For angles close or equal to pi (case 2), the outer product relation can be used to obtain the
-    squared rotation vector:
-
-    .. math :: \omega \otimes \omega = \frac{1}{2}(\mathbf{I} + R)
-
-    Taking the root of the diagonal elements recovers the normalized rotation vector up to the signs
-    of the component. The latter can be obtained from the off-diagonal elements.
-
-    Adapted from https://github.com/jasonkyuyim/se3_diffusion/blob/2cba9e09fdc58112126a0441493b42022c62bbea/data/so3_utils.py
-    which was adapted from https://github.com/geomstats/geomstats/blob/master/geomstats/geometry/special_orthogonal.py
-    with heavy help from https://cvg.cit.tum.de/_media/members/demmeln/nurlanov2021so3log.pdf
-
-    :param rotmat: Batch of rotation matrices.
-    :return: Batch of rotation vectors.
-    """
-
-    # Get angles and sin/cos from rotation matrix.
-    angles, angles_sin, _ = angle_from_rotmat(rotmat)
-    # Compute skew matrix representation and extract so(3) vector components.
-    vector = skewmat_to_rotvec(rotmat - rotmat.transpose(-2, -1))
-
-    # Three main cases for angle theta, which are captured
-    # 1) Angle is 0 or close to zero -> use Taylor series for small values / return 0 vector.
-    mask_zero = torch.isclose(angles, torch.zeros_like(angles)).to(angles.dtype)
-    # 2) Angle is close to pi -> use outer product relation.
-    mask_pi = torch.isclose(angles, torch.full_like(angles, np.pi), atol=1e-2).to(
-        angles.dtype
+def rotvec_to_rotmat(rotvec: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+    """Numerically stable rotation vector to matrix conversion"""
+    theta = torch.norm(rotvec, dim=-1, keepdim=True)
+    small_theta_mask = theta.squeeze(-1) < eps
+    
+    # Safe axis computation
+    axis = torch.where(
+        small_theta_mask[..., None],
+        F.normalize(rotvec + eps, dim=-1),
+        rotvec / (theta + eps)
     )
-    # 3) Angle is unproblematic -> use the standard formula.
-    mask_else = (1 - mask_zero) * (1 - mask_pi)
+    
+    # Skew-symmetric matrix
+    skew = torch.zeros(*rotvec.shape[:-1], 3, 3, device=rotvec.device)
+    skew[..., 0, 1] = -axis[..., 2]
+    skew[..., 0, 2] = axis[..., 1]
+    skew[..., 1, 0] = axis[..., 2]
+    skew[..., 1, 2] = -axis[..., 0]
+    skew[..., 2, 0] = -axis[..., 1]
+    skew[..., 2, 1] = axis[..., 0]
 
-    # Compute case dependent pre-factor (1/2 for angle close to 0, angle otherwise).
-    numerator = mask_zero / 2.0 + angles * mask_else
-    # The Taylor expansion used here is actually the inverse of the Taylor expansion of the inverted
-    # fraction sin(x) / x which gives better accuracy over a wider range (hence the minus and
-    # position in denominator).
-    denominator = (
-        (1.0 - angles**2 / 6.0) * mask_zero  # Taylor expansion for small angles.
-        + 2.0 * angles_sin * mask_else  # Standard formula.
-        + mask_pi  # Avoid zero division at angle == pi.
+    # Taylor expansion for small angles
+    sin_theta = torch.where(
+        small_theta_mask[..., None],
+        theta - (theta**3)/6,
+        torch.sin(theta)
     )
-    prefactor = numerator / denominator
-    vector = vector * prefactor[..., None]
-
-    # For angles close to pi, derive vectors from their outer product (ww' = 1 + R).
-    id3 = _broadcast_identity(rotmat)
-    skew_outer = (id3 + rotmat) / 2.0
-    # Ensure diagonal is >= 0 for square root (uses identity for masking).
-    skew_outer = skew_outer + (torch.relu(skew_outer) - skew_outer) * id3
-
-    # Get basic rotation vector as sqrt of diagonal (is unit vector).
-    vector_pi = torch.sqrt(torch.diagonal(skew_outer, dim1=-2, dim2=-1))
-
-    # Compute the signs of vector elements (up to a global phase).
-    # Fist select indices for outer product slices with the largest norm.
-    signs_line_idx = torch.argmax(torch.norm(skew_outer, dim=-1), dim=-1).long()
-    # Select rows of outer product and determine signs.
-    signs_line = torch.take_along_dim(
-        skew_outer, dim=-2, indices=signs_line_idx[..., None, None]
+    cos_theta = torch.where(
+        small_theta_mask[..., None],
+        1 - (theta**2)/2 + (theta**4)/24,
+        torch.cos(theta)
     )
-    signs_line = signs_line.squeeze(-2)
-    signs = torch.sign(signs_line)
+    
+    # Rodrigues' formula with stabilization
+    eye = torch.eye(3, device=rotvec.device).expand_as(skew)
+    term1 = eye * cos_theta[..., None]
+    term2 = skew * sin_theta[..., None]
+    term3 = (axis[..., None] @ axis[..., None, :]) * (1 - cos_theta[..., None])
+    
+    return term1 + term2 + term3
 
-    # Apply signs and rotation vector.
-    vector_pi = vector_pi * angles[..., None] * signs
+@enforce_float32
+def rotmat_to_rotvec(rotmat: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+    """Stable rotation matrix to vector conversion"""
+    trace = torch.einsum('...ii', rotmat)
+    cos_theta = (trace - 1) / 2
+    cos_theta = torch.clamp(cos_theta, -1+eps, 1-eps)  # Critical clamp
+    theta = torch.acos(cos_theta)
+    
+    skew = 0.5 * (rotmat - rotmat.transpose(-1, -2))
+    axis = torch.stack([skew[..., 2, 1], skew[..., 0, 2], skew[..., 1, 0]], dim=-1)
+    axis_norm = torch.norm(axis, dim=-1, keepdim=True) + eps
+    
+    # Handle θ ≈ 0
+    small_theta = theta < eps
+    axis = torch.where(
+        small_theta[..., None],
+        F.normalize(rotmat[..., :, 0], dim=-1),  # Use first column
+        axis / axis_norm
+    )
+    
+    # Handle θ ≈ π (antipodal points)
+    near_pi = theta > (torch.pi - eps)
+    if near_pi.any():
+        d_diag = torch.diagonal(rotmat, dim1=-2, dim2=-1)
+        axis_pi = torch.sqrt((d_diag - cos_theta[..., None]) / (1 - cos_theta[..., None] + eps))
+        axis_pi = torch.where(rotmat[..., 2, 1] < 0, -axis_pi, axis_pi)
+        axis = torch.where(near_pi[..., None], axis_pi, axis)
+    
+    return F.normalize(axis, dim=-1) * theta[..., None]
 
-    # Fill entries for angle == pi in rotation vector (basic vector has zero entries at this point).
-    rotvec = vector + vector_pi * mask_pi[..., None]
-
-    return rotvec
 
 
 @enforce_float32
-def rotvec_to_rotmat(rotvec: torch.Tensor, tol: float = 1e-7) -> torch.Tensor:
+def rotmats_mul(rotmat1: torch.Tensor, rotmat2: torch.Tensor) -> torch.Tensor:
     """
-    Convert rotation vectors to rotation matrix representation. The length of the rotation vector
-    is the angle of rotation, the unit vector the rotation axis.
+    Performs matrix multiplication of two rotation matrix tensors. Written
+    out by hand to avoid AMP downcasting.
 
-    :param rotvec: Rotation vectors of shape [..., 3].
-    :param tol: Small offset for numerical stability.
-    :return: Rotation matrices of shape [..., 3, 3].
+    Formula:
+        R = R1 * R2
+        [R]_ij = sum_k R1_ik * R2_kj
+
+    :param rotmat1: First rotation matrix tensor of shape [..., 3, 3].
+    :param rotmat2: Second rotation matrix tensor of shape [..., 3, 3].
+    :return: Resultant rotation matrix tensor of shape [..., 3, 3].
     """
 
-    # Compute rotation angle as vector norm.
-    rotation_angles = torch.norm(rotvec, dim=-1)
+    def row_mul(i):
+        return torch.stack(
+            [
+                rotmat1[..., i, 0] * rotmat2[..., 0, 0]
+                + rotmat1[..., i, 1] * rotmat2[..., 1, 0]
+                + rotmat1[..., i, 2] * rotmat2[..., 2, 0],
+                rotmat1[..., i, 0] * rotmat2[..., 0, 1]
+                + rotmat1[..., i, 1] * rotmat2[..., 1, 1]
+                + rotmat1[..., i, 2] * rotmat2[..., 2, 1],
+                rotmat1[..., i, 0] * rotmat2[..., 0, 2]
+                + rotmat1[..., i, 1] * rotmat2[..., 1, 2]
+                + rotmat1[..., i, 2] * rotmat2[..., 2, 2],
+            ],
+            dim=-1,
+        )
 
-    # Map axis to skew matrix basis.
-    skew_matrices = rotvec_to_skewmat(rotvec)
+    rotmats = torch.stack(
+        [
+            row_mul(0),
+            row_mul(1),
+            row_mul(2),
+        ],
+        dim=-2,
+    )
 
-    # Compute rotation matrices via matrix exponential.
-    rotmat = skewmat_exponential_map(rotation_angles, skew_matrices, tol=tol)
+    return rotmats
 
-    return rotmat
+
+@enforce_float32
+def rotvecs_mul(rotvec1: torch.Tensor, rotvec2: torch.Tensor) -> torch.Tensor:
+    """
+    Multiply two rotations represented as rotation vectors (axis-angle) by converting
+    them to rotation matrices, multiplying the matrices, and converting back to a
+    rotation vector.
+
+    Rotation vectors represent rotations as an axis and an angle, but the composition
+    (multiplication) of two rotations cannot be done directly in this representation.
+
+    :param rotvec1: First rotation vector tensor of shape [..., 3].
+    :param rotvec2: Second rotation vector tensor of shape [..., 3].
+    :return: Resultant rotation vector tensor of shape [..., 3].
+    """
+
+    rotmat1 = rotvec_to_rotmat(rotvec1)
+    rotmat2 = rotvec_to_rotmat(rotvec2)
+
+    rotmats = rotmats_mul(rotmat1, rotmat2)
+    rotvecs = rotmat_to_rotvec(rotmats)
+
+    return rotvecs
+
 
 
 @enforce_float32
@@ -720,7 +722,7 @@ def rotquat_to_rotvec(rotquat: torch.Tensor) -> torch.Tensor:
     theta = 2 * torch.atan2(torch.norm(v, dim=-1)[..., None], r)
     axis = v / (torch.norm(v, dim=-1, keepdim=True) + 1e-7)
     rotvec = axis * theta
-
+    
     return rotvec
 
 
