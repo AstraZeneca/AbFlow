@@ -18,9 +18,16 @@ from ..flow.manifold_flow import (
     LinearSO3Flow,
     LinearSimplexFlow,
     LinearToricFlow,
-    )
+)
 
-from ..flow.rotation import rotvec_to_rotmat, rotmat_to_rotvec, rotvecs_mul, rot6d_mul, rot6d_to_rotmat, rotmat_to_rot6d
+from ..flow.rotation import (
+    rotvec_to_rotmat,
+    rotmat_to_rotvec,
+    rotvecs_mul,
+    rot6d_mul,
+    rot6d_to_rotmat,
+    rotmat_to_rot6d,
+)
 from ..utils.utils import apply_mask, create_rigid
 from ..data.process_pdb import add_features
 from ..geometry import construct_3d_basis, BBHeavyAtom
@@ -36,7 +43,7 @@ class GaussianNoise(nn.Module):
     def __init__(self, std=0.01):
         super().__init__()
         self.std = std
-        
+
     def forward(self, x):
         if self.training:
             noise = torch.randn_like(x) * self.std
@@ -80,7 +87,6 @@ class DenoisingModule(nn.Module):
         self.res_layernorm = nn.LayerNorm(c_s)
         self.linear_no_bias_s_prev = nn.Linear(c_s, c_z, bias=False)
 
-
         if self.binder_loss:
             self.pair_loss = PairLossModule(bank_max_size=10, sample_size=4)
 
@@ -89,9 +95,19 @@ class DenoisingModule(nn.Module):
             hidden_size_z = 2 * c_z
 
             # Use GRU with hidden size equal to the sequence embedding dimension.
-            self.gru_s = nn.GRU(input_size=c_s, hidden_size=hidden_size_s, num_layers=2, batch_first=True)
+            self.gru_s = nn.GRU(
+                input_size=c_s,
+                hidden_size=hidden_size_s,
+                num_layers=2,
+                batch_first=True,
+            )
             # Use GRU with hidden size equal to the pair embedding dimension.
-            self.gru_z = nn.GRU(input_size=c_z, hidden_size=hidden_size_z, num_layers=2, batch_first=True)
+            self.gru_z = nn.GRU(
+                input_size=c_z,
+                hidden_size=hidden_size_z,
+                num_layers=2,
+                batch_first=True,
+            )
 
             # Project GRU output back to original channel dimension if needed
             self.proj_s = nn.Linear(hidden_size_s, c_s)
@@ -103,7 +119,6 @@ class DenoisingModule(nn.Module):
         self.design_mode = design_mode
         self.label_smoothing = label_smoothing
         self.max_time_clamp = max_time_clamp
-
 
         self.linear_no_bias_s = nn.Linear(20 + 5 + 1 + 6 + 3, c_s, bias=False)
 
@@ -117,42 +132,44 @@ class DenoisingModule(nn.Module):
             )
             self.output_proj_seq = self.get_pred_network(c_s=c_s, out_dim=20)
 
-            self.task_heads['sequence'] = self.output_proj_seq
-
+            self.task_heads["sequence"] = self.output_proj_seq
 
         if "backbone" in self.design_mode:
 
             self._translation_flow = OptimalTransportEuclideanFlow(
-                                                                    dim=(3,),
-                                                                    schedule_type="linear",
-                                                                    schedule_params={},
-                                                                )
+                dim=(3,),
+                schedule_type="linear",
+                schedule_params={},
+            )
 
             self._position_flow = OptimalTransportEuclideanFlow(
-                                                                    dim=(15, 3,),
-                                                                    schedule_type="linear",
-                                                                    schedule_params={},
-                                                                )
+                dim=(
+                    15,
+                    3,
+                ),
+                schedule_type="linear",
+                schedule_params={},
+            )
 
             self._rotation_flow = LinearSO3Flow(
-                                                schedule_type="linear",
-                                                schedule_params={},
-                                            )
+                schedule_type="linear",
+                schedule_params={},
+            )
             self.output_proj_tran = self.get_pred_network(c_s=c_s, out_dim=3)
-            self.output_proj_rot =  self.get_pred_network(c_s=c_s, out_dim=6)
-            self.task_heads['translation'] = self.output_proj_tran
-            self.task_heads['rotation'] = self.output_proj_rot
+            self.output_proj_rot = self.get_pred_network(c_s=c_s, out_dim=6)
+            self.task_heads["translation"] = self.output_proj_tran
+            self.task_heads["rotation"] = self.output_proj_rot
 
         if "sidechain" in self.design_mode:
-            self.output_proj_dihed  = self.get_pred_network(c_s=c_s, out_dim=5)
-            self.task_heads['dihedral'] = self.output_proj_dihed
+            self.output_proj_dihed = self.get_pred_network(c_s=c_s, out_dim=5)
+            self.task_heads["dihedral"] = self.output_proj_dihed
 
         # Initialize diheadral flow by default so that we can sample from its prior
         self._dihedral_flow = LinearToricFlow(
-                                                dim=5,
-                                                schedule_type="linear",
-                                                schedule_params={},
-                                            )
+            dim=5,
+            schedule_type="linear",
+            schedule_params={},
+        )
 
     def forward(
         self,
@@ -175,27 +192,32 @@ class DenoisingModule(nn.Module):
         s_prev = self.res_layernorm(s_i)
         s_prev_scaled = self.linear_no_bias_s_prev(s_prev)
 
-        z_ij = z_ij + z_inputs_ij + z_trunk_ij + s_prev_scaled[:,None,:,:] + s_prev_scaled[:,:, None,:]
+        z_ij = (
+            z_ij
+            + z_inputs_ij
+            + z_trunk_ij
+            + s_prev_scaled[:, None, :, :]
+            + s_prev_scaled[:, :, None, :]
+        )
 
         s_i = self.ipa_stack(s_i, z_ij, r_i, time_i)
 
         return s_i
 
-
     def get_pred_network(self, c_s=64, out_dim=20, sequence=False):
         # Network architecture for noise prediction
         modules = [
-            nn.Linear(c_s, c_s), 
+            nn.Linear(c_s, c_s),
             nn.ReLU(),
-            nn.Linear(c_s, c_s), 
+            nn.Linear(c_s, c_s),
             nn.ReLU(),
-            nn.Linear(c_s, out_dim)
+            nn.Linear(c_s, out_dim),
         ]
 
         if sequence:
             # For sequence prediction, apply softmax at the output layer
             modules.append(nn.Softmax(dim=-1))
-        
+
         return nn.Sequential(*modules)
 
     def forward_gru(
@@ -249,7 +271,9 @@ class DenoisingModule(nn.Module):
 
         # Convert 3x3 rotations to 6D with correct dimensions
         frame_rotations = data_dict["frame_rotations"]  # Shape [6, 240, 3, 3]
-        frame_rotations_6d = frame_rotations[..., :2, :]  # Keep first two rows [6, 240, 2, 3]
+        frame_rotations_6d = frame_rotations[
+            ..., :2, :
+        ]  # Keep first two rows [6, 240, 2, 3]
         frame_rotations_6d = frame_rotations_6d.flatten(start_dim=-2)  # [6, 240, 6]
 
         return {
@@ -261,7 +285,12 @@ class DenoisingModule(nn.Module):
         }
 
     # TODO: Combine _init_features with _noise_features such that at t=0 _noise_features == _init_features
-    def _init_features(self, true_data_dict: dict[str, torch.Tensor], true_feature_dict: dict[str, torch.Tensor], time: torch.Tensor):
+    def _init_features(
+        self,
+        true_data_dict: dict[str, torch.Tensor],
+        true_feature_dict: dict[str, torch.Tensor],
+        time: torch.Tensor,
+    ):
 
         N_batch, N_res, N_atom, _ = true_data_dict["pos_heavyatom"].shape
         pos_heavyatom = true_data_dict["pos_heavyatom"]
@@ -297,12 +326,9 @@ class DenoisingModule(nn.Module):
                 size=(N_batch, N_res), device=device, dtype=dtype
             )
 
-            pos_heavyatom = apply_mask(
-                pos_heavyatom, init_pos_heavyatom, redesign_mask
-            )
+            pos_heavyatom = apply_mask(pos_heavyatom, init_pos_heavyatom, redesign_mask)
 
-
-        #if "sidechain" in self.design_mode:
+        # if "sidechain" in self.design_mode:
         init_dihedrals = self._dihedral_flow.prior_sample(
             size=(N_batch, N_res), device=device, dtype=dtype
         )
@@ -320,17 +346,19 @@ class DenoisingModule(nn.Module):
             "pos_heavyatom": pos_heavyatom,
         }
 
-
     def _sample_time(self, num_batch: int, device: torch.device, dtype: torch.dtype):
         """
         Sample a different continuous time step between 0 and 1 for each data point in the batch,
         then clamp the values to be between 0 and 0.99.
         """
         time_steps = torch.rand(num_batch, device=device, dtype=dtype)
-        return torch.clamp(time_steps, min=0., max=self.max_time_clamp)
+        return torch.clamp(time_steps, min=0.0, max=self.max_time_clamp)
 
     def _noise_features(
-        self, true_data_dict: dict[str, torch.Tensor], true_feature_dict: dict[str, torch.Tensor], time: torch.Tensor
+        self,
+        true_data_dict: dict[str, torch.Tensor],
+        true_feature_dict: dict[str, torch.Tensor],
+        time: torch.Tensor,
     ):
 
         N_batch, N_res, N_atom, _ = true_data_dict["pos_heavyatom"].shape
@@ -354,10 +382,12 @@ class DenoisingModule(nn.Module):
 
         if "backbone" in self.design_mode:
             noised_frame_rotations = self._rotation_flow.interpolate_path(
-                frame_rotations, time,
+                frame_rotations,
+                time,
             )
             noised_frame_translations = self._translation_flow.interpolate_path(
-                frame_translations, time,
+                frame_translations,
+                time,
             )
             frame_rotations = apply_mask(
                 frame_rotations, noised_frame_rotations, redesign_mask
@@ -367,13 +397,14 @@ class DenoisingModule(nn.Module):
             )
 
             noised_pos_heavyatom = self._position_flow.interpolate_path(
-                pos_heavyatom, time[:, :, :, None],
+                pos_heavyatom,
+                time[:, :, :, None],
             )
             pos_heavyatom = apply_mask(
                 pos_heavyatom, noised_pos_heavyatom, redesign_mask
             )
 
-        #if "sidechain" in self.design_mode:
+        # if "sidechain" in self.design_mode:
         noised_dihedrals = self._dihedral_flow.interpolate_path(dihedrals, time)
         noised_dihedrals = apply_mask(dihedrals, noised_dihedrals, redesign_mask)
 
@@ -395,27 +426,31 @@ class DenoisingModule(nn.Module):
             "redesign_mask": redesign_mask,
         }
 
-    def _embed(self, noised_feature_dict: dict[str, torch.Tensor], true_data_dict: dict[str, torch.Tensor]):
+    def _embed(
+        self,
+        noised_feature_dict: dict[str, torch.Tensor],
+        true_data_dict: dict[str, torch.Tensor],
+    ):
 
-        composed_dict = {'time': noised_feature_dict["time"],
-                         'res_type': noised_feature_dict['res_type'],
-                         'pos_heavyatom': noised_feature_dict['pos_heavyatom'],
-                         'res_index':  true_data_dict['res_index'],
-                         'chain_type':  true_data_dict['chain_type'],
-                         'cb_distogram':  true_data_dict["cb_distogram"].clone(),
-                         'ca_unit_vectors':  true_data_dict["ca_unit_vectors"].clone(),
-                         'valid_mask':  true_data_dict['valid_mask'],
-                         'redesign_mask':  true_data_dict['redesign_mask'],
-                         }
+        composed_dict = {
+            "time": noised_feature_dict["time"],
+            "res_type": noised_feature_dict["res_type"],
+            "pos_heavyatom": noised_feature_dict["pos_heavyatom"],
+            "res_index": true_data_dict["res_index"],
+            "chain_type": true_data_dict["chain_type"],
+            "cb_distogram": true_data_dict["cb_distogram"].clone(),
+            "ca_unit_vectors": true_data_dict["ca_unit_vectors"].clone(),
+            "valid_mask": true_data_dict["valid_mask"],
+            "redesign_mask": true_data_dict["redesign_mask"],
+        }
 
         s_i, z_ij, _, _, _ = self._encode_batch(composed_dict)
-
 
         r_i = create_rigid(
             noised_feature_dict["frame_rotations"],
             noised_feature_dict["frame_translations"] * ANG_TO_NM_SCALE,
         )
-        
+
         return s_i, z_ij, r_i, noised_feature_dict["time"]
 
     def _get_vector_fields(
@@ -453,7 +488,7 @@ class DenoisingModule(nn.Module):
                 noise_feature_dict["dihedrals"],
                 unnoised_feature_dict["dihedrals"],
                 noise_feature_dict["time"],
-                is_wrap = False,
+                is_wrap=False,
             )
             vf_dict["dihedral_vf"] = dihedral_vf
 
@@ -470,7 +505,7 @@ class DenoisingModule(nn.Module):
         frame_rotations = noised_feature_dict["frame_rotations"]
         frame_translations = noised_feature_dict["frame_translations"]
         dihedrals = noised_feature_dict["dihedrals"]
-        pos_heavyatom = noised_feature_dict['pos_heavyatom']
+        pos_heavyatom = noised_feature_dict["pos_heavyatom"]
 
         time = noised_feature_dict["time"]
         time = time + d_t
@@ -503,7 +538,6 @@ class DenoisingModule(nn.Module):
             )
             dihedrals = apply_mask(dihedrals, updated_dihedrals, redesign_mask)
 
-
         res_type = res_type_prob.argmax(-1)
         pos_heavyatom = full_atom_reconstruction(
             frame_rotations=rot6d_to_rotmat(frame_rotations),
@@ -515,7 +549,7 @@ class DenoisingModule(nn.Module):
         return {
             "res_type_prob": res_type_prob,
             "res_type": res_type,
-            'pos_heavyatom': pos_heavyatom,
+            "pos_heavyatom": pos_heavyatom,
             "frame_rotations": frame_rotations,
             "frame_translations": frame_translations,
             "dihedrals": dihedrals,
@@ -523,14 +557,12 @@ class DenoisingModule(nn.Module):
             "redesign_mask": redesign_mask,
         }
 
-
     def _predict(
         self,
         noised_feature_dict: dict[str, torch.Tensor],
         s_i: torch.Tensor,
         r_i: Rigid,
     ):
-
 
         results = {}
 
@@ -551,14 +583,12 @@ class DenoisingModule(nn.Module):
             frame_rotations_vf = self.output_proj_rot(s_i)
             results["rotation_vf"] = frame_rotations_vf
             results["translation_vf"] = frame_translations_vf
-            
+
         if "sidechain" in self.design_mode:
             dihedral_vf = self.output_proj_dihed(s_i)
-            results["dihedral_vf"] = dihedral_vf 
-
+            results["dihedral_vf"] = dihedral_vf
 
         return results
-
 
     def _reconstruct(
         self,
@@ -566,20 +596,20 @@ class DenoisingModule(nn.Module):
         pred_feature_dict: dict[str, torch.Tensor],
         step: int = None,
     ):
-        
+
         # Compute probs
         pred_res_type_prob = F.softmax(pred_feature_dict["res_type_prob"], dim=-1)
         res_type = torch.argmax(pred_res_type_prob, dim=-1)
-        
+
         # 6D to 3D
         frame_rotations = rot6d_to_rotmat(pred_feature_dict["frame_rotations"])
         frame_translations = pred_feature_dict["frame_translations"]
-        
+
         # Get the diheadrals
         dihedrals = pred_feature_dict["dihedrals"]
 
         pos_heavyatom = full_atom_reconstruction(
-            frame_rotations=frame_rotations, # expects 3D rotations
+            frame_rotations=frame_rotations,  # expects 3D rotations
             frame_translations=frame_translations,
             dihedrals=dihedrals,
             res_type=res_type,
@@ -605,18 +635,17 @@ class DenoisingModule(nn.Module):
             )
 
         output_dict = {
-                        "res_type": res_type,
-                        "res_type_prob": pred_res_type_prob,
-                        "pos_heavyatom": pos_heavyatom,
-                    }
+            "res_type": res_type,
+            "res_type_prob": pred_res_type_prob,
+            "pos_heavyatom": pos_heavyatom,
+        }
 
         if step is not None:
-            output_dict["res_type_"+str(step)] = res_type
-            output_dict["res_type_prob_"+str(step)] = pred_res_type_prob
-            output_dict["pos_heavyatom_"+str(step)] = pos_heavyatom
-        
-        return output_dict
+            output_dict["res_type_" + str(step)] = res_type
+            output_dict["res_type_prob_" + str(step)] = pred_res_type_prob
+            output_dict["pos_heavyatom_" + str(step)] = pos_heavyatom
 
+        return output_dict
 
     def get_loss_terms(
         self,
@@ -634,42 +663,46 @@ class DenoisingModule(nn.Module):
         num_batch, num_res, _, _ = true_data_dict["pos_heavyatom"].size()
         device = true_data_dict["pos_heavyatom"].device
         dtype = true_data_dict["pos_heavyatom"].dtype
-        chain_type = true_data_dict['chain_type']
+        chain_type = true_data_dict["chain_type"]
 
         # Get features to be used
         true_feature_dict = self._add_features(true_data_dict)
-        
-        time = self._sample_time(num_batch=num_batch, device=device, dtype=dtype)[:, None, None].expand(num_batch, num_res, 1)
-        noised_feature_dict = self._noise_features(true_data_dict, true_feature_dict, time)
 
-        # Embed the features        
+        time = self._sample_time(num_batch=num_batch, device=device, dtype=dtype)[
+            :, None, None
+        ].expand(num_batch, num_res, 1)
+        noised_feature_dict = self._noise_features(
+            true_data_dict, true_feature_dict, time
+        )
+
+        # Embed the features
         s_i, z_ij, r_i, time_i = self._embed(noised_feature_dict, true_data_dict)
-        
+
         s_i_out = torch.zeros_like(s_i)
 
         for i in range(self.recycle):
             if self.use_gru:
                 s_i_out = self.forward_gru(
-                                s_i,
-                                z_ij,
-                                r_i,
-                                s_inputs_i,
-                                z_inputs_ij,
-                                s_trunk_i,
-                                z_trunk_ij,
-                                )
+                    s_i,
+                    z_ij,
+                    r_i,
+                    s_inputs_i,
+                    z_inputs_ij,
+                    s_trunk_i,
+                    z_trunk_ij,
+                )
             else:
                 s_i_out = self.forward(
-                                s_i,
-                                z_ij,
-                                r_i,
-                                s_inputs_i,
-                                z_inputs_ij,
-                                s_trunk_i,
-                                z_trunk_ij,
-                                s_i_out,
-                                time_i,
-                                )
+                    s_i,
+                    z_ij,
+                    r_i,
+                    s_inputs_i,
+                    z_inputs_ij,
+                    s_trunk_i,
+                    z_trunk_ij,
+                    s_i_out,
+                    time_i,
+                )
 
         pred_vf_dict = self._predict(noised_feature_dict, s_i_out, r_i)
         true_vf_dict = self._get_vector_fields(noised_feature_dict, true_feature_dict)
@@ -680,14 +713,13 @@ class DenoisingModule(nn.Module):
         if self.binder_loss:
             # Compute CE loss
             binder_loss = self.pair_loss.compute_pair_loss(s_trunk_i, chain_type)
-            pred_loss_update['binder_loss'] = binder_loss
+            pred_loss_update["binder_loss"] = binder_loss
 
         return pred_loss_update, true_loss_update
 
-
     def _encode_batch(self, batch):
         """
-        Encode the input batch to get residue embeddings, pair embeddings, 
+        Encode the input batch to get residue embeddings, pair embeddings,
         initial AA sequence, and position of atoms.
 
         Parameters
@@ -710,20 +742,20 @@ class DenoisingModule(nn.Module):
         """
 
         # Extract sequence, fragment type, and heavy atom positional information
-        s0 = batch['res_type']
-        pos_heavyatom = batch['pos_heavyatom']
+        s0 = batch["res_type"]
+        pos_heavyatom = batch["pos_heavyatom"]
 
-        res_nb = batch['res_index']
-        fragment_type = batch['chain_type']
+        res_nb = batch["res_index"]
+        fragment_type = batch["chain_type"]
         cb_distogram = batch["cb_distogram"].clone()
-        ca_unit_vectors =batch["ca_unit_vectors"].clone()
-        residue_mask = batch['valid_mask']
-        generation_mask_bar = ~batch['redesign_mask']
-        time = batch['time']
+        ca_unit_vectors = batch["ca_unit_vectors"].clone()
+        residue_mask = batch["valid_mask"]
+        generation_mask_bar = ~batch["redesign_mask"]
+        time = batch["time"]
 
         # Construct context masks for training structure and sequence
         context_mask = torch.logical_and(
-            residue_mask, 
+            residue_mask,
             generation_mask_bar,
         )
 
@@ -733,34 +765,42 @@ class DenoisingModule(nn.Module):
 
         # Compute residue embeddings
         res_emb = self.residue_emb(
-            aa=s0, res_nb=res_nb, fragment_type=fragment_type, 
-            pos_atoms=pos_heavyatom, residue_mask=residue_mask, 
-            structure_mask=structure_mask, sequence_mask=sequence_mask, 
-            generation_mask=batch['redesign_mask'],
+            aa=s0,
+            res_nb=res_nb,
+            fragment_type=fragment_type,
+            pos_atoms=pos_heavyatom,
+            residue_mask=residue_mask,
+            structure_mask=structure_mask,
+            sequence_mask=sequence_mask,
+            generation_mask=batch["redesign_mask"],
             time=time,
         )
 
         # Compute pairwise residue embeddings
         pair_emb = self.pair_emb(
-            aa=s0, res_nb=res_nb, fragment_type=fragment_type, 
-            pos_atoms=pos_heavyatom, residue_mask=residue_mask, 
-            cb_distogram=cb_distogram, ca_unit_vectors=ca_unit_vectors,
-            structure_mask=structure_mask, sequence_mask=sequence_mask,
-            generation_mask=batch['redesign_mask'],
+            aa=s0,
+            res_nb=res_nb,
+            fragment_type=fragment_type,
+            pos_atoms=pos_heavyatom,
+            residue_mask=residue_mask,
+            cb_distogram=cb_distogram,
+            ca_unit_vectors=ca_unit_vectors,
+            structure_mask=structure_mask,
+            sequence_mask=sequence_mask,
+            generation_mask=batch["redesign_mask"],
             time=time,
         )
 
         # Extract positions of C-alpha atoms and construct 3D basis
         p0 = pos_heavyatom[:, :, BBHeavyAtom.CA]
         R0 = construct_3d_basis(
-            center=pos_heavyatom[:, :, BBHeavyAtom.CA], 
-            p1=pos_heavyatom[:, :, BBHeavyAtom.C],  
+            center=pos_heavyatom[:, :, BBHeavyAtom.CA],
+            p1=pos_heavyatom[:, :, BBHeavyAtom.C],
             p2=pos_heavyatom[:, :, BBHeavyAtom.N],
         )
         v0_6D = rotmat_to_rot6d(R0)
 
         return res_emb, pair_emb, v0_6D, p0, s0
-
 
     @torch.no_grad()
     def rollout(
@@ -771,7 +811,7 @@ class DenoisingModule(nn.Module):
         s_trunk_i: torch.Tensor,
         z_trunk_ij: torch.Tensor,
         num_steps: int,
-        store_all: bool = False
+        store_all: bool = False,
     ):
         """
         Rollout the denoising module, returning the predicted data dictionary with denoising trajectory.
@@ -780,8 +820,10 @@ class DenoisingModule(nn.Module):
 
         true_feature_dict = self._add_features(true_data_dict)
 
-        time = torch.zeros_like(s_inputs_i[:,:,:1])
-        noised_feature_dict = self._init_features(true_data_dict, true_feature_dict, time)
+        time = torch.zeros_like(s_inputs_i[:, :, :1])
+        noised_feature_dict = self._init_features(
+            true_data_dict, true_feature_dict, time
+        )
         d_t = 1 / num_steps
 
         for i in range(num_steps):
@@ -789,20 +831,34 @@ class DenoisingModule(nn.Module):
 
             s_i_out = torch.zeros_like(s_i)
             for i in range(self.recycle):
-                s_i_out = self.forward(s_i, z_ij, r_i, s_inputs_i, z_inputs_ij, s_trunk_i, z_trunk_ij, s_i_out, time_i)
-            
+                s_i_out = self.forward(
+                    s_i,
+                    z_ij,
+                    r_i,
+                    s_inputs_i,
+                    z_inputs_ij,
+                    s_trunk_i,
+                    z_trunk_ij,
+                    s_i_out,
+                    time_i,
+                )
+
             # Predict vector fields directly
-            pred_vf_dict = self._predict(noised_feature_dict, s_i_out, r_i)            
+            pred_vf_dict = self._predict(noised_feature_dict, s_i_out, r_i)
             noised_feature_dict = self._update_features(
                 noised_feature_dict, pred_vf_dict, d_t
             )
-            
+
             if store_all:
-                pred_data_dict_update = self._reconstruct(true_data_dict, noised_feature_dict, step=i)
+                pred_data_dict_update = self._reconstruct(
+                    true_data_dict, noised_feature_dict, step=i
+                )
                 pred_data_dict.update(pred_data_dict_update)
 
         if not store_all:
-            pred_data_dict_update = self._reconstruct(true_data_dict, noised_feature_dict)
+            pred_data_dict_update = self._reconstruct(
+                true_data_dict, noised_feature_dict
+            )
             pred_data_dict.update(pred_data_dict_update)
 
         return pred_data_dict
