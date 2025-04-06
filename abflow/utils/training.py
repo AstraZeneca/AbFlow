@@ -32,13 +32,6 @@ def setup_model(
         model_instance = AbFlow(network=network_instance, **config["model"])
         
         if is_ema:
-            # state_dict = checkpoint
-            # model_state = model_instance.state_dict()
-            # # Remove keys with mismatched shapes
-            # for key in list(state_dict.keys()):
-            #     if key in model_state and state_dict[key].shape != model_state[key].shape:
-            #         print(f"Removing key {key} due to shape mismatch: checkpoint shape {state_dict[key].shape} vs. model shape {model_state[key].shape}")
-            #         del state_dict[key]
             model_instance.load_state_dict(checkpoint, strict=False)
         else:
             model_instance.load_state_dict(checkpoint["state_dict"], strict=False)
@@ -83,9 +76,9 @@ class CustomEMACallback(Callback):
         self,
         start_iter: int = 50,
         ema_decay: float = 0.999,
-        save_interval: int = 2000,  # Save the EMA model every 2000 iterations by default.
+        save_interval: int = 2000,
         save_dir: str = "./",
-        ema_checkpoint_path: str = None, #str = '/home/jovyan/abflow-datavol/checkpoints/Pocket10_finetuned_from_seq_bb_v2_sabdab_sequence_backbone/ema_model_52000.ckpt',  # Optional path to a pre-existing EMA checkpoint.
+        ema_checkpoint_path: str = None,
     ):
         """
         :param start_iter: Iteration to start EMA.
@@ -148,72 +141,13 @@ class CustomEMACallback(Callback):
         print(f"Final EMA model saved as {final_file_name}")
 
 
-
-# class CustomEMACallback(Callback):
-#     def __init__(
-#         self,
-#         start_iter: int = 50,
-#         ema_decay: float = 0.999,
-#         save_interval: int = 2000,  # Save the EMA model every 2000 iterations by default.
-#         save_dir: str = "./"
-#     ):
-#         """
-#         :param start_iter: Iteration to start EMA.
-#         :param ema_decay: EMA decay factor.
-#         :param save_interval: Iterations interval to save EMA weights.
-#         """
-#         super().__init__()
-#         self.start_iter = start_iter
-#         self.ema_decay = ema_decay
-#         self.save_interval = save_interval
-#         self.ema_state_dict = None
-#         self.iteration = 0
-#         self.save_dir = save_dir
-
-#     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0):
-#         # Only update EMA on the main process.
-#         if trainer.global_rank != 0:
-#             return
-
-#         self.iteration += 1
-
-#         # Delay EMA initialization until start_iter so the model is fully built.
-#         if self.iteration == self.start_iter:
-#             self.ema_state_dict = {
-#                 k: v.clone().detach().cpu() for k, v in pl_module.state_dict().items()
-#             }
-
-#         if self.iteration < self.start_iter:
-#             return
-
-#         # Update EMA weights using CPU tensors.
-#         current_state = {k: v.detach().cpu() for k, v in pl_module.state_dict().items()}
-#         for key in self.ema_state_dict.keys():
-#             # ema = ema_decay * ema + (1 - ema_decay) * current
-#             self.ema_state_dict[key].mul_(self.ema_decay).add_(current_state[key], alpha=1 - self.ema_decay)
-
-#         # Save EMA weights at specified intervals.
-#         if self.iteration > 10 and self.iteration % self.save_interval == 0:
-#             file_name = f"{self.save_dir}/ema_model_{self.iteration}.ckpt"
-#             torch.save(self.ema_state_dict, file_name)
-#             print(f"EMA model saved at iteration {self.iteration} as {file_name}")
-
-#     def on_train_end(self, trainer, pl_module):
-#         if trainer.global_rank != 0 or self.ema_state_dict is None:
-#             return
-#         final_file_name = "{self.save_dir}/ema_model_final.ckpt"
-#         torch.save(self.ema_state_dict, final_file_name)
-#         print(f"Final EMA model saved as {final_file_name}")
-
-
-
 class CustomSWACallback(Callback):
     def __init__(
         self,
         start_iter: int = 50,
         swa_frequency: int = 100,
         swa_lr: float = None,
-        save_interval: int = 2000,  # Save SWA model every 2000 iterations by default.
+        save_interval: int = 2000,
         save_dir: str = "./"
     ):
         """
