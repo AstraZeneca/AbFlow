@@ -54,6 +54,8 @@ class AbFlow(LightningModule):
         is_compile: bool = True,
         loss_combination_method: str ='all',
         confidence: bool =False,
+        dataset_name: str = 'sabdab',
+        binder_loss: bool = False,
     ):
         """
         Initialize the AbFlow model.
@@ -69,13 +71,16 @@ class AbFlow(LightningModule):
                                 loss_weights=loss_weighting,
                                 loss_combination_method=loss_combination_method,
                                 confidence = confidence,
+                                binder_loss = binder_loss,
                                 )
 
         self.loss_weighting_copy = copy.deepcopy(loss_weighting)
         self._metrics = AbFlowMetrics()
         self._network = network
         self.compile = is_compile
+        self.binder_loss = binder_loss
         self.loss_dict_means = None
+        self.dataset_name = dataset_name
         
         if self.compile:
             torch._dynamo.config.cache_size_limit = 128
@@ -91,7 +96,7 @@ class AbFlow(LightningModule):
     def configure_optimizers(self) -> torch.optim.Optimizer:
         """By default, model use the AdamW optimizer."""
         return torch.optim.AdamW(self.parameters(), lr=self._learning_rate)
-
+        
     @property
     def network(self) -> nn.Module:
         """Property for accessing the underlying network."""

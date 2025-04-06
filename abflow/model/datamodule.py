@@ -40,7 +40,7 @@ class AntibodyAntigenDataset(Dataset):
     @property
     def structure_data_path(self):
         return os.path.join(
-            self.data_path, self.config["name"], f"abflow_processed_structures_{self.config['name']}_v3.lmdb"
+            self.data_path, self.config["name"], f"abflow_processed_structures_{self.config['name']}_v4.lmdb"
         )
 
     def _load_entries(self):
@@ -156,7 +156,7 @@ class AntibodyAntigenDataset(Dataset):
 
         num_val_cluster_half = int(0.5*self.config["num_val_cluster"])
 
-        val_clusters = oas_clusters_train_val[:num_val_cluster_half] + sabdab_clusters_train_val[:num_val_cluster_half]
+        val_clusters = sabdab_clusters_train_val[:num_val_cluster_half] + oas_clusters_train_val[:num_val_cluster_half]
 
         oas_train_clusters = oas_clusters_train_val[num_val_cluster_half:]
         sabdab_train_clusters = sabdab_clusters_train_val[num_val_cluster_half:]
@@ -186,7 +186,8 @@ class AntibodyAntigenDataset(Dataset):
                     for c_id in oas_train_clusters
                     if c_id in self.clusters
                 )
-            )
+            )[::-1]
+            random.shuffle(self.split_ids_oas)
             self.split_ids_oas_length = len(self.split_ids_oas)
 
             self.split_ids_sabdab = list(
@@ -297,20 +298,20 @@ class AntibodyAntigenDataset(Dataset):
         return length
 
     def __getitem__(self, idx: int):
-        if self.split in ["test", "val"] or self.config["name"]=='sabdab':
+        if self.split in ["test", "val"] or self.config["name"] == 'sabdab':
             structure_id = self.split_ids[idx]
             item = self._get_data_from_id(structure_id)
+            return item
         else:
-            coin_flip = random.randint(0, 1)
-
-            if coin_flip==0:
-                structure_id = self.split_ids_oas[idx]
-            else:
-                structure_id = self.split_ids_sabdab[idx % self.split_ids_sabdab_length]
+            # Sample one item from each list:
+            structure_id_oas = self.split_ids_oas[idx]
+            structure_id_sabdab = self.split_ids_sabdab[idx % self.split_ids_sabdab_length]
             
-            item = self._get_data_from_id(structure_id)
+            item_oas = self._get_data_from_id(structure_id_oas)
+            item_sabdab = self._get_data_from_id(structure_id_sabdab)
             
-        return item
+            # Return both items together
+            return item_oas, item_sabdab
 
     def _get_data_from_id(self, id: str):
         data = self._get_structure(id)
@@ -362,13 +363,20 @@ class AntibodyAntigenDataModule(LightningDataModule):
     def __repr__(self):
         return f"{self.__class__.__name__}(batch_size={self._batch_size})"
 
-    def collate(self, data_list: list[dict[str, torch.Tensor]], custom_redesign_mask: torch.Tensor = None) -> dict[str, torch.Tensor]:
+    def collate(self, data_list: list[dict[str, torch.Tensor]], custom_redesign_mask: torch.Tensor = None, with_antigen: bool = True) -> dict[str, torch.Tensor]:
         """
         Combines a list of dictionaries into a single dictionary with an additional batch dimension.
         """
 
-        for i, data in enumerate(data_list):
+        # Check if the first item is a tuple (train mode returns tuple)
+        if isinstance(data_list[0], (tuple, list)):
+            # Unzip the list of tuples into two lists
+            oas_items, sabdab_items = zip(*data_list)
+            data_list = list(oas_items) + list(sabdab_items)
+            random.shuffle(data_list)
 
+        for i, data in enumerate(data_list):
+            
             # Delete string based entries
             for cdr_seq in ["H1_seq", "L1_seq", "H2_seq", "L2_seq", "H3_seq", "L3_seq"]:
                 if cdr_seq in data:
@@ -385,7 +393,8 @@ class AntibodyAntigenDataModule(LightningDataModule):
                         data,
                         max_crop_size=self._max_crop_size,
                         antigen_crop_size=self._antigen_crop_size,
-                        random_sample_sizes=self.config['random_sample_sizes']
+                        random_sample_sizes=self.config['random_sample_sizes'],
+                        with_antigen = with_antigen,
                     )
                 )
             except Exception as e:

@@ -10,27 +10,29 @@ from Bio.PDB.Polypeptide import protein_letters_3to1
 
 from .geometry import create_rotation_matrix
 
+
 # Chain and region mappings
 chain_id_to_index = {
-    "antigen": 0,
-    "heavy": 1,
-    "light_kappa": 2,
-    "light_lambda": 3,
+    "antigen": 1,
+    "heavy": 2,
+    "light_kappa": 3,
+    "light_lambda": 4,
 }
+
 antibody_chain_names = ["heavy", "light_kappa", "light_lambda"]
 antigen_chain_name = ["antigen"]
 antibody_index = [chain_id_to_index[chain] for chain in antibody_chain_names]
 antigen_index = [chain_id_to_index[chain] for chain in antigen_chain_name]
 
 region_to_index = {
-    "framework": 0,
-    "hcdr1": 1,
-    "hcdr2": 2,
-    "hcdr3": 3,
-    "lcdr1": 4,
-    "lcdr2": 5,
-    "lcdr3": 6,
-    "antigen": 7,
+    "framework": 1,
+    "hcdr1": 2,
+    "hcdr2": 3,
+    "hcdr3": 4,
+    "lcdr1": 5,
+    "lcdr2": 6,
+    "lcdr3": 7,
+    "antigen": 8,
 }
 
 

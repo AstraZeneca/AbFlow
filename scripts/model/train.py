@@ -20,7 +20,7 @@ from lightning.pytorch.strategies import DDPStrategy
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint, TQDMProgressBar
 from lightning.pytorch.loggers import CSVLogger, WandbLogger
 
-from abflow.utils.training import setup_model, set_seed
+from abflow.utils.training import setup_model, set_seed, CustomSWACallback, CustomEMACallback
 from abflow.utils.arguments import get_arguments, get_config, print_config_summary
 from torch.profiler import ProfilerActivity
 from pytorch_lightning.profilers import PyTorchProfiler
@@ -63,7 +63,7 @@ def train(config: dict):
 
     # Instantiate model and datamodule
     model, datamodule = setup_model(
-        config, config["checkpoint"]["path"], config["checkpoint"]["load_optimizer"]
+        config, config["checkpoint"]["path"], config["checkpoint"]["load_optimizer"],
     )
 
     # Learning rate monitor
@@ -96,6 +96,9 @@ def train(config: dict):
     tqdm = TQDMProgressBar(refresh_rate=10)
     callbacks.append(tqdm)
 
+    ema_callback = CustomEMACallback(start_iter=1000, ema_decay=0.99965, save_interval=4000, save_dir=results_dir)
+    callbacks.append(ema_callback)
+
     # Logger
     logger = WandbLogger(
         project=config["project_name"], name=config["model_name"], log_model=False
@@ -103,7 +106,7 @@ def train(config: dict):
 
     # Trainer
     trainer = L.Trainer(
-        devices=8,
+        devices=1,
         accelerator="gpu",
         strategy=DDPStrategy(
             timeout=timedelta(seconds=15400), find_unused_parameters=True,
@@ -120,10 +123,8 @@ def train(config: dict):
         # profiler=profiler,
     )
 
-    trainer.fit(model, datamodule=datamodule)
-    trainer.test(model, datamodule=datamodule)
+    trainer.fit(model, datamodule=datamodule) 
     print("Done with training...")
-
 
 def main(config: dict):
     """Main wrapper function for training routine.

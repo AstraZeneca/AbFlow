@@ -3,6 +3,7 @@ A collection of embedding methods/classes.
 """
 
 import copy
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -264,6 +265,43 @@ class EmbedInput(nn.Module):
 
         return noised_feature_dict, s_i, z_ij, time
 
+
+class FourierEncoder(nn.Module):
+    def __init__(self, num_freq_bands=4, include_input=True):
+        """
+        Args:
+            num_freq_bands (int): Number of frequency bands for each side.
+                This will generate frequency bands as:
+                [1, 2, ..., num_freq_bands] and [1, 1/2, ..., 1/num_freq_bands].
+            include_input (bool): Whether to include the original input in the final encoding.
+        """
+        super().__init__()
+        self.include_input = include_input
+        # Register frequency bands as a buffer.
+        # This creates a tensor: [1, 2, ..., num_freq_bands, 1, 1/2, ..., 1/num_freq_bands]
+        freq_bands = torch.FloatTensor(
+            [i + 1 for i in range(num_freq_bands)] + [1. / (i + 1) for i in range(num_freq_bands)]
+        )
+        self.register_buffer('freq_bands', freq_bands)
+
+    def forward(self, x):
+        """
+        Args:
+            x (torch.Tensor): Tensor of shape [batch_size, 1] with values typically in [0, 1].
+        
+        Returns:
+            torch.Tensor: Encoded tensor that includes the original input (if include_input is True)
+            and the sine and cosine responses for each frequency band.
+        """
+        encodings = [x] if self.include_input else []
+        # Ensure x has shape [batch_size, 1] for proper broadcasting.
+        # Expand x for multiplication with freq_bands: result shape will be [batch_size, num_freq_bands*2]
+        for freq in self.freq_bands:
+            encodings.append(torch.sin(x * freq))
+            encodings.append(torch.cos(x * freq))
+        return torch.cat(encodings, dim=-1)
+
+
 class ResidueEmbedding(nn.Module):
     """
     Embeds residue-level features, including amino acid types, chain types, dihedral angles,
@@ -280,9 +318,10 @@ class ResidueEmbedding(nn.Module):
     max_chain_types : int, optional
         Maximum number of chain types (default is 10).
     """
-    def __init__(self, residue_dim, num_atoms, max_aa_types=22, max_chain_types=10):
+    def __init__(self, residue_dim, num_atoms, max_aa_types=22, max_chain_types=10, time_dim=17):
         super(ResidueEmbedding, self).__init__()
         
+        self.time_dim = time_dim
         self.residue_dim = residue_dim
         self.num_atoms = num_atoms
         self.max_aa_types = max_aa_types
@@ -291,9 +330,10 @@ class ResidueEmbedding(nn.Module):
         self.aa_emb = nn.Embedding(max_aa_types, residue_dim)
         self.chain_emb = nn.Embedding(max_chain_types, residue_dim, padding_idx=0)
         self.dihedral_emb = DihedralEncoding()
+        self.encode_time = FourierEncoder()
 
         # Input dimension for the MLP layer
-        input_dim = residue_dim + max_aa_types * num_atoms * 3 + self.dihedral_emb.get_dim() + residue_dim
+        input_dim = residue_dim + max_aa_types * num_atoms * 3 + self.dihedral_emb.get_dim() + residue_dim + time_dim + 10
         self.mlp = nn.Sequential(
             nn.Linear(input_dim, 2 * residue_dim), nn.ReLU(), 
             nn.Linear(2 * residue_dim, residue_dim), nn.ReLU(), 
@@ -301,7 +341,7 @@ class ResidueEmbedding(nn.Module):
             nn.Linear(residue_dim, residue_dim)
         )
 
-    def forward(self, aa, res_nb, fragment_type, pos_atoms, residue_mask, structure_mask=None, sequence_mask=None, generation_mask=None):
+    def forward(self, aa, res_nb, fragment_type, pos_atoms, residue_mask, structure_mask=None, sequence_mask=None, generation_mask=None, time=None, pocket=None):
         """
         Forward pass for residue embedding.
 
@@ -380,7 +420,21 @@ class ResidueEmbedding(nn.Module):
             dihedral_emb = dihedral_emb * dihedral_mask[:, :, None]
 
         # 5. Concatenate all features and apply mask
-        all_features = torch.cat([aa_emb, local_coords, dihedral_emb, chain_emb], dim=-1)
+        features_list = [aa_emb, local_coords, dihedral_emb, chain_emb]
+        if time is not None:
+            time_emb = self.encode_time(time)
+        else:
+            time_emb = torch.zeros((N, L, self.time_dim), device=aa_emb.device)
+
+        features_list.append(time_emb)
+
+        if pocket is not None:
+            pocket_emb = pocket.view(N,L,1).expand(-1, -1, 10)
+        else:
+            pocket_emb = torch.zeros((N, L, 10), device=aa_emb.device)
+
+        features_list.append(pocket_emb)
+        all_features = torch.cat(features_list, dim=-1)
         all_features = all_features * residue_mask[:, :, None].expand_as(all_features)
 
         # 6. Apply MLP to generate final embeddings
@@ -405,15 +459,17 @@ class PairEmbedding(nn.Module):
     max_relpos : int, optional
         Maximum relative position (default is 32).
     """
-    def __init__(self, pair_dim, num_atoms, max_aa_types=22, max_relpos=32):
+    def __init__(self, pair_dim, num_atoms, max_aa_types=22, max_relpos=32, time_dim=17):
         super(PairEmbedding, self).__init__()
 
+        self.time_dim = time_dim
         self.pair_dim = pair_dim
         self.num_atoms = num_atoms
         self.max_aa_types = max_aa_types
         self.max_relpos = max_relpos
 
         # Pair embedding, relative position embedding, and distance embedding
+        self.encode_time = FourierEncoder()
         self.aa_pair_emb = nn.Embedding(max_aa_types**2, pair_dim)
         self.relpos_emb = nn.Embedding(2 * max_relpos + 1, pair_dim)
         self.aapair_to_dist_coeff = nn.Embedding(max_aa_types**2, num_atoms**2)
@@ -425,10 +481,10 @@ class PairEmbedding(nn.Module):
         dihedral_feature_dim = self.dihedral_emb.get_dim(num_dim=2)
 
         # MLP for final pair embedding, cb_distogram=40, ca_unit_vector=3
-        all_features_dim = 3 * pair_dim + dihedral_feature_dim + 40 + 3
+        all_features_dim = 3 * pair_dim + dihedral_feature_dim + 40 + 3 + time_dim + 10
         self.mlp = nn.Sequential(nn.Linear(all_features_dim, pair_dim), nn.ReLU(), nn.Linear(pair_dim, pair_dim), nn.ReLU(), nn.Linear(pair_dim, pair_dim))
 
-    def forward(self, aa, res_nb, fragment_type, pos_atoms, residue_mask, cb_distogram, ca_unit_vectors, structure_mask=None, sequence_mask=None, generation_mask=None):
+    def forward(self, aa, res_nb, fragment_type, pos_atoms, residue_mask, cb_distogram, ca_unit_vectors, structure_mask=None, sequence_mask=None, generation_mask=None, time=None, pocket=None):
         """
         Forward pass for pairwise residue embedding.
 
@@ -469,6 +525,12 @@ class PairEmbedding(nn.Module):
         aa_pair = self.max_aa_types * aa[:, :, None] + aa[:, None, :]
         aa_pair_emb = self.aa_pair_emb(aa_pair)
 
+        if pocket is not None:
+            pocket_emb = (pocket[:,:,None]*pocket[:,None,:]).view(N, L, L,1).expand(-1, -1, -1, 10)
+        else:
+            pocket_emb = torch.zeros((N, L, L, 10), device=aa_pair.device)
+
+
         # 2. Relative position embedding
         relative_pos = res_nb[:, :, None] - res_nb[:, None, :]
         relative_pos = torch.clamp(relative_pos, min=-self.max_relpos, max=self.max_relpos) + self.max_relpos
@@ -507,7 +569,17 @@ class PairEmbedding(nn.Module):
 
 
         # 5. Combine all features
-        all_features = torch.cat([aa_pair_emb, relative_pos_emb, dist_emb, dihedral_emb, cb_distogram, ca_unit_vectors], dim=-1)
+        features_list = [aa_pair_emb, relative_pos_emb, dist_emb, dihedral_emb, cb_distogram, ca_unit_vectors]
+        if time is not None:
+            time_emb = self.encode_time(time)
+            time_emb = time_emb[:, :, None, :].expand(-1, -1, L, -1)
+        else:
+            time_emb = torch.zeros((N, L, L, self.time_dim), device=aa_pair_emb.device)
+
+        features_list.append(time_emb)
+        features_list.append(pocket_emb)
+
+        all_features = torch.cat(features_list, dim=-1)
         all_features = all_features * mask2d_pair[:, :, :, None].expand_as(all_features)
 
         # 6. Apply MLP for final pairwise embedding

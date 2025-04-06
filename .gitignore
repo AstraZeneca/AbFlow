@@ -17,13 +17,14 @@ __pycache__/
 # Ignore all unuseful files
 benchmark.py
 benchmark2.py
+plot_evol.py
 benchmarks/diffab/
 8gpu_cluster.yaml
 nohup.out
 wandb/
 data/rabd/pdb/
 data/absci_her2_zs/
-
+checkpoints/
 config/
 
 scripts/design/

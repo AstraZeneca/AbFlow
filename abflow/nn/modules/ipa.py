@@ -12,6 +12,7 @@ from einops import rearrange
 from ...rigid import Rigid
 from .pairformer import Transition
 from ...flow.rotation import rot6d_mul_vec
+from ...nn.input_embedding import FourierEncoder
 
 class InvariantPointAttention(nn.Module):
     """
@@ -26,8 +27,17 @@ class InvariantPointAttention(nn.Module):
         n_head: int = 12,
         n_query_points: int = 4,
         n_point_values: int = 8,
+        embed_time: bool = False,
+        time_dim: int = 17,
     ):
         super().__init__()
+
+        self.embed_time = embed_time
+        self.time_dim = time_dim
+        self.encode_time = FourierEncoder()
+
+        c_s_i = c_s + self.time_dim if self.embed_time else c_s
+        c_z_i = c_z + self.time_dim if self.embed_time else c_z
 
         self.n_head = n_head
         self.c_hidden = c_hidden
@@ -38,20 +48,20 @@ class InvariantPointAttention(nn.Module):
         self.w_C = (2 / (9 * n_query_points)) ** 0.5
         self.w_L = (1 / 3) ** 0.5
 
-        self.linear_q_h = nn.Linear(c_s, hc, bias=False)
-        self.linear_k_h = nn.Linear(c_s, hc, bias=False)
-        self.linear_v_h = nn.Linear(c_s, hc, bias=False)
+        self.linear_q_h = nn.Linear(c_s_i, hc, bias=False)
+        self.linear_k_h = nn.Linear(c_s_i, hc, bias=False)
+        self.linear_v_h = nn.Linear(c_s_i, hc, bias=False)
 
-        self.linear_q_hp = nn.Linear(c_s, n_head * n_query_points * 3, bias=False)
-        self.linear_k_hp = nn.Linear(c_s, n_head * n_query_points * 3, bias=False)
-        self.linear_v_hp = nn.Linear(c_s, n_head * n_point_values * 3, bias=False)
+        self.linear_q_hp = nn.Linear(c_s_i, n_head * n_query_points * 3, bias=False)
+        self.linear_k_hp = nn.Linear(c_s_i, n_head * n_query_points * 3, bias=False)
+        self.linear_v_hp = nn.Linear(c_s_i, n_head * n_point_values * 3, bias=False)
 
-        self.linear_no_bias_b = nn.Linear(c_z, n_head, bias=False)
+        self.linear_no_bias_b = nn.Linear(c_z_i, n_head, bias=False)
 
         self.gamma_h = nn.Parameter(torch.randn(1, 1, 1, n_head))
 
         self.linear_output = nn.Linear(
-            n_head * c_z + hc + n_head * n_point_values * 3 + n_head * n_point_values,
+            n_head * c_z_i + hc + n_head * n_point_values * 3 + n_head * n_point_values,
             c_s,
         )
 
@@ -61,6 +71,7 @@ class InvariantPointAttention(nn.Module):
         s_i: torch.Tensor,
         z_ij: torch.Tensor,
         rigid_i: Rigid,
+        time_i: torch.Tensor = None,
     ):
         """
         s_i: (N_batch, N_res, c_s)
@@ -73,6 +84,11 @@ class InvariantPointAttention(nn.Module):
         Translation vectors are in nanometers as the weighting factors w_L and w_C are
         computed such that all three terms contribute equally and that the resulting variance is 1.
         """
+
+        if self.embed_time and time_i is not None:
+            time_emb = self.encode_time(time_i)
+            s_i = torch.cat([s_i, time_emb], dim=-1)
+            z_ij = torch.cat([z_ij, time_emb[:, :, None, :].expand(-1, -1, s_i.size(1), -1)], dim=-1)
 
         q_h_i = rearrange(self.linear_q_h(s_i), "b i (h d) -> b i h d", h=self.n_head)
         k_h_i = rearrange(self.linear_k_h(s_i), "b i (h d) -> b i h d", h=self.n_head)
@@ -162,17 +178,18 @@ class IPAStack(nn.Module):
                 n_head=params["n_head"],
                 n_query_points=params["n_query_points"],
                 n_point_values=params["n_point_values"],
+                embed_time=True,
             )
             self.trunk[f"layer_norm_1_{b}"] = nn.LayerNorm(c_s)
             self.trunk[f"transition_{b}"] = Transition(c_s)
             self.trunk[f"layer_norm_2_{b}"] = nn.LayerNorm(c_s)
 
-    def forward(self, s_i: torch.Tensor, z_ij: torch.Tensor, r_i: Rigid):
+    def forward(self, s_i: torch.Tensor, z_ij: torch.Tensor, r_i: Rigid, time_i: torch.Tensor):
 
         for b in range(self.n_block):
 
             # IPA
-            s_i = self.trunk[f"invariant_point_attention_{b}"](s_i, z_ij, r_i)
+            s_i = self.trunk[f"invariant_point_attention_{b}"](s_i, z_ij, r_i, time_i)
             s_i = self.trunk[f"layer_norm_1_{b}"](self.dropout(s_i))
 
             # Transition

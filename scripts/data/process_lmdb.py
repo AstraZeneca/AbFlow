@@ -42,7 +42,7 @@ def process_lmdb(data_folder: str):
     """
     dataset_name = '_'.join(os.path.basename(os.path.normpath(data_folder)).split('_')[:-1])
     source_db_path = os.path.join(data_folder, "structures.lmdb")
-    output_db_path = f"/home/jovyan/abflow-datavol/data/{dataset_name}/abflow_processed_structures_{dataset_name}_v3.lmdb"
+    output_db_path = f"/home/jovyan/abflow-datavol/data/{dataset_name}/abflow_processed_structures_{dataset_name}_v4.lmdb"
     if os.path.exists(output_db_path):
         os.remove(output_db_path)
 
