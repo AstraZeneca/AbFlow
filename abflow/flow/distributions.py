@@ -62,7 +62,7 @@ class NormalEuclidean(EuclideanDistribution):
     def sample(
         self, size: torch.Size, device: torch.device, dtype: torch.dtype
     ) -> torch.Tensor:
-        samples = torch.randn(size + (self.dim,), device=device, dtype=dtype)
+        samples = torch.randn(size + self.dim, device=device, dtype=dtype)
         return samples
 
 

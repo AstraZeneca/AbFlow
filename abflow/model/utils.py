@@ -186,9 +186,23 @@ def crop_data(
     compute_pocket: bool = True,
     pocket_indices: list[int] = None,
     threshold: int = 10,
+    with_antigen: bool = True,
 ) -> dict:
     """
     Crop the data dict based on the crop mask, including special handling for pairwise features.
+
+    Args:
+        data: Input data dictionary.
+        max_crop_size: Maximum number of residues to crop.
+        antigen_crop_size: Maximum antigen crop size.
+        random_sample_sizes: Whether to randomly sample sizes within specified bounds.
+        compute_pocket: Whether to compute the pocket feature.
+        pocket_indices: Optional explicit 1-indexed indices among antigen residues for pocket computation.
+        threshold: Distance threshold for pocket computation.
+        with_antigen: If True, keep antigen related features; if False, zero out antigen-specific positions.
+
+    Returns:
+        Cropped data dictionary.
     """
     crop_mask = crop_complex(
         data["region_index"],
@@ -221,7 +235,6 @@ def crop_data(
         antigen_idx = region_to_index["antigen"]
         antigen_mask = data["region_index"] == antigen_idx
 
-
         if pocket_indices is not None:
             # User provides explicit 1-indexed indices among antigen residues.
             antigen_idx_list = torch.where(antigen_mask)[0]  # absolute indices of antigen residues
@@ -233,7 +246,7 @@ def crop_data(
                     pocket_full[pos] = True
 
         else:
-            # Compute distances: for each antigen residue, if its CA atom is within 10 Å of any antibody residue.
+            # Compute distances: for each antigen residue, if its CA atom is within a threshold of any antibody residue.
             if antigen_mask.sum() > 0:
                 antigen_coords = data["pos_heavyatom"][antigen_mask, 1]  # CA coordinates for antigen residues
                 antibody_mask = ~antigen_mask  # all non-antigen residues (assumed antibody)
@@ -251,8 +264,25 @@ def crop_data(
         # Crop the pocket mask using the same crop_mask.
         cropped_data["pocket"] = pocket_full[crop_mask]
 
-    return cropped_data
+    # If with_antigen is False, zero out antigen-specific positions in all tensors.
+    if not with_antigen:
+        antigen_val = region_to_index["antigen"]
+        # We assume that "region_index" is included in the cropped_data and reflects per-residue labels.
+        if "region_index" in cropped_data:
+            cropped_region = cropped_data["region_index"]
+            antigen_positions = (cropped_region == antigen_val)
+            for key, tensor in cropped_data.items():
+                # Only adjust tensors that have a per-residue first dimension.
+                if isinstance(tensor, torch.Tensor) and tensor.shape[0] == cropped_region.shape[0]:
+                    # For pairwise features, zero out both rows and columns.
+                    if tensor.ndim >= 2 and tensor.shape[0] == tensor.shape[1]:
+                        tensor[antigen_positions, :] = 0
+                        tensor[:, antigen_positions] = 0
+                    else:
+                        tensor[antigen_positions] = 0
+                    cropped_data[key] = tensor
 
+    return cropped_data
 
 def center_complex(
     pos_heavyatom: torch.Tensor,

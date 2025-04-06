@@ -9,7 +9,6 @@ import torch.nn as nn
 from .modules.pairformer import PairformerStack
 from .modules.features import OneHotEmbedding
 from ..utils.utils import mask_data
-from .input_embedding import ResidueEmbedding, PairEmbedding
 from ..geometry import construct_3d_basis, BBHeavyAtom
 from ..flow.rotation import rotmat_to_rot6d
 
@@ -26,6 +25,8 @@ class ConditionModule(nn.Module):
 
     def __init__(
         self,
+        residue_emb_nn: nn.Module,
+        pair_emb_nn: nn.Module,
         c_s: int,
         c_z: int,
         n_block: int,
@@ -35,14 +36,12 @@ class ConditionModule(nn.Module):
         num_res_types: int = 22,
         num_rel_pos: int = 32,
         network_params: dict = None,
-        num_atoms: int = 15,
-        max_aa_types: int = 22,
     ):
         super().__init__()
 
         # Residue and pair embeddings
-        self.residue_emb = ResidueEmbedding(c_s, num_atoms, max_aa_types=max_aa_types, max_chain_types=10)
-        self.pair_emb = PairEmbedding(c_z, num_atoms, max_aa_types=max_aa_types, max_relpos=32)
+        self.residue_emb = residue_emb_nn
+        self.pair_emb = pair_emb_nn
 
         self.n_cycle = n_cycle
         self.design_mode = design_mode
@@ -115,10 +114,9 @@ class ConditionModule(nn.Module):
                 in_place=True,
             )
 
-        if "sidechain" in self.design_mode:
-            mask_data(
-                dihedral_trigometry, 0.0, data_dict["redesign_mask"], in_place=True
-            )
+        mask_data(
+            dihedral_trigometry, 0.0, data_dict["redesign_mask"], in_place=True
+        )
 
         # concatenate the per node features
         s_i = torch.cat(
@@ -223,6 +221,7 @@ class ConditionModule(nn.Module):
         generation_mask_bar = ~batch['redesign_mask']
         frame_rotations = batch["frame_rotations"]
         frame_translations = batch["frame_translations"]
+        pocket = batch["pocket"]
 
         # Construct context masks for training structure and sequence
         context_mask = torch.logical_and(
@@ -239,7 +238,8 @@ class ConditionModule(nn.Module):
             aa=s0, res_nb=res_nb, fragment_type=fragment_type, 
             pos_atoms=pos_heavyatom, residue_mask=residue_mask, 
             structure_mask=structure_mask, sequence_mask=sequence_mask, 
-            generation_mask=batch['redesign_mask']
+            generation_mask=batch['redesign_mask'],
+            pocket = pocket,
         )
 
         # Compute pairwise residue embeddings
@@ -248,7 +248,8 @@ class ConditionModule(nn.Module):
             pos_atoms=pos_heavyatom, residue_mask=residue_mask, 
             cb_distogram=cb_distogram, ca_unit_vectors=ca_unit_vectors,
             structure_mask=structure_mask, sequence_mask=sequence_mask,
-            generation_mask=batch['redesign_mask']
+            generation_mask=batch['redesign_mask'],
+            pocket=pocket,
         )
 
         # Extract positions of C-alpha atoms and construct 3D basis

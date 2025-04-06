@@ -10,6 +10,7 @@ from ..nn.condition_module import ConditionModule
 from ..nn.distogram_head import DistogramHead
 from ..nn.denoising_module import DenoisingModule
 from ..nn.confidence_module import ConfidenceModule
+from ..nn.input_embedding import ResidueEmbedding, PairEmbedding
 
 
 class FlowPrediction(nn.Module):
@@ -25,6 +26,7 @@ class FlowPrediction(nn.Module):
         c_s: int = 384,
         c_z: int = 128,
         n_cycle: int = 4,
+        denoising_cycle: int = 2,
         n_condition_module_blocks: int = 48,
         n_denoising_module_blocks: int = 24,
         n_confidence_module_blocks: int = 4,
@@ -32,9 +34,12 @@ class FlowPrediction(nn.Module):
         full_rollout_steps: int = 500,
         label_smoothing: float = 0.0,
         max_time_clamp: float = 0.995,
+        num_atoms: int = 15,
+        max_aa_types: int = 22,
         network_params: dict = None,
         confidence: bool = False,
         is_training: bool = True,
+        binder_loss: bool = False,
     ):
         """
         Initialize the FlowPrediction network.
@@ -63,8 +68,15 @@ class FlowPrediction(nn.Module):
         self.confidence = confidence
         self.mini_rollout_steps = mini_rollout_steps
         self.full_rollout_steps = full_rollout_steps
+        self.binder_loss = binder_loss
+
+        # Residue and pair embeddings
+        self.residue_emb = ResidueEmbedding(c_s, num_atoms, max_aa_types=max_aa_types, max_chain_types=10)
+        self.pair_emb = PairEmbedding(c_z, num_atoms, max_aa_types=max_aa_types, max_relpos=32)
 
         self.condition_module = ConditionModule(
+            residue_emb_nn=self.residue_emb,
+            pair_emb_nn=self.pair_emb,
             c_s=c_s,
             c_z=c_z,
             n_block=n_condition_module_blocks,
@@ -74,6 +86,8 @@ class FlowPrediction(nn.Module):
         )
         self.distogram_head = DistogramHead(c_z=c_z)
         self.denoising_module = DenoisingModule(
+            residue_emb_nn=self.residue_emb,
+            pair_emb_nn=self.pair_emb,
             c_s=c_s,
             c_z=c_z,
             n_block=n_denoising_module_blocks,
@@ -81,6 +95,8 @@ class FlowPrediction(nn.Module):
             label_smoothing=label_smoothing,
             max_time_clamp=max_time_clamp,
             network_params=network_params,
+            binder_loss=binder_loss,
+            recycle=denoising_cycle,
         )
         if self.confidence:
             self.confidence_module = ConfidenceModule(
