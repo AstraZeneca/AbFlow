@@ -488,7 +488,6 @@ class DenoisingModule(nn.Module):
                 noise_feature_dict["dihedrals"],
                 unnoised_feature_dict["dihedrals"],
                 noise_feature_dict["time"],
-                is_wrap=False,
             )
             vf_dict["dihedral_vf"] = dihedral_vf
 
