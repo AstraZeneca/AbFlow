@@ -158,17 +158,17 @@ def get_rmsd(
 ) -> torch.Tensor:
     """
     Calculate the root mean squared error (RMSD) between predicted and true coordinates.
-    In the redesign case, we want to align the predicted and true tensors using valid positions 
+    In the redesign case, we want to align the predicted and true tensors using valid positions
     outside the redesign region, then compute the RMSD only on the redesign region.
-    
+
     If `alignment_masks` is not provided, it is computed from the provided masks.
     The caller should supply a list of masks where:
       - masks[0] is the redesign mask (True for positions in the redesign region)
       - masks[1] is the valid mask (True for positions that are valid)
-    
+
     The alignment mask is computed as:
         alignment_mask = valid_mask & (~redesign_mask)
-    
+
     :param pred_coords: List of predicted coordinates, each with shape (N_batch, N_res, 3).
     :param true_coords: List of true coordinates, each with shape (N_batch, N_res, 3).
     :param masks: List of masks to apply. Expected to include at least the redesign and valid masks.
@@ -182,21 +182,22 @@ def get_rmsd(
     # Expand masks to match the combined coordinate shape if provided.
     if masks is not None:
         masks = [
-            torch.repeat_interleave(mask, len(pred_coords), dim=-1)
-            for mask in masks
+            torch.repeat_interleave(mask, len(pred_coords), dim=-1) for mask in masks
         ]
 
     # If no alignment masks are provided, compute them using valid positions outside redesign.
     if alignment_masks is None and masks is not None and len(masks) >= 2:
         redesign_mask = masks[0]  # Expected to be the redesign region mask
-        valid_mask = masks[1]     # Expected to be the valid positions mask
+        valid_mask = masks[1]  # Expected to be the valid positions mask
         # Alignment should use only valid positions that are not part of the redesign region.
         alignment_mask = valid_mask & (~redesign_mask)
         alignment_masks = [alignment_mask]
 
     # Perform Kabsch alignment if alignment_masks are provided.
     if alignment_masks is not None:
-        pred_coord, true_coord = kabsch_alignment(pred_coord, true_coord, alignment_masks)
+        pred_coord, true_coord = kabsch_alignment(
+            pred_coord, true_coord, alignment_masks
+        )
 
     # Compute squared distances over all positions.
     sq_distance = torch.sum((pred_coord - true_coord) ** 2, dim=-1)
@@ -205,6 +206,7 @@ def get_rmsd(
     mean_sq_distance = average_data(sq_distance, masks=masks)
     rmsd = torch.sqrt(mean_sq_distance)
     return rmsd
+
 
 def get_tm_score(
     pred_coord: torch.Tensor,
@@ -239,8 +241,9 @@ def get_tm_score(
         )
 
     combined_mask = combine_masks(masks, pred_coord[:, :, 0])
-    L_target = combined_mask
+    L_target = combined_mask.sum(dim=1)
     d0 = 1.24 * torch.pow(torch.clamp(L_target.float(), min=19) - 15, 1 / 3) - 1.8
+    d0 = d0.unsqueeze(-1)
 
     dist = torch.sqrt(torch.sum((pred_coord - true_coord) ** 2, dim=-1))
     tm_score_res = 1 / (1 + (dist / d0) ** 2)
@@ -554,10 +557,11 @@ def get_lddt_de(
              torch.Tensor: Distance error for pairs of residues in each complex, shape (N_batch, N_res, N_res).
     """
 
-
     # Compute pairwise distances
     d_dist = torch.cdist(pred_coord, true_coord, p=2)  # Shape: (N_batch, N_res, N_res)
-    d_dist_gt = torch.cdist(true_coord, true_coord, p=2)  # Shape: (N_batch, N_res, N_res)
+    d_dist_gt = torch.cdist(
+        true_coord, true_coord, p=2
+    )  # Shape: (N_batch, N_res, N_res)
 
     # Compute distance error
     d_dist_pred = torch.cdist(pred_coord, pred_coord, p=2)
@@ -580,7 +584,9 @@ def get_lddt_de(
     for batch in range(N_batch):
         for i in range(N_res):
             # Find valid indices within the distance cutoff
-            valid_indices = torch.nonzero(d_dist_gt[batch, i] < distance_cutoff).squeeze(-1)
+            valid_indices = torch.nonzero(
+                d_dist_gt[batch, i] < distance_cutoff
+            ).squeeze(-1)
 
             if valid_indices.numel() == 0:
                 continue  # Skip if no valid indices
@@ -743,7 +749,7 @@ class AbFlowMetrics(nn.Module):
         super().__init__()
 
     def forward(self, pred_data_dict: dict, true_data_dict: dict):
-        
+
         metrics = {}
 
         # Sequence metrics
