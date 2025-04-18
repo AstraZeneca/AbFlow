@@ -12,7 +12,7 @@ from ..model.datamodule import AntibodyAntigenDataModule
 
 
 def setup_model(
-    config: dict, checkpoint_path: str = None, load_optimizer: bool = False, is_ema: bool = False,
+    config: dict, checkpoint_path: str = None, load_optimizer: bool = False, is_ema: bool = False, ignore_mismatched_state_dict: bool = False,
 ):
     """Setup model and datamodule instances."""
 
@@ -31,10 +31,28 @@ def setup_model(
         checkpoint = torch.load(checkpoint_path)
         model_instance = AbFlow(network=network_instance, **config["model"])
         
-        if is_ema:
-            model_instance.load_state_dict(checkpoint, strict=False)
+
+        if ignore_mismatched_state_dict:
+            # Get the current model state dictionary
+            current_state = model_instance.state_dict()
+
+            # Create a filtered checkpoint dictionary only including keys that match in shape
+            filtered_state = {}
+            for key, value in checkpoint["state_dict"].items():
+                if key in current_state:
+                    if current_state[key].shape == value.shape:
+                        filtered_state[key] = value
+                    else:
+                        print(f"Skipping key '{key}' due to shape mismatch: checkpoint {value.shape} vs. model {current_state[key].shape}")
+                else:
+                    print(f"Key '{key}' not found in the current model.")
+            model_instance.load_state_dict(filtered_state, strict=False)
+
         else:
-            model_instance.load_state_dict(checkpoint["state_dict"], strict=False)
+            if is_ema:
+                model_instance.load_state_dict(checkpoint, strict=False)
+            else:
+                model_instance.load_state_dict(checkpoint["state_dict"], strict=False)
     else:
         # start from scratch
         model_instance = AbFlow(network=network_instance, **config["model"])

@@ -194,12 +194,18 @@ class IPAStack(nn.Module):
         for b in range(self.n_block):
 
             # IPA
-            s_i = s_i + self.trunk[f"invariant_point_attention_{b}"](
-                s_i, z_ij, r_i, time_i
+            s_i = s_i + self.trunk[f"layer_norm_1_{b}"](
+                self.dropout(self.trunk[f"invariant_point_attention_{b}"](
+                    s_i, z_ij, r_i, time_i
+                    )
+                )
             )
-            s_i = self.trunk[f"layer_norm_1_{b}"](self.dropout(s_i))
 
             # Transition
-            s_i = s_i + self.trunk[f"transition_{b}"](s_i)
-            s_i = self.trunk[f"layer_norm_2_{b}"](self.dropout(s_i))
+            s_i = s_i + self.trunk[f"layer_norm_2_{b}"](
+                self.dropout(
+                    self.trunk[f"transition_{b}"](s_i)
+                )
+            )
+
         return s_i

@@ -460,6 +460,10 @@ class PairformerStack(nn.Module):
             z_ij = z_ij + self.dropout_columnwise(
                 self.trunk[f"triangle_attention_ending_node_{b}"](z_ij)
             )
+
+            # TODO: Add dropout
+            z_ij = z_ij + self.trunk[f"transition_z_{b}"](z_ij)
+
             s_i = s_i + self.trunk[f"attention_pair_bias_{b}"](s_i, None, z_ij)
             s_i = s_i + self.trunk[f"transition_s_{b}"](s_i)
 

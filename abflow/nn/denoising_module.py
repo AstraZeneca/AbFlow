@@ -8,7 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .modules.ipa import IPAStack
-from .modules.features import apply_label_smoothing
+from .modules.features import apply_label_smoothing, DihedralEmbedding
 
 from ..structure import full_atom_reconstruction, get_frames_and_dihedrals
 from ..rigid import Rigid
@@ -84,8 +84,19 @@ class DenoisingModule(nn.Module):
         self.pair_emb = pair_emb_nn
 
         self.res_noise = GaussianNoise()
-        self.res_layernorm = nn.LayerNorm(c_s)
-        self.linear_no_bias_s_prev = nn.Linear(c_s, c_z, bias=False)
+        self.res_layernorm = nn.LayerNorm(c_z)
+        self.si_layernorm = nn.LayerNorm(c_s)
+
+        self.linear_no_bias_s_prev1 = nn.Linear(c_s, c_z, bias=False)
+        self.linear_no_bias_s_prev2 = nn.Linear(c_s, c_z, bias=False)
+
+        self.layer_norm1 = nn.LayerNorm(c_s)
+        self.layer_norm2 = nn.LayerNorm(c_s)
+        self.layer_norm3 = nn.LayerNorm(c_s)
+        self.layer_norm_z = nn.LayerNorm(c_z)
+        self.dropout1 = nn.Dropout(p=0.2)
+        self.dropout2 = nn.Dropout(p=0.2)
+        self.dropout3 = nn.Dropout(p=0.2)
 
         if self.binder_loss:
             self.pair_loss = PairLossModule(bank_max_size=10, sample_size=4)
@@ -119,8 +130,9 @@ class DenoisingModule(nn.Module):
         self.design_mode = design_mode
         self.label_smoothing = label_smoothing
         self.max_time_clamp = max_time_clamp
+        self.dihedral_encode = DihedralEmbedding()
 
-        self.linear_no_bias_s = nn.Linear(20 + 5 + 1 + 6 + 3, c_s, bias=False)
+        self.linear_no_bias_s = nn.Linear(33, c_s, bias=False)
 
         self.task_heads = {}
 
@@ -157,12 +169,16 @@ class DenoisingModule(nn.Module):
             )
             self.output_proj_tran = self.get_pred_network(c_s=c_s, out_dim=3)
             self.output_proj_rot = self.get_pred_network(c_s=c_s, out_dim=6)
+
             self.task_heads["translation"] = self.output_proj_tran
             self.task_heads["rotation"] = self.output_proj_rot
+
 
         if "sidechain" in self.design_mode:
             self.output_proj_dihed = self.get_pred_network(c_s=c_s, out_dim=5)
             self.task_heads["dihedral"] = self.output_proj_dihed
+
+
 
         # Initialize diheadral flow by default so that we can sample from its prior
         self._dihedral_flow = LinearToricFlow(
@@ -170,6 +186,7 @@ class DenoisingModule(nn.Module):
             schedule_type="linear",
             schedule_params={},
         )
+
 
     def forward(
         self,
@@ -187,31 +204,144 @@ class DenoisingModule(nn.Module):
         Forward pass of the denoising module.
         """
 
-        s_i = s_i + s_inputs_i + s_trunk_i + s_prev
+        s_i = s_i + s_inputs_i + s_trunk_i #+ s_prev
+        s_i = s_i + self.res_noise(s_i)
+        s_i = self.si_layernorm(s_i)
 
-        s_prev = self.res_layernorm(s_i)
-        s_prev_scaled = self.linear_no_bias_s_prev(s_prev)
-
-        z_ij = (
-            z_ij
-            + z_inputs_ij
-            + z_trunk_ij
-            + s_prev_scaled[:, None, :, :]
-            + s_prev_scaled[:, :, None, :]
-        )
+        s_i_ln_scaled1 = self.linear_no_bias_s_prev1(s_i)
+        s_i_ln_scaled2 = self.linear_no_bias_s_prev2(s_i)
+        z_ij = z_ij + z_inputs_ij + z_trunk_ij + s_i_ln_scaled1[:, None, :, :] + s_i_ln_scaled2[:, :, None, :]
+        z_ij = self.layer_norm_z(z_ij)
 
         s_i = self.ipa_stack(s_i, z_ij, r_i, time_i)
 
         return s_i
 
-    def get_pred_network(self, c_s=64, out_dim=20, sequence=False):
+
+    # def forward(
+    #     self,
+    #     s_i: torch.Tensor,
+    #     z_ij: torch.Tensor,
+    #     r_i: Rigid,
+    #     s_inputs_i: torch.Tensor,
+    #     z_inputs_ij: torch.Tensor,
+    #     s_trunk_i: torch.Tensor,
+    #     z_trunk_ij: torch.Tensor,
+    #     s_prev: torch.Tensor,
+    #     time_i: torch.Tensor,
+    # ):
+    #     """
+    #     Forward pass of the denoising module.
+    #     """
+
+    #     s_i = s_i + self.layer_norm1(self.dropout1(s_inputs_i))
+    #     s_i = s_i + self.layer_norm2(self.dropout2(s_trunk_i))
+    #     # s_i = s_i + self.layer_norm3(s_prev)
+
+
+    #     s_i_ln_scaled1 = self.linear_no_bias_s_prev1(s_i)
+    #     s_i_ln_scaled2 = self.linear_no_bias_s_prev2(s_i)
+
+    #     z_ij = z_ij + self.layer_norm_z(self.dropout3(
+    #                                                     z_inputs_ij 
+    #                                                     + z_trunk_ij 
+    #                                                     + self.res_layernorm(s_i_ln_scaled1[:, None, :, :] + s_i_ln_scaled2[:, :, None, :])
+    #                                                 )
+    #                                     )
+
+    #     s_i = s_i + self.ipa_stack(s_i, z_ij, r_i, time_i)
+
+    #     return s_i
+
+
+
+    # def forward(
+    #     self,
+    #     s_i: torch.Tensor,
+    #     z_ij: torch.Tensor,
+    #     r_i: Rigid,
+    #     s_inputs_i: torch.Tensor,
+    #     z_inputs_ij: torch.Tensor,
+    #     s_trunk_i: torch.Tensor,
+    #     z_trunk_ij: torch.Tensor,
+    #     s_prev: torch.Tensor,
+    #     time_i: torch.Tensor,
+    # ):
+    #     """
+    #     Forward pass of the denoising module.
+    #     """
+
+    #     s_i = s_i + self.layer_norm1(s_inputs_i)
+    #     s_i = s_i + self.layer_norm2(s_trunk_i)
+    #     # s_i = s_i + self.layer_norm3(s_prev)
+
+
+    #     s_i_ln = self.res_layernorm(s_i)
+    #     s_i_ln_scaled1 = self.linear_no_bias_s_prev1(s_i_ln)
+    #     s_i_ln_scaled2 = self.linear_no_bias_s_prev2(s_i_ln)
+
+    #     z_ij = (
+    #         z_ij
+    #         + z_inputs_ij
+    #         + z_trunk_ij
+    #         + s_i_ln_scaled1[:, None, :, :]
+    #         + s_i_ln_scaled2[:, :, None, :]
+    #     )
+
+    #     z_ij = self.layer_norm_z(z_ij)
+    #     s_i = s_i + self.ipa_stack(s_i_ln, z_ij, r_i, time_i)
+
+    #     return s_i
+
+
+
+    # def forward(
+    #     self,
+    #     s_i: torch.Tensor,
+    #     z_ij: torch.Tensor,
+    #     r_i: Rigid,
+    #     s_inputs_i: torch.Tensor,
+    #     z_inputs_ij: torch.Tensor,
+    #     s_trunk_i: torch.Tensor,
+    #     z_trunk_ij: torch.Tensor,
+    #     s_prev: torch.Tensor,
+    #     time_i: torch.Tensor,
+    # ):
+    #     """
+    #     Forward pass of the denoising module.
+    #     """
+
+    #     s_i = s_i + s_inputs_i + s_trunk_i
+
+    #     s_i_ln = self.res_layernorm(s_i)
+    #     s_i_ln_scaled1 = self.linear_no_bias_s_prev1(s_i_ln)
+    #     s_i_ln_scaled2 = self.linear_no_bias_s_prev2(s_i_ln)
+
+    #     z_ij = (
+    #         z_ij
+    #         + z_inputs_ij
+    #         + z_trunk_ij
+    #         + s_i_ln_scaled1[:, None, :, :]
+    #         + s_i_ln_scaled2[:, :, None, :]
+    #     )
+
+    #     z_ij = self.layer_norm_z(z_ij)
+    #     s_i = s_i + self.ipa_stack(s_i_ln, z_ij, r_i, time_i)
+
+    #     return s_i, z_ij
+
+
+
+
+    def get_pred_network(self, c_s=64, out_dim=20, sequence=False, c_m=None):
         # Network architecture for noise prediction
+        c_m = c_m or c_s
         modules = [
-            nn.Linear(c_s, c_s),
+            nn.Linear(c_s, c_m),
             nn.ReLU(),
-            nn.Linear(c_s, c_s),
+            nn.Linear(c_m, c_m),
             nn.ReLU(),
-            nn.Linear(c_s, out_dim),
+            nn.Linear(c_m, out_dim),
         ]
 
         if sequence:
@@ -265,6 +395,11 @@ class DenoisingModule(nn.Module):
         return s_i
 
     def _add_features(self, data_dict: dict[str, torch.Tensor]):
+
+        N_batch, N_res, N_atom, _ = data_dict["pos_heavyatom"].shape
+        device = data_dict["pos_heavyatom"].device
+        dtype = data_dict["pos_heavyatom"].dtype
+
         res_type_prob = apply_label_smoothing(
             data_dict["res_type_one_hot"], self.label_smoothing, 20
         )
@@ -275,6 +410,7 @@ class DenoisingModule(nn.Module):
             ..., :2, :
         ]  # Keep first two rows [6, 240, 2, 3]
         frame_rotations_6d = frame_rotations_6d.flatten(start_dim=-2)  # [6, 240, 6]
+
 
         return {
             "res_type_prob": res_type_prob,
@@ -333,6 +469,7 @@ class DenoisingModule(nn.Module):
             size=(N_batch, N_res), device=device, dtype=dtype
         )
         dihedrals = apply_mask(dihedrals, init_dihedrals, redesign_mask)
+        sidechain_dihedrals = self.dihedral_encode(dihedrals)
 
         return {
             "time": time,
@@ -341,6 +478,7 @@ class DenoisingModule(nn.Module):
             "frame_rotations": frame_rotations,
             "frame_translations": frame_translations,
             "dihedrals": dihedrals,
+            "sidechain_dihedrals": sidechain_dihedrals,
             "dihedrals_features": dihedrals,
             "redesign_mask": redesign_mask,
             "pos_heavyatom": pos_heavyatom,
@@ -404,15 +542,19 @@ class DenoisingModule(nn.Module):
                 pos_heavyatom, noised_pos_heavyatom, redesign_mask
             )
 
-        # if "sidechain" in self.design_mode:
         noised_dihedrals = self._dihedral_flow.interpolate_path(dihedrals, time)
-        noised_dihedrals = apply_mask(dihedrals, noised_dihedrals, redesign_mask)
-
+        dihedrals = apply_mask(dihedrals, noised_dihedrals, redesign_mask)
+        
         # Dihedral as input features
         init_dihedrals = self._dihedral_flow.prior_sample(
             size=(N_batch, N_res), device=device, dtype=dtype
         )
-        dihedrals_features = apply_mask(dihedrals, init_dihedrals, redesign_mask)
+        init_dihedrals = apply_mask(dihedrals, init_dihedrals, redesign_mask)
+
+        if "sidechain" in self.design_mode:
+            sidechain_dihedrals = self.dihedral_encode(dihedrals)
+        else:
+            sidechain_dihedrals = self.dihedral_encode(init_dihedrals)
 
         return {
             "time": time,
@@ -421,12 +563,13 @@ class DenoisingModule(nn.Module):
             "pos_heavyatom": pos_heavyatom,
             "frame_rotations": frame_rotations,
             "frame_translations": frame_translations,
-            "dihedrals": noised_dihedrals,
-            "dihedrals_features": dihedrals_features,
+            "dihedrals": dihedrals,
+            "sidechain_dihedrals": sidechain_dihedrals,
+            "init_dihedrals": init_dihedrals,
             "redesign_mask": redesign_mask,
         }
 
-    def _embed(
+    def _embed2(
         self,
         noised_feature_dict: dict[str, torch.Tensor],
         true_data_dict: dict[str, torch.Tensor],
@@ -436,6 +579,7 @@ class DenoisingModule(nn.Module):
             "time": noised_feature_dict["time"],
             "res_type": noised_feature_dict["res_type"],
             "pos_heavyatom": noised_feature_dict["pos_heavyatom"],
+            "sidechain_dihedrals": noised_feature_dict["sidechain_dihedrals"], 
             "res_index": true_data_dict["res_index"],
             "chain_type": true_data_dict["chain_type"],
             "cb_distogram": true_data_dict["cb_distogram"].clone(),
@@ -446,12 +590,35 @@ class DenoisingModule(nn.Module):
 
         s_i, z_ij, _, _, _ = self._encode_batch(composed_dict)
 
+        return s_i, z_ij
+
+    def _embed(self, noised_feature_dict: dict[str, torch.Tensor]):
+
+        dihedral_trigometry = self.dihedral_encode(noised_feature_dict["dihedrals"])
+        # encode the redesign mask as one-hot vector
+        mask_onehot = F.one_hot(
+            noised_feature_dict["redesign_mask"].long(), num_classes=2
+        ).float()
+
+        # Concatenate and project the per residue features
+        s_i = torch.cat(
+            [
+                noised_feature_dict["res_type_prob"],
+                dihedral_trigometry,
+                mask_onehot,
+                noised_feature_dict["time"],
+            ],
+            dim=-1,
+        )
+
+        s_i = self.linear_no_bias_s(s_i)
+
         r_i = create_rigid(
             noised_feature_dict["frame_rotations"],
             noised_feature_dict["frame_translations"] * ANG_TO_NM_SCALE,
         )
 
-        return s_i, z_ij, r_i, noised_feature_dict["time"]
+        return s_i, r_i, noised_feature_dict["time"]
 
     def _get_vector_fields(
         self,
@@ -499,6 +666,10 @@ class DenoisingModule(nn.Module):
         pred_vf_dict: dict[str, torch.Tensor],
         d_t: float,
     ):
+        N_batch, N_res = noised_feature_dict["redesign_mask"].shape
+        device = noised_feature_dict["dihedrals"].device
+        dtype = noised_feature_dict["dihedrals"].dtype
+
         redesign_mask = noised_feature_dict["redesign_mask"]
         res_type_prob = noised_feature_dict["res_type_prob"]
         frame_rotations = noised_feature_dict["frame_rotations"]
@@ -536,6 +707,14 @@ class DenoisingModule(nn.Module):
                 dihedrals, pred_vf_dict["dihedral_vf"], d_t
             )
             dihedrals = apply_mask(dihedrals, updated_dihedrals, redesign_mask)
+        else:
+            init_dihedrals = self._dihedral_flow.prior_sample(
+                size=(N_batch, N_res), device=device, dtype=dtype
+            )
+            dihedrals = apply_mask(dihedrals, init_dihedrals, redesign_mask)
+
+        sidechain_dihedrals = self.dihedral_encode(dihedrals)
+
 
         res_type = res_type_prob.argmax(-1)
         pos_heavyatom = full_atom_reconstruction(
@@ -552,6 +731,7 @@ class DenoisingModule(nn.Module):
             "frame_rotations": frame_rotations,
             "frame_translations": frame_translations,
             "dihedrals": dihedrals,
+            "sidechain_dihedrals": sidechain_dihedrals,
             "time": time,
             "redesign_mask": redesign_mask,
         }
@@ -646,6 +826,82 @@ class DenoisingModule(nn.Module):
 
         return output_dict
 
+    # def get_loss_terms(
+    #     self,
+    #     true_data_dict: dict[str, torch.Tensor],
+    #     s_inputs_i: torch.Tensor,
+    #     z_inputs_ij: torch.Tensor,
+    #     s_trunk_i: torch.Tensor,
+    #     z_trunk_ij: torch.Tensor,
+    # ):
+    #     """
+    #     Get the loss terms for the denoising module.
+    #     """
+    #     pred_loss_update = {}
+    #     true_loss_update = {}
+    #     num_batch, num_res, _, _ = true_data_dict["pos_heavyatom"].size()
+    #     device = true_data_dict["pos_heavyatom"].device
+    #     dtype = true_data_dict["pos_heavyatom"].dtype
+    #     chain_type = true_data_dict["chain_type"]
+
+    #     # Get features to be used
+    #     true_feature_dict = self._add_features(true_data_dict)
+
+    #     time = self._sample_time(num_batch=num_batch, device=device, dtype=dtype)[
+    #         :, None, None
+    #     ].expand(num_batch, num_res, 1)
+    #     noised_feature_dict = self._noise_features(
+    #         true_data_dict, true_feature_dict, time
+    #     )
+
+    #     # Embed the features
+    #     # s_i_out, z_ij = self._embed2(noised_feature_dict, true_data_dict)
+
+    #     s_i, r_i, time_i = self._embed(noised_feature_dict)
+    #     z_ij = torch.zeros_like(z_inputs_ij)
+
+    #     for i in range(self.recycle):
+    #         if self.use_gru:
+    #             s_i = self.forward_gru(
+    #                                     s_i,
+    #                                     z_ij,
+    #                                     r_i,
+    #                                     s_inputs_i,
+    #                                     z_inputs_ij,
+    #                                     s_trunk_i,
+    #                                     z_trunk_ij,
+    #                                 )
+    #         else:
+    #             s_i, z_ij = self.forward(
+    #                                     s_i,
+    #                                     z_ij,
+    #                                     r_i,
+    #                                     s_inputs_i,
+    #                                     z_inputs_ij,
+    #                                     s_trunk_i,
+    #                                     z_trunk_ij,
+    #                                     None, #s_i_out,
+    #                                     time_i,
+    #                                 )
+
+    #     pred_vf_dict = self._predict(noised_feature_dict, s_i, r_i)
+    #     true_vf_dict = self._get_vector_fields(noised_feature_dict, true_feature_dict)
+
+    #     pred_loss_update.update(pred_vf_dict)
+    #     true_loss_update.update(true_vf_dict)
+
+    #     if self.binder_loss:
+    #         # Compute CE loss
+    #         binder_loss = self.pair_loss.compute_pair_loss(s_trunk_i, chain_type)
+    #         pred_loss_update["binder_loss"] = binder_loss
+
+    #     true_loss_update['time'] = time
+    #     return pred_loss_update, true_loss_update
+
+
+
+
+
     def get_loss_terms(
         self,
         true_data_dict: dict[str, torch.Tensor],
@@ -675,13 +931,12 @@ class DenoisingModule(nn.Module):
         )
 
         # Embed the features
-        s_i, z_ij, r_i, time_i = self._embed(noised_feature_dict, true_data_dict)
-
-        s_i_out = torch.zeros_like(s_i)
+        s_i, r_i, time_i = self._embed(noised_feature_dict)
+        s_i_out, z_ij = self._embed2(noised_feature_dict, true_data_dict)
 
         for i in range(self.recycle):
             if self.use_gru:
-                s_i_out = self.forward_gru(
+                s_i = self.forward_gru(
                     s_i,
                     z_ij,
                     r_i,
@@ -691,7 +946,7 @@ class DenoisingModule(nn.Module):
                     z_trunk_ij,
                 )
             else:
-                s_i_out = self.forward(
+                s_i = self.forward(
                     s_i,
                     z_ij,
                     r_i,
@@ -703,7 +958,7 @@ class DenoisingModule(nn.Module):
                     time_i,
                 )
 
-        pred_vf_dict = self._predict(noised_feature_dict, s_i_out, r_i)
+        pred_vf_dict = self._predict(noised_feature_dict, s_i, r_i)
         true_vf_dict = self._get_vector_fields(noised_feature_dict, true_feature_dict)
 
         pred_loss_update.update(pred_vf_dict)
@@ -714,7 +969,11 @@ class DenoisingModule(nn.Module):
             binder_loss = self.pair_loss.compute_pair_loss(s_trunk_i, chain_type)
             pred_loss_update["binder_loss"] = binder_loss
 
+        true_loss_update['time'] = time
         return pred_loss_update, true_loss_update
+
+
+
 
     def _encode_batch(self, batch):
         """
@@ -748,6 +1007,7 @@ class DenoisingModule(nn.Module):
         fragment_type = batch["chain_type"]
         cb_distogram = batch["cb_distogram"].clone()
         ca_unit_vectors = batch["ca_unit_vectors"].clone()
+        sidechain_dihedrals = batch["sidechain_dihedrals"].clone()
         residue_mask = batch["valid_mask"]
         generation_mask_bar = ~batch["redesign_mask"]
         time = batch["time"]
@@ -768,6 +1028,7 @@ class DenoisingModule(nn.Module):
             res_nb=res_nb,
             fragment_type=fragment_type,
             pos_atoms=pos_heavyatom,
+            sidechain_dihedrals=sidechain_dihedrals,
             residue_mask=residue_mask,
             structure_mask=structure_mask,
             sequence_mask=sequence_mask,
@@ -781,6 +1042,7 @@ class DenoisingModule(nn.Module):
             res_nb=res_nb,
             fragment_type=fragment_type,
             pos_atoms=pos_heavyatom,
+            sidechain_dihedrals=sidechain_dihedrals,
             residue_mask=residue_mask,
             cb_distogram=cb_distogram,
             ca_unit_vectors=ca_unit_vectors,
@@ -811,53 +1073,235 @@ class DenoisingModule(nn.Module):
         z_trunk_ij: torch.Tensor,
         num_steps: int,
         store_all: bool = False,
+        confidence: bool = False,
     ):
         """
         Rollout the denoising module, returning the predicted data dictionary with denoising trajectory.
         """
-        pred_data_dict = copy.deepcopy(true_data_dict)
+        with torch.no_grad():
+            pred_data_dict = copy.deepcopy(true_data_dict)
 
-        true_feature_dict = self._add_features(true_data_dict)
+            true_feature_dict = self._add_features(true_data_dict)
 
-        time = torch.zeros_like(s_inputs_i[:, :, :1])
-        noised_feature_dict = self._init_features(
-            true_data_dict, true_feature_dict, time
-        )
-        d_t = 1 / num_steps
+            time = torch.zeros_like(s_inputs_i[:, :, :1])
+            noised_feature_dict = self._init_features(
+                true_data_dict, true_feature_dict, time
+            )
+            d_t = 1 / num_steps
 
-        for i in range(num_steps):
-            s_i, z_ij, r_i, time_i = self._embed(noised_feature_dict, true_data_dict)
+            si_l = []
 
-            s_i_out = torch.zeros_like(s_i)
-            for i in range(self.recycle):
-                s_i_out = self.forward(
-                    s_i,
-                    z_ij,
-                    r_i,
-                    s_inputs_i,
-                    z_inputs_ij,
-                    s_trunk_i,
-                    z_trunk_ij,
-                    s_i_out,
-                    time_i,
+            for i in range(num_steps):
+                s_i, r_i, time_i = self._embed(noised_feature_dict)
+                s_i_out, z_ij = self._embed2(noised_feature_dict, true_data_dict)
+
+                for i in range(self.recycle):
+                    s_i = self.forward(
+                        s_i,
+                        z_ij,
+                        r_i,
+                        s_inputs_i,
+                        z_inputs_ij,
+                        s_trunk_i,
+                        z_trunk_ij,
+                        s_i_out,
+                        time_i,
+                    )
+                    # si_l.append(s_i)
+
+                # s_i = sum(si_l)/len(si_l)
+                # Predict vector fields directly
+                pred_vf_dict = self._predict(noised_feature_dict, s_i, r_i)
+                noised_feature_dict = self._update_features(
+                    noised_feature_dict, pred_vf_dict, d_t
                 )
 
-            # Predict vector fields directly
-            pred_vf_dict = self._predict(noised_feature_dict, s_i_out, r_i)
-            noised_feature_dict = self._update_features(
-                noised_feature_dict, pred_vf_dict, d_t
-            )
+                if store_all:
+                    pred_data_dict_update = self._reconstruct(
+                        true_data_dict, noised_feature_dict, step=i
+                    )
+                    pred_data_dict.update(pred_data_dict_update)
 
-            if store_all:
+            if not store_all:
                 pred_data_dict_update = self._reconstruct(
-                    true_data_dict, noised_feature_dict, step=i
+                    true_data_dict, noised_feature_dict
                 )
                 pred_data_dict.update(pred_data_dict_update)
 
-        if not store_all:
-            pred_data_dict_update = self._reconstruct(
-                true_data_dict, noised_feature_dict
-            )
-            pred_data_dict.update(pred_data_dict_update)
-
         return pred_data_dict
+
+
+    def rollout_train(
+        self,
+        true_data_dict: dict[str, torch.Tensor],
+        s_inputs_i: torch.Tensor,
+        z_inputs_ij: torch.Tensor,
+        s_trunk_i: torch.Tensor,
+        z_trunk_ij: torch.Tensor,
+        num_steps: int,
+        store_all: bool = False,
+        confidence: bool = False,
+    ):
+        """
+        Rollout the denoising module for `num_steps` iterations.
+
+        If `confidence` is False: build a full gradient graph on every step.
+        If `confidence` is True: only build a gradient graph on the final step,
+        freezing upstream modules (via detach/no_grad) as needed.
+
+        Returns:
+            pred_loss_update: dict of predicted-vector-field losses (final step)
+            true_loss_update: dict of true-vector-field losses (final step)
+            pred_data_dict: updated data dict with predicted coordinates
+        """
+        import copy
+
+        pred_loss_update: dict[str, torch.Tensor] = {}
+        true_loss_update: dict[str, torch.Tensor] = {}
+        pred_data_dict = copy.deepcopy(true_data_dict)
+
+        # Build the "true" feature bank
+        true_feature_dict = self._add_features(true_data_dict)
+
+        # Initialize the diffusion time and step size
+        time = torch.zeros_like(s_inputs_i[:, :, :1])
+        d_t = 1.0 / num_steps
+
+        # Placeholder for the noised features
+        noised_feature_dict = None
+
+        for i in range(num_steps):
+            # Determine whether to build a gradient graph at this step
+            build_graph = (not confidence) or (i == num_steps - 1)
+            with torch.set_grad_enabled(build_graph):
+
+                if i == 0:
+                    # supply `time` to init_features
+                    noised_feature_dict = self._init_features(
+                        true_data_dict,
+                        true_feature_dict,
+                        time,
+                    )
+                else:
+                    noised_feature_dict = self._update_features(
+                        noised_feature_dict,
+                        pred_vf_dict,
+                        d_t,
+                    )
+
+                # Embed under no_grad so embedding params stay frozen
+                with torch.no_grad():
+                    s_i, r_i, time_i = self._embed(noised_feature_dict)
+                    s_i_out, z_ij = self._embed2(
+                        noised_feature_dict,
+                        true_data_dict,
+                    )
+
+                # Recycling: always detach so only predict() gets gradients
+                for _ in range(self.recycle):
+                    s_i = self.forward(
+                        s_i.detach(),
+                        z_ij.detach(),
+                        r_i,
+                        s_inputs_i.detach(),
+                        z_inputs_ij.detach(),
+                        s_trunk_i.detach(),
+                        z_trunk_ij.detach(),
+                        s_i_out.detach(),
+                        time_i,
+                    )
+
+                # Predict the vector field (this is the only place gradients flow into predict params when confidence=True)
+                pred_vf_dict = self._predict(
+                    noised_feature_dict,
+                    s_i,
+                    r_i,
+                )
+                true_vf_dict = self._get_vector_fields(
+                    noised_feature_dict,
+                    true_feature_dict,
+                )
+
+        # Collect only the final-step losses
+        pred_loss_update.update(pred_vf_dict)
+        true_loss_update.update(true_vf_dict)
+
+        # Reconstruct coordinates for downstream confidence head
+        pred_data_dict_update = self._reconstruct(
+            true_data_dict,
+            noised_feature_dict,
+        )
+        pred_data_dict.update(pred_data_dict_update)
+
+        # Log the final time for any time-dependent losses
+        true_loss_update['time'] = noised_feature_dict['time']
+
+        return pred_loss_update, true_loss_update, pred_data_dict
+
+
+    # def rollout_train(
+    #     self,
+    #     true_data_dict: dict[str, torch.Tensor],
+    #     s_inputs_i: torch.Tensor,
+    #     z_inputs_ij: torch.Tensor,
+    #     s_trunk_i: torch.Tensor,
+    #     z_trunk_ij: torch.Tensor,
+    #     num_steps: int,
+    #     store_all: bool = False,
+    #     confidence: bool = False,
+    # ):
+    #     """
+    #     Rollout the denoising module, returning the predicted data dictionary with denoising trajectory.
+    #     """
+    #     pred_loss_update = {}
+    #     true_loss_update = {}
+
+    #     pred_data_dict = copy.deepcopy(true_data_dict)
+
+    #     true_feature_dict = self._add_features(true_data_dict)
+
+    #     time = torch.zeros_like(s_inputs_i[:, :, :1])
+
+    #     d_t = 1 / num_steps
+
+
+    #     for i in range(num_steps):  
+
+    #         with torch.set_grad_enabled(i == num_steps - 1):
+
+    #             if i == 0:
+    #                 noised_feature_dict = self._init_features(true_data_dict, true_feature_dict, time)
+    #             else:
+    #                 noised_feature_dict = self._update_features(noised_feature_dict, pred_vf_dict, d_t)
+
+    #             with torch.no_grad():
+    #                 s_i, r_i, time_i = self._embed(noised_feature_dict)
+    #                 s_i_out, z_ij = self._embed2(noised_feature_dict, true_data_dict)
+
+    #             for _ in range(self.recycle):
+    #                 s_i = self.forward(
+    #                     s_i.detach(),
+    #                     z_ij.detach(),
+    #                     r_i,
+    #                     s_inputs_i.detach(),
+    #                     z_inputs_ij.detach(),
+    #                     s_trunk_i.detach(),
+    #                     z_trunk_ij.detach(),
+    #                     s_i_out.detach(),
+    #                     time_i,
+    #                 )
+
+    #             # Predict vector fields directly
+    #             pred_vf_dict = self._predict(noised_feature_dict, s_i, r_i)
+    #             true_vf_dict = self._get_vector_fields(noised_feature_dict, true_feature_dict)
+
+    #     pred_loss_update.update(pred_vf_dict)
+    #     true_loss_update.update(true_vf_dict)
+
+    #     pred_data_dict_update = self._reconstruct(true_data_dict, noised_feature_dict)
+    #     pred_data_dict.update(pred_data_dict_update)
+
+    #     true_loss_update['time'] = noised_feature_dict['time']
+
+
+    #     return pred_loss_update, true_loss_update, pred_data_dict
