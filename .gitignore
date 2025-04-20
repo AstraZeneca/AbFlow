@@ -25,15 +25,18 @@ wandb/
 data/rabd/pdb/
 data/absci_her2_zs/
 checkpoints/
-config/
+config/test.yaml
 
 scripts/design/
 scripts/test/
 scripts/circe/
 scripts/hpc/
+scripts/analysis/
 
 results/
 
 notebooks/
 evaluation/
 pymol/
+benchmarks/
+data/
