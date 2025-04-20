@@ -39,3 +39,6 @@ heatmaps/
 notebooks/
 evaluation/
 pymol/
+
+data/
+benchmarks/
