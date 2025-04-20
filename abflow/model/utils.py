@@ -63,7 +63,7 @@ def crop_complex(
 ) -> torch.Tensor:
     """
     Context selection with minimum guarantees and efficient sampling.
-    
+
     Args:
         region_index: Array of indices representing different regions in the structure.
         redesign_mask: Boolean array indicating which residues are part of the redesign.
@@ -78,12 +78,12 @@ def crop_complex(
         torch.Tensor: Boolean mask array with same shape as `region_index`, indicating selected residues
                       that contribute to the context (True) or are excluded (False).
     """
-    # TODO: If we are re-designing only one loop, and if it does not exist in a sample, cropping might fail. 
+    # TODO: If we are re-designing only one loop, and if it does not exist in a sample, cropping might fail.
     # When we can not find the region of interest (redesign_mask is all False), we should randomly select an existing region in the sample to redesign.
 
     redesign_mask_c = copy.deepcopy(redesign_mask)
     antibody_non_cdr_max = max_crop_size - antigen_crop_max
-    
+
     # Get region indices from global mapping
     antigen_idx = region_to_index["antigen"]
     device = region_index.device
@@ -101,26 +101,30 @@ def crop_complex(
     if selected_count >= max_crop_size or max_crop_size == 0:
         return new_mask
 
-    # 1. Select antigen context (epitope) 
+    # 1. Select antigen context (epitope)
     antigen_coords = pos_heavyatom[antigen_mask, 1]  # CA atoms
     antibody_coords = pos_heavyatom[antibody_non_redesign_mask, 1]
     design_coords = pos_heavyatom[redesign_mask_c, 1]
 
-    # Calculate antigen distances to redesign_mask regions to find the correct pocket 
+    # Calculate antigen distances to redesign_mask regions to find the correct pocket
     # TODO: Consider the possibility of data leakage, but this is only used for extracting the pocket
     if antigen_coords.shape[0] > 0 and antibody_coords.shape[0] > 0:
         dists = torch.cdist(antigen_coords, design_coords).min(dim=1).values
     else:
-        dists = torch.full((antigen_coords.shape[0],), float('inf'), device=device)
+        dists = torch.full((antigen_coords.shape[0],), float("inf"), device=device)
 
     # Determine antigen selection parameters
     available_antigens = antigen_mask.sum().item()
-    max_antigen = min(antigen_crop_max, available_antigens, max_crop_size - selected_count)
+    max_antigen = min(
+        antigen_crop_max, available_antigens, max_crop_size - selected_count
+    )
     min_antigen = min(antigen_crop_min, max_antigen) if available_antigens > 0 else 0
-    
+
     # Sample actual antigen size
     if random_sample_sizes and (max_antigen > min_antigen):
-        actual_antigen = torch.randint(min_antigen, max_antigen + 1, (), device=device).item()
+        actual_antigen = torch.randint(
+            min_antigen, max_antigen + 1, (), device=device
+        ).item()
     else:
         actual_antigen = max_antigen
 
@@ -131,7 +135,7 @@ def crop_complex(
         new_mask[antigen_indices] = True
         selected_count += actual_antigen
 
-    # 2. Select antibody non-CDR context 
+    # 2. Select antibody non-CDR context
     remaining_budget = max_crop_size - selected_count
     if remaining_budget <= 0:
         return new_mask
@@ -147,11 +151,15 @@ def crop_complex(
     # Determine antibody selection parameters
     available_antibody = antibody_non_redesign_mask.sum().item()
     max_antibody = min(antibody_non_cdr_max, available_antibody, remaining_budget)
-    min_antibody = min(antibody_non_cdr_min, max_antibody) if available_antibody > 0 else 0
-    
+    min_antibody = (
+        min(antibody_non_cdr_min, max_antibody) if available_antibody > 0 else 0
+    )
+
     # Sample actual antibody size
     if random_sample_sizes and (max_antibody > min_antibody):
-        actual_antibody = torch.randint(min_antibody, max_antibody + 1, (), device=device).item()
+        actual_antibody = torch.randint(
+            min_antibody, max_antibody + 1, (), device=device
+        ).item()
     else:
         actual_antibody = max_antibody
 
@@ -167,7 +175,7 @@ def crop_complex(
     if remaining > 0:
         other_mask = ~antigen_mask & ~antibody_non_redesign_mask & ~new_mask
         other_coords = pos_heavyatom[other_mask, 1]
-        
+
         if other_coords.shape[0] > 0:
             # Calculate distances to already selected context
             context_coords = pos_heavyatom[new_mask, 1]
@@ -237,7 +245,9 @@ def crop_data(
 
         if pocket_indices is not None:
             # User provides explicit 1-indexed indices among antigen residues.
-            antigen_idx_list = torch.where(antigen_mask)[0]  # absolute indices of antigen residues
+            antigen_idx_list = torch.where(antigen_mask)[
+                0
+            ]  # absolute indices of antigen residues
             # Ensure that the user indices are valid given the number of antigen residues.
             for idx in pocket_indices:
                 antigen_relative_idx = idx - 1  # convert from 1-indexed to 0-indexed
@@ -248,16 +258,24 @@ def crop_data(
         else:
             # Compute distances: for each antigen residue, if its CA atom is within a threshold of any antibody residue.
             if antigen_mask.sum() > 0:
-                antigen_coords = data["pos_heavyatom"][antigen_mask, 1]  # CA coordinates for antigen residues
-                antibody_mask = ~antigen_mask  # all non-antigen residues (assumed antibody)
+                antigen_coords = data["pos_heavyatom"][
+                    antigen_mask, 1
+                ]  # CA coordinates for antigen residues
+                antibody_mask = (
+                    ~antigen_mask
+                )  # all non-antigen residues (assumed antibody)
                 if antibody_mask.sum() > 0:
                     antibody_coords = data["pos_heavyatom"][antibody_mask, 1]
                     dists = torch.cdist(antigen_coords, antibody_coords)
                     min_dists = dists.min(dim=1).values
                     threshold_instance = random.randint(4, threshold)
-                    pocket_vals = min_dists < threshold_instance  # e.g., threshold at 10 Å
+                    pocket_vals = (
+                        min_dists < threshold_instance
+                    )  # e.g., threshold at 10 Å
                 else:
-                    pocket_vals = torch.zeros((antigen_coords.shape[0],), dtype=torch.bool, device=device)
+                    pocket_vals = torch.zeros(
+                        (antigen_coords.shape[0],), dtype=torch.bool, device=device
+                    )
                 antigen_indices = torch.where(antigen_mask)[0]
                 pocket_full[antigen_indices] = pocket_vals
 
@@ -270,10 +288,13 @@ def crop_data(
         # We assume that "region_index" is included in the cropped_data and reflects per-residue labels.
         if "region_index" in cropped_data:
             cropped_region = cropped_data["region_index"]
-            antigen_positions = (cropped_region == antigen_val)
+            antigen_positions = cropped_region == antigen_val
             for key, tensor in cropped_data.items():
                 # Only adjust tensors that have a per-residue first dimension.
-                if isinstance(tensor, torch.Tensor) and tensor.shape[0] == cropped_region.shape[0]:
+                if (
+                    isinstance(tensor, torch.Tensor)
+                    and tensor.shape[0] == cropped_region.shape[0]
+                ):
                     # For pairwise features, zero out both rows and columns.
                     if tensor.ndim >= 2 and tensor.shape[0] == tensor.shape[1]:
                         tensor[antigen_positions, :] = 0
@@ -283,6 +304,7 @@ def crop_data(
                     cropped_data[key] = tensor
 
     return cropped_data
+
 
 def center_complex(
     pos_heavyatom: torch.Tensor,
@@ -338,7 +360,15 @@ def pad_data(data: dict, max_res: int) -> dict:
     padded_data["valid_mask"] = valid_mask
 
     for key, value in data.items():
-        if key in ["pos_scale", "H1_seq", "L1_seq", "H2_seq", "L2_seq", "H3_seq", "L3_seq"]:
+        if key in [
+            "pos_scale",
+            "H1_seq",
+            "L1_seq",
+            "H2_seq",
+            "L2_seq",
+            "H3_seq",
+            "L3_seq",
+        ]:
             continue
 
         if isinstance(value, torch.Tensor):
@@ -368,7 +398,9 @@ def pad_data(data: dict, max_res: int) -> dict:
     return padded_data
 
 
-def adjust_mask_regions(mask: torch.Tensor, delta: int, enlarge: bool = True) -> torch.Tensor:
+def adjust_mask_regions(
+    mask: torch.Tensor, delta: int, enlarge: bool = True
+) -> torch.Tensor:
     """
 
     Parameters:
@@ -376,7 +408,7 @@ def adjust_mask_regions(mask: torch.Tensor, delta: int, enlarge: bool = True) ->
                            and L is the sequence length.
       delta (int): The number of positions to enlarge or shrink from each side.
       enlarge (bool): Whether to enlarge (True) or shrink (False) the regions.
-    
+
     Returns:
       torch.Tensor: The adjusted mask of shape (B, L) as a boolean tensor.
     """
@@ -384,12 +416,61 @@ def adjust_mask_regions(mask: torch.Tensor, delta: int, enlarge: bool = True) ->
     kernel_size = 2 * delta + 1
 
     if enlarge:
-        dilated = F.max_pool1d(mask_float, kernel_size=kernel_size, stride=1, padding=delta)
+        dilated = F.max_pool1d(
+            mask_float, kernel_size=kernel_size, stride=1, padding=delta
+        )
         adjusted_mask = dilated.squeeze(1).bool()
     else:
         weight = torch.ones((1, 1, kernel_size), device=mask.device)
-        window_sum = F.conv1d(mask_float, weight=weight, bias=None, stride=1, padding=delta)
+        window_sum = F.conv1d(
+            mask_float, weight=weight, bias=None, stride=1, padding=delta
+        )
         eroded = (window_sum == float(kernel_size)).float()
         adjusted_mask = eroded.squeeze(1).bool()
 
     return adjusted_mask
+
+
+def mask_out_data(data: dict, mask: torch.Tensor) -> dict:
+    """
+    Zero out data outside of a boolean mask, similar to padding logic.
+    Mannually zero out the masked regions in the data dictionary.
+
+    Args:
+        data (dict): Dictionary of tensors or other values.
+        mask (torch.Tensor): Boolean tensor of shape (N,) indicating valid residues.
+
+    Returns:
+        dict: Dictionary with values masked (zeroed out) accordingly.
+    """
+    masked_data = {}
+
+    mask_names = [
+        "res_type",
+        "pos_heavyatom",
+        "res_type_one_hot",
+        "frame_rotations",
+        "frame_translations",
+        "dihedrals",
+        "dihedral_trigometry",
+        "cb_distogram",
+        "ca_unit_vectors",
+    ]
+
+    for key, value in data.items():
+        if key in mask_names:
+            if value.ndim >= 2 and value.shape[0] == value.shape[1]:
+                value = value.clone()
+                value[mask, :] = torch.tensor(0, dtype=value.dtype, device=value.device)
+                value[:, mask] = torch.tensor(0, dtype=value.dtype, device=value.device)
+                masked_data[key] = value
+            elif value.shape[0] == mask.shape[0]:
+                value = value.clone()
+                value[mask] = torch.tensor(0, dtype=value.dtype, device=value.device)
+                masked_data[key] = value
+            else:
+                raise ValueError(
+                    f"Unexpected tensor shape for key '{key}': {value.shape}. Expected shape (N,) or (N, N)."
+                )
+
+    return masked_data
