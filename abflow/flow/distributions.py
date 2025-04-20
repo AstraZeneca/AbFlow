@@ -273,7 +273,13 @@ class UniformToric(ToricDistribution):
     def sample(
         self, size: torch.Size, device: torch.device, dtype: torch.dtype
     ) -> torch.Tensor:
+        """
+        Sample from the uniform distribution on the toric space between -pi and pi.
+        """
 
-        x_0 = torch.rand(size + (self.dim,), device=device, dtype=dtype) * 2 * math.pi
-        
+        x_0 = (
+            torch.rand(size + (self.dim,), device=device, dtype=dtype) * 2 * math.pi
+            - math.pi
+        )
+
         return x_0

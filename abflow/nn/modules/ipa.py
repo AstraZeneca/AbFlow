@@ -1,4 +1,4 @@
-"""Implementation of Invariant Point Attention (IPA) module from AlphaFold 2. 
+"""Implementation of Invariant Point Attention (IPA) module from AlphaFold 2.
 
 paper: Highly accurate protein structure prediction with AlphaFold
 link: https://www.nature.com/articles/s41586-021-03819-2
@@ -13,6 +13,7 @@ from ...rigid import Rigid
 from .pairformer import Transition
 from ...flow.rotation import rot6d_mul_vec
 from ...nn.input_embedding import FourierEncoder
+
 
 class InvariantPointAttention(nn.Module):
     """
@@ -65,7 +66,6 @@ class InvariantPointAttention(nn.Module):
             c_s,
         )
 
-
     def forward(
         self,
         s_i: torch.Tensor,
@@ -88,7 +88,9 @@ class InvariantPointAttention(nn.Module):
         if self.embed_time and time_i is not None:
             time_emb = self.encode_time(time_i)
             s_i = torch.cat([s_i, time_emb], dim=-1)
-            z_ij = torch.cat([z_ij, time_emb[:, :, None, :].expand(-1, -1, s_i.size(1), -1)], dim=-1)
+            z_ij = torch.cat(
+                [z_ij, time_emb[:, :, None, :].expand(-1, -1, s_i.size(1), -1)], dim=-1
+            )
 
         q_h_i = rearrange(self.linear_q_h(s_i), "b i (h d) -> b i h d", h=self.n_head)
         k_h_i = rearrange(self.linear_k_h(s_i), "b i (h d) -> b i h d", h=self.n_head)
@@ -151,6 +153,7 @@ class InvariantPointAttention(nn.Module):
 
         return s_hat_i
 
+
 class IPAStack(nn.Module):
     """
     Invariant Point Attention (IPA) stack.
@@ -184,15 +187,25 @@ class IPAStack(nn.Module):
             self.trunk[f"transition_{b}"] = Transition(c_s)
             self.trunk[f"layer_norm_2_{b}"] = nn.LayerNorm(c_s)
 
-    def forward(self, s_i: torch.Tensor, z_ij: torch.Tensor, r_i: Rigid, time_i: torch.Tensor):
+    def forward(
+        self, s_i: torch.Tensor, z_ij: torch.Tensor, r_i: Rigid, time_i: torch.Tensor
+    ):
 
         for b in range(self.n_block):
 
             # IPA
-            s_i = self.trunk[f"invariant_point_attention_{b}"](s_i, z_ij, r_i, time_i)
-            s_i = self.trunk[f"layer_norm_1_{b}"](self.dropout(s_i))
+            s_i = s_i + self.trunk[f"layer_norm_1_{b}"](
+                self.dropout(self.trunk[f"invariant_point_attention_{b}"](
+                    s_i, z_ij, r_i, time_i
+                    )
+                )
+            )
 
             # Transition
-            s_i = s_i + self.trunk[f"transition_{b}"](s_i)
-            s_i = self.trunk[f"layer_norm_2_{b}"](self.dropout(s_i))
-        return s_i 
+            s_i = s_i + self.trunk[f"layer_norm_2_{b}"](
+                self.dropout(
+                    self.trunk[f"transition_{b}"](s_i)
+                )
+            )
+
+        return s_i

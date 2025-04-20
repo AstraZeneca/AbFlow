@@ -19,7 +19,7 @@ Example usage of a concrete ManifoldFlow class:
     >>> if neural network predicts v_t_hat:
         >>> v_t_hat = neural_network(x_t)
     >>> loss = loss_fn(v_t, v_t_hat)
-    
+
 
     >>> # Inference
     >>> x_0 = flow.prior_sample(size=(1, 10), device=device)
@@ -44,7 +44,17 @@ from .distributions import (
     UniformSO3,
     UniformToric,
 )
-from .rotation import rotvecs_mul, rotvec_inv, rotvec_to_rotmat, rotmat_to_rotvec, rotmat_to_rot6d, rotvec_to_rotmat, rotmat_inv, rotmats_mul
+from .rotation import (
+    rotvecs_mul,
+    rotvec_inv,
+    rotvec_to_rotmat,
+    rotmat_to_rotvec,
+    rotmat_to_rot6d,
+    rotvec_to_rotmat,
+    rotmat_inv,
+    rotmats_mul,
+)
+
 
 class ManifoldFlow(ABC):
     """
@@ -155,10 +165,10 @@ class EuclideanFlow(ManifoldFlow, ABC):
     def nn_to_manifold(self, x_hat: torch.Tensor):
         return x_hat
 
-
     # def nn_to_manifold(self, x_hat: torch.Tensor) -> torch.Tensor:
     #     """Clamp translation vectors"""
     #     return torch.clamp(x_hat, -100.0, 100.0)
+
 
 class OptimalTransportEuclideanFlow(EuclideanFlow):
     """
@@ -206,7 +216,6 @@ class SimplexFlow(ManifoldFlow, ABC):
         """
 
         return torch.softmax(x_hat / temp, dim=-1)
-
 
     # def get_cond_vfs(
     #     self, x_t: torch.Tensor, x_1: torch.Tensor, t: torch.Tensor
@@ -261,14 +270,14 @@ class LinearSimplexFlow(SimplexFlow):
     def tangent_project(self, v: torch.Tensor) -> torch.Tensor:
         """
         Project a vector v onto the tangent space of the simplex.
-        
+
         The tangent space of the simplex consists of all vectors whose components sum to zero.
-        This projection is achieved by subtracting the mean of v from each component, which 
+        This projection is achieved by subtracting the mean of v from each component, which
         guarantees that the resulting vector has a zero sum.
-        
+
         Args:
             v (torch.Tensor): The vector to be projected.
-        
+
         Returns:
             torch.Tensor: The projected vector with components that sum to zero.
         """
@@ -293,7 +302,6 @@ class SO3Flow(ManifoldFlow, ABC):
         return x_hat / (torch.norm(x_hat, dim=-1, keepdim=True) + 1e-8)
 
 
-
 class LinearSO3Flow(SO3Flow):
     def __init__(self, schedule_type="linear", schedule_params=None, eps=1e-6):
         super().__init__()
@@ -306,8 +314,10 @@ class LinearSO3Flow(SO3Flow):
         # Size should be (batch, seq_len)
         rot_mat = self._prior.sample(size=size, device=device, dtype=dtype)
         return rotmat_to_rot6d(rot_mat)  # Converts [..., 3, 3] -> [..., 6]
-        
-    def log_map(self, x_base: torch.Tensor, x_target: torch.Tensor, is_6d: bool=True) -> torch.Tensor:
+
+    def log_map(
+        self, x_base: torch.Tensor, x_target: torch.Tensor, is_6d: bool = True
+    ) -> torch.Tensor:
         """Direct vector difference in 6D space"""
         # 6D rotation
         if is_6d:
@@ -319,7 +329,9 @@ class LinearSO3Flow(SO3Flow):
             v = rotmat_to_rotvec(R_rel)
             return v
 
-    def exp_map(self, x_base: torch.Tensor, v: torch.Tensor, is_6d: bool=True) -> torch.Tensor:
+    def exp_map(
+        self, x_base: torch.Tensor, v: torch.Tensor, is_6d: bool = True
+    ) -> torch.Tensor:
         """Linear update in 6D space"""
         # 6D rotation
         if is_6d:
@@ -329,24 +341,22 @@ class LinearSO3Flow(SO3Flow):
             x_target = rotmats_mul(x_base, rotvec_to_rotmat(v))
             return x_target
 
-
     def nn_to_manifold(self, x_hat: torch.Tensor) -> torch.Tensor:
         """Project raw network output to valid 6D rotation representation.
         Args:
             x_hat: Raw network output [..., 6]
-            
+
         Returns:
             Valid 6D rotation representation [..., 6]
         """
-        a1 = x_hat[..., :3]  
-        a2 = x_hat[..., 3:]  
-        
-        e1 = F.normalize(a1, dim=-1)        
-        u2 = a2 - (e1 * a2).sum(dim=-1, keepdim=True) * e1  
-        e2 = F.normalize(u2, dim=-1)  
-        
-        return torch.cat([e1, e2], dim=-1) 
+        a1 = x_hat[..., :3]
+        a2 = x_hat[..., 3:]
 
+        e1 = F.normalize(a1, dim=-1)
+        u2 = a2 - (e1 * a2).sum(dim=-1, keepdim=True) * e1
+        e2 = F.normalize(u2, dim=-1)
+
+        return torch.cat([e1, e2], dim=-1)
 
     def interpolate_path(self, x_1: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """
@@ -359,22 +369,18 @@ class LinearSO3Flow(SO3Flow):
         """
         # x_1 shape: [6, 240, 6]
         # t shape: [6, 240, 1]
-        
+
         # Sample prior with matching spatial dimensions
         x_0 = self.prior_sample(x_1.shape[:-1], x_1.device, x_1.dtype)  # [6, 240, 6]
         # Get schedule parameters
         _, beta_t, _ = self._schedule(t)  # beta_t shape [6, 240, 1]
-        
+
         # Linear interpolation in 6D space
         return self.exp_map(x_0, beta_t * self.log_map(x_0, x_1))
-
 
     # def nn_to_manifold(self, x_hat: torch.Tensor):
     #     """No conversion needed - network outputs 6D directly"""
     #     return x_hat
-
-
-
 
 
 class ToricFlow(ManifoldFlow, ABC):
@@ -426,7 +432,7 @@ class LinearToricFlow(ToricFlow):
                                    = wrap_angles(x_target - x_base)
         """
 
-        return x_target - x_base
+        return self.wrap_angle(x_target - x_base)
 
     def exp_map(self, x_base: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
         """
@@ -436,37 +442,4 @@ class LinearToricFlow(ToricFlow):
             exp_{x_base}(v) = wrap_angles(x_base + v)
         """
 
-        return x_base + v
-
-    def get_cond_vfs(
-        self, x_t: torch.Tensor, x_1: torch.Tensor, t: torch.Tensor, is_wrap: bool = True
-    ) -> torch.Tensor:
-        """
-        Conditional vector fields (defined directly on manifold or on transformed space)
-        at time t.
-
-        :param x_t: The current point on the manifold.
-        :param x_1: The ending point.
-        :param t: The interpolation time.
-        :return: The conditional vector field at time t.
-        """
-        _, _, speed_t = self._schedule(t)
-        v_t = speed_t * self.log_map(x_t, x_1)
-
-        return self.wrap_angle(v_t) if is_wrap else v_t
-
-
-    def interpolate_path(self, x_1: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
-        """
-        Interpolate between prior x_0 and true x_1 on the manifold over the time
-        interval [0, 1].
-
-        :param x_1: The ending point.
-        :param t: The interpolation time.
-        :return: The interpolated point.
-        """
-        x_0 = self.prior_sample(x_1.size()[:2], x_1.device, x_1.dtype)
-        alpha_t, beta_t, _ = self._schedule(t)
-        x_t = self.exp_map(x_0, beta_t * self.log_map(x_0, x_1))
-
-        return torch.remainder(x_t, 2 * torch.pi)
+        return self.wrap_angle(x_base + v)

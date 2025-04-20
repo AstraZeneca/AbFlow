@@ -25,7 +25,9 @@ wandb/
 data/rabd/pdb/
 data/absci_her2_zs/
 checkpoints/
-config/test.yaml
+config/
+abflow/model/loss_old.py
+abflow/model/loss_temp.py
 
 scripts/design/
 scripts/test/
@@ -34,7 +36,7 @@ scripts/hpc/
 scripts/analysis/
 
 results/
-
+heatmaps/
 notebooks/
 evaluation/
 pymol/

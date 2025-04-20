@@ -251,84 +251,70 @@ def get_tm_score(
     return tm_score
 
 
+
+
 def get_bb_clash_violation(
     N_coords: torch.Tensor,
     CA_coords: torch.Tensor,
     C_coords: torch.Tensor,
-    masks_dim_1: List[torch.Tensor] = None,
-    masks_dim_2: List[torch.Tensor] = None,
+    masks_dim_1: list = None,
+    masks_dim_2: list = None,
     tolerance: float = 1.5,
-) -> torch.Tensor:
+) -> tuple:
     """
-    Calculates loss penalising steric clashes, calculated using Van Der Waals radii.
-    Specifically any non-covalently bonded atoms whose Van der Waals radii overlap
-    are deemed a clash. Implemented exactly the same way as in AlphaFold2
-    (https://www.nature.com/articles/s41586-021-03819-2).
-
-    Be aware the mask region to calculate bond angle has to be continuous (assuming all residues are covalently bonded in order).
-    This implementation is adapted from loopgen (https://arxiv.org/abs/2310.07051).
-
-    :param N_coords: Predicted N coordinates, shape (N_batch, N_res, 3).
-    :param CA_coords: Predicted CA coordinates, shape (N_batch, N_res, 3).
-    :param C_coords: Predicted C coordinates, shape (N_batch, N_res, 3).
-    :param tolerance: Tolerance for clash detection. Defaults to 1.5.
-    :param masks_dim_1: List of masks to apply to the first residue dimension, each shape (N_batch, N_res).
-    :param masks_dim_2: List of masks to apply to the second residue dimension, each shape (N_batch, N_res).
-
-    :return: Backbone clash loss for each complex, shape (N_batch,).
-    :return: Percentage of residue with backbone clash violation for each complex, shape (N_batch,).
+    Calculates backbone clash violations using out-of-place operations only.
     """
+    # Literature distances
+    N_N_lit = 2.0 * AtomVanDerWaalRadii["N"].value
+    C_C_lit = 2.0 * AtomVanDerWaalRadii["C"].value
+    C_N_lit = AtomVanDerWaalRadii["C"].value + AtomVanDerWaalRadii["N"].value
 
-    N_N_lit_dist = 2.0 * AtomVanDerWaalRadii["N"].value
-    C_C_lit_dist = 2.0 * AtomVanDerWaalRadii["C"].value
-    C_N_lit_dist = AtomVanDerWaalRadii["C"].value + AtomVanDerWaalRadii["N"].value
+    # Pairwise distances
+    N_dist    = torch.cdist(N_coords,    N_coords,    p=2)
+    CA_dist   = torch.cdist(CA_coords,   CA_coords,   p=2)
+    C_dist    = torch.cdist(C_coords,    C_coords,    p=2)
+    N_CA_dist = torch.cdist(N_coords,    CA_coords,   p=2)
+    N_C_dist  = torch.cdist(N_coords,    C_coords.roll(1, dims=-2), p=2)
+    CA_C_dist = torch.cdist(CA_coords,   C_coords,    p=2)
 
-    N_dist = torch.cdist(N_coords, N_coords, p=2)
-    CA_dist = torch.cdist(CA_coords, CA_coords, p=2)
-    C_dist = torch.cdist(C_coords, C_coords, p=2)
-    N_CA_dist = torch.cdist(N_coords, CA_coords, p=2)
-    N_C_dist = torch.cdist(N_coords, C_coords.roll(1, dims=-2), p=2)
-    CA_C_dist = torch.cdist(CA_coords, C_coords, p=2)
+    # Replace first row/col without in-place
+    mask_row = torch.zeros_like(N_C_dist, dtype=torch.bool)
+    mask_row[:, 0, :] = True
+    mask_col = torch.zeros_like(N_C_dist, dtype=torch.bool)
+    mask_col[:, :, 0] = True
+    bound_mask = mask_row | mask_col
+    N_C_dist = torch.where(bound_mask, C_N_lit, N_C_dist)
 
-    # Cut the first row/col in N_C_dist
-    N_C_dist[:, 0] = C_N_lit_dist
-    N_C_dist[:, :, 0] = C_N_lit_dist
+    # Mask diagonal distances out-of-place
+    diag = torch.eye(N_dist.size(1), device=N_dist.device, dtype=torch.bool)
+    diag = diag.unsqueeze(0).expand_as(N_dist)
+    N_dist    = mask_data(N_dist,    1e9, diag, in_place=False)
+    CA_dist   = mask_data(CA_dist,   1e9, diag, in_place=False)
+    C_dist    = mask_data(C_dist,    1e9, diag, in_place=False)
+    N_CA_dist = mask_data(N_CA_dist, 1e9, diag, in_place=False)
+    N_C_dist  = mask_data(N_C_dist,  1e9, diag, in_place=False)
+    CA_C_dist = mask_data(CA_C_dist, 1e9, diag, in_place=False)
 
-    diag_mask_matrix = (
-        torch.eye(N_dist.shape[1], device=N_dist.device).expand_as(N_dist).bool()
-    )
-    N_dist = mask_data(N_dist, 1e9, diag_mask_matrix, in_place=True)
-    CA_dist = mask_data(CA_dist, 1e9, diag_mask_matrix, in_place=True)
-    C_dist = mask_data(C_dist, 1e9, diag_mask_matrix, in_place=True)
-    N_CA_dist = mask_data(N_CA_dist, 1e9, diag_mask_matrix, in_place=True)
-    N_C_dist = mask_data(N_C_dist, 1e9, diag_mask_matrix, in_place=True)
-    CA_C_dist = mask_data(CA_C_dist, 1e9, diag_mask_matrix, in_place=True)
+    # Compute clashing losses
+    N_clash    = torch.clamp(N_N_lit - tolerance - N_dist,    min=0.0) / 2
+    CA_clash   = torch.clamp(C_C_lit - tolerance - CA_dist,   min=0.0) / 2
+    C_clash    = torch.clamp(C_C_lit - tolerance - C_dist,    min=0.0) / 2
+    N_CA_clash = torch.clamp(C_N_lit - tolerance - N_CA_dist, min=0.0)
+    N_C_clash  = torch.clamp(C_N_lit - tolerance - N_C_dist,  min=0.0)
+    CA_C_clash = torch.clamp(C_C_lit - tolerance - CA_C_dist, min=0.0)
 
-    N_clash_loss = torch.clamp(N_N_lit_dist - tolerance - N_dist, min=0.0) / 2
-    CA_clash_loss = torch.clamp(C_C_lit_dist - tolerance - CA_dist, min=0.0) / 2
-    C_clash_loss = torch.clamp(C_C_lit_dist - tolerance - C_dist, min=0.0) / 2
-    N_CA_clash_loss = torch.clamp(C_N_lit_dist - tolerance - N_CA_dist, min=0.0)
-    N_C_clash_loss = torch.clamp(C_N_lit_dist - tolerance - N_C_dist, min=0.0)
-    CA_C_clash_loss = torch.clamp(C_C_lit_dist - tolerance - CA_C_dist, min=0.0)
+    total = N_clash + CA_clash + C_clash + N_CA_clash + N_C_clash + CA_C_clash
 
-    total_clash_loss = (
-        N_clash_loss
-        + CA_clash_loss
-        + C_clash_loss
-        + N_CA_clash_loss
-        + N_C_clash_loss
-        + CA_C_clash_loss
-    )
+    # Apply 2D masks
+    masks_dim_2 = [m.unsqueeze(1) for m in masks_dim_2]
+    mask2       = combine_masks(masks_dim_2, total)
+    total_sum   = (total * mask2).sum(dim=-1)
+    denom       = mask2.sum(dim=-1).clamp_min(1e-6)
+    total_loss  = total_sum / denom
+    violation   = (total_loss > 0.0).float()
 
-    masks_dim_2 = [mask[:, None, :] for mask in masks_dim_2]
-    mask_dim_2 = combine_masks(masks_dim_2, total_clash_loss)
-    total_clash_loss = (total_clash_loss * mask_dim_2).sum(dim=-1) / (
-        mask_dim_2.sum(dim=-1) + 1e-9
-    )
-    total_clash_violation = (total_clash_loss > 0.0).float()
-
-    clash_loss = average_data(total_clash_loss, masks=masks_dim_1)
-    clash_violation = average_data(total_clash_violation, masks=masks_dim_1)
+    clash_loss      = average_data(total_loss, masks=masks_dim_1)
+    clash_violation = average_data(violation,   masks=masks_dim_1)
     return clash_loss, clash_violation
 
 
@@ -336,142 +322,261 @@ def get_bb_bond_angle_violation(
     N_coords: torch.Tensor,
     CA_coords: torch.Tensor,
     C_coords: torch.Tensor,
-    masks: List[torch.Tensor] = None,
+    masks: list = None,
     num_stds: float = 12,
-) -> torch.Tensor:
+) -> tuple:
     """
-    Calculates a bond angle loss term, depending on deviations
-    between predicted backbone bond angles and their literature values.
-    Specifically this uses a flat-bottomed loss that only takes values >0
-    if the the bond angle is outside of the mean +/- num_stds * std.
-    Note here we calculate angle loss. Alphafold 2 could use the cosine angle loss.
-    Not sure if cosine of bond angle or bond angle is used in AlphaFold2 (https://www.nature.com/articles/s41586-021-03819-2).
-
-    Be aware the mask region to calculate bond angle has to be continuous (assuming all residues are covalently bonded in order).
-    This implementation is adapted from loopgen (https://arxiv.org/abs/2310.07051).
-
-    :param N_coords: Predicted N coordinates, shape (N_batch, N_res, 3).
-    :param CA_coords: Predicted CA coordinates, shape (N_batch, N_res, 3).
-    :param C_coords: Predicted C coordinates, shape (N_batch, N_res, 3).
-    :param num_stds: Number of standard deviations to use for the flat-bottomed loss. Defaults to 12.
-    :param masks: List of masks to apply, each shape (N_batch, N_res).
-
-    :return: Bond angle loss for each complex, shape (N_batch,).
-    :return: Percentage of residues with bond angle violation for each complex, shape (N_batch,).
+    Calculates bond angle violations without in-place operations.
     """
+    # 1) safe normalization
+    eps_norm = 1e-6
+    N_CA = F.normalize(N_coords - CA_coords, dim=-1, eps=eps_norm)
+    C_CA = F.normalize(C_coords - CA_coords, dim=-1, eps=eps_norm)
+    C_N  = F.normalize(C_coords - N_coords.roll(-1, dims=-2), dim=-1, eps=eps_norm)
 
-    N_CA_vectors = F.normalize(N_coords - CA_coords, dim=-1)
-    C_CA_vectors = F.normalize(C_coords - CA_coords, dim=-1)
-    C_N_vectors = F.normalize(C_coords - N_coords.roll(-1, dims=-2), dim=-1)
+    # 2) clamp before acos
+    def safe_angle(u, v):
+        c = (u * v).sum(dim=-1)
+        c = torch.clamp(c, -1.0 + 1e-6, 1.0 - 1e-6)
+        return torch.acos(c)
 
-    cos_N_CA_C_bond_angles = torch.sum(N_CA_vectors * C_CA_vectors, dim=-1)
-    cos_CA_C_N_bond_angles = torch.sum(C_CA_vectors * C_N_vectors, dim=-1)
-    cos_C_N_CA_bond_angles = torch.sum(
-        C_N_vectors * -N_CA_vectors.roll(-1, dims=-2), dim=-1
-    )
+    ang1 = safe_angle(N_CA,   C_CA)
+    ang2 = safe_angle(C_CA,   C_N)
+    ang3 = safe_angle(C_N,   -N_CA.roll(-1, dims=-2))
 
-    N_CA_C_bond_angles = torch.acos(cos_N_CA_C_bond_angles)
-    CA_C_N_bond_angles = torch.acos(cos_CA_C_N_bond_angles)
-    C_N_CA_bond_angles = torch.acos(cos_C_N_CA_bond_angles)
+    # Replace last valid index per batch
+    mask     = combine_masks(masks, ang1)
+    last_idx = mask.float().argmax(dim=-1)
+    batch_idx = torch.arange(ang1.size(0), device=ang1.device)
+    ang2[batch_idx, last_idx] = BackboneBondAngles["CA_C_N"].value
+    ang3[batch_idx, last_idx] = BackboneBondAngles["C_N_CA"].value
 
-    mask = combine_masks(masks, N_CA_C_bond_angles)
-    mask_np = mask.detach().cpu().numpy()
-
-    # For each batch, replace the last valid index with the reference angle
-    for i in range(N_coords.shape[0]):
-        idx_array = mask_np[i].nonzero()[0]
-        if len(idx_array) > 0:
-            last_valid_idx = idx_array[-1]
-            CA_C_N_bond_angles[i, last_valid_idx] = BackboneBondAngles["CA_C_N"].value
-            C_N_CA_bond_angles[i, last_valid_idx] = BackboneBondAngles["C_N_CA"].value
-
-    N_CA_C_angle_loss = torch.clamp_min(
-        torch.abs(N_CA_C_bond_angles - BackboneBondAngles["N_CA_C"].value)
+    # Flat-bottom loss
+    loss1 = torch.clamp_min(
+        torch.abs(ang1 - BackboneBondAngles["N_CA_C"].value)
         - num_stds * BackboneBondAngleStdDevs["N_CA_C"].value,
-        0.0,
+        0.0
     )
-    CA_C_N_angle_loss = torch.clamp_min(
-        torch.abs(CA_C_N_bond_angles - BackboneBondAngles["CA_C_N"].value)
+    loss2 = torch.clamp_min(
+        torch.abs(ang2 - BackboneBondAngles["CA_C_N"].value)
         - num_stds * BackboneBondAngleStdDevs["CA_C_N"].value,
-        0.0,
+        0.0
     )
-    C_N_CA_angle_loss = torch.clamp_min(
-        torch.abs(C_N_CA_bond_angles - BackboneBondAngles["C_N_CA"].value)
+    loss3 = torch.clamp_min(
+        torch.abs(ang3 - BackboneBondAngles["C_N_CA"].value)
         - num_stds * BackboneBondAngleStdDevs["C_N_CA"].value,
-        0.0,
+        0.0
     )
 
-    total_angle_loss = N_CA_C_angle_loss + CA_C_N_angle_loss + C_N_CA_angle_loss
-    total_angle_violation = (total_angle_loss > 0.0).float()
+    total     = loss1 + loss2 + loss3
+    violation = (total > 0.0).float()
 
-    bond_angle_loss = average_data(total_angle_loss, masks=masks)
-    bond_angle_violation = average_data(total_angle_violation, masks=masks)
-    return bond_angle_loss, bond_angle_violation
+    bond_loss      = average_data(total,     masks=masks)
+    bond_violation = average_data(violation,  masks=masks)
+    return bond_loss, bond_violation
 
 
 def get_bb_bond_length_violation(
     N_coords: torch.Tensor,
     CA_coords: torch.Tensor,
     C_coords: torch.Tensor,
-    masks: List[torch.Tensor] = None,
+    masks: list = None,
     num_stds: float = 12,
-) -> torch.Tensor:
+) -> tuple:
     """
-    Calculates a bond length loss term, depending on deviations
-    between predicted backbone bond lengths and their literature values.
-    Specifically this uses a flat-bottomed loss that only takes values >0
-    if the bond length is outside of the mean +/- num_stds * std.
-    Implemented the same way as in AlphaFold2 (https://www.nature.com/articles/s41586-021-03819-2).
-
-    Be aware the mask region to calculate bond length has to be continuous (assuming all residues are covalently bonded in order).
-    This implementation is adapted from loopgen (https://arxiv.org/abs/2310.07051).
-
-    :param N_coords: Predicted N coordinates, shape (N_batch, N_res, 3).
-    :param CA_coords: Predicted CA coordinates, shape (N_batch, N_res, 3).
-    :param C_coords: Predicted C coordinates, shape (N_batch, N_res, 3).
-    :param num_stds: Number of standard deviations to use for the flat-bottomed loss. Defaults to 12.
-    :param masks: List of masks to apply, each shape (N_batch, N_res).
-
-    :return: Bond length loss for each complex, shape (N_batch,).
-    :return: Percentage of residues with bond length violation for each complex, shape (N_batch,).
+    Calculates bond length violations without in-place operations.
     """
-    N_CA_bond_lengths = torch.norm(N_coords - CA_coords, dim=-1)
-    CA_C_bond_lengths = torch.norm(CA_coords - C_coords, dim=-1)
-    C_N_bond_lengths = torch.norm(C_coords - N_coords.roll(-1, dims=-2), dim=-1)
+    # Distances
+    d1 = torch.norm(N_coords - CA_coords, dim=-1)
+    d2 = torch.norm(CA_coords - C_coords, dim=-1)
+    d3 = torch.norm(C_coords - N_coords.roll(-1, dims=-2), dim=-1)
 
-    mask = combine_masks(masks, N_CA_bond_lengths)
-    mask_np = mask.detach().cpu().numpy()
+    # Replace last valid index per batch
+    mask     = combine_masks(masks, d1)
+    last_idx = mask.float().argmax(dim=-1)
+    batch_idx = torch.arange(d1.size(0), device=d1.device)
 
-    # Replace the last valid index in each batch with the literature value
-    for i in range(N_coords.shape[0]):
-        idx_array = mask_np[i].nonzero()[0]
-        if len(idx_array) > 0:
-            last_valid_idx = idx_array[-1]
-            C_N_bond_lengths[i, last_valid_idx] = BackboneBondLengths["C_N"].value
+    d3 = d3.clone()
+    d3[batch_idx, last_idx] = BackboneBondLengths["C_N"].value
 
-    N_CA_length_loss = torch.clamp_min(
-        torch.abs(N_CA_bond_lengths - BackboneBondLengths["N_CA"].value)
+    # Flat-bottom loss
+    loss1 = torch.clamp_min(
+        torch.abs(d1 - BackboneBondLengths["N_CA"].value)
         - num_stds * BackboneBondLengthStdDevs["N_CA"].value,
-        0.0,
+        0.0
     )
-    CA_C_length_loss = torch.clamp_min(
-        torch.abs(CA_C_bond_lengths - BackboneBondLengths["CA_C"].value)
+    loss2 = torch.clamp_min(
+        torch.abs(d2 - BackboneBondLengths["CA_C"].value)
         - num_stds * BackboneBondLengthStdDevs["CA_C"].value,
-        0.0,
+        0.0
     )
-    C_N_length_loss = torch.clamp_min(
-        torch.abs(C_N_bond_lengths - BackboneBondLengths["C_N"].value)
+    loss3 = torch.clamp_min(
+        torch.abs(d3 - BackboneBondLengths["C_N"].value)
         - num_stds * BackboneBondLengthStdDevs["C_N"].value,
-        0.0,
+        0.0
     )
 
-    total_length_loss = N_CA_length_loss + CA_C_length_loss + C_N_length_loss
-    total_length_violation = (total_length_loss > 0.0).float()
+    total     = loss1 + loss2 + loss3
+    violation = (total > 0.0).float()
 
-    bond_length_loss = average_data(total_length_loss, masks=masks)
-    bond_length_violation = average_data(total_length_violation, masks=masks)
-    return bond_length_loss, bond_length_violation
+    length_loss      = average_data(total,     masks=masks)
+    length_violation = average_data(violation,  masks=masks)
+    return length_loss, length_violation
 
+# def get_bb_clash_violation(
+#     N_coords: torch.Tensor,
+#     CA_coords: torch.Tensor,
+#     C_coords: torch.Tensor,
+#     masks_dim_1: List[torch.Tensor] = None,
+#     masks_dim_2: List[torch.Tensor] = None,
+#     tolerance: float = 1.5,
+# ) -> torch.Tensor:
+#     """
+#     Calculates backbone clash violations using out-of-place operations only.
+#     """
+#     # Literature distances
+#     N_N_lit = 2.0 * AtomVanDerWaalRadii["N"].value
+#     C_C_lit = 2.0 * AtomVanDerWaalRadii["C"].value
+#     C_N_lit = AtomVanDerWaalRadii["C"].value + AtomVanDerWaalRadii["N"].value
+
+#     # Pairwise distances
+#     N_dist = torch.cdist(N_coords, N_coords, p=2)
+#     CA_dist = torch.cdist(CA_coords, CA_coords, p=2)
+#     C_dist = torch.cdist(C_coords, C_coords, p=2)
+#     N_CA_dist = torch.cdist(N_coords, CA_coords, p=2)
+#     N_C_dist = torch.cdist(N_coords, C_coords.roll(1, dims=-2), p=2)
+#     CA_C_dist = torch.cdist(CA_coords, C_coords, p=2)
+
+#     # Replace first row/col without in-place
+#     mask_row = torch.zeros_like(N_C_dist, dtype=torch.bool)
+#     mask_row[:, 0, :] = True
+#     mask_col = torch.zeros_like(N_C_dist, dtype=torch.bool)
+#     mask_col[:, :, 0] = True
+#     bound_mask = mask_row | mask_col
+#     N_C_dist = torch.where(bound_mask, C_N_lit, N_C_dist)
+
+#     # Mask diagonal distances out-of-place
+#     diag = torch.eye(N_dist.size(1), device=N_dist.device, dtype=torch.bool)
+#     diag = diag.unsqueeze(0).expand_as(N_dist)
+#     N_dist = mask_data(N_dist, 1e9, diag, in_place=False)
+#     CA_dist = mask_data(CA_dist, 1e9, diag, in_place=False)
+#     C_dist = mask_data(C_dist, 1e9, diag, in_place=False)
+#     N_CA_dist = mask_data(N_CA_dist, 1e9, diag, in_place=False)
+#     N_C_dist = mask_data(N_C_dist, 1e9, diag, in_place=False)
+#     CA_C_dist = mask_data(CA_C_dist, 1e9, diag, in_place=False)
+
+#     # Compute clashing losses
+#     N_clash = torch.clamp(N_N_lit - tolerance - N_dist, min=0.0) / 2
+#     CA_clash = torch.clamp(C_C_lit - tolerance - CA_dist, min=0.0) / 2
+#     C_clash = torch.clamp(C_C_lit - tolerance - C_dist, min=0.0) / 2
+#     N_CA_clash = torch.clamp(C_N_lit - tolerance - N_CA_dist, min=0.0)
+#     N_C_clash = torch.clamp(C_N_lit - tolerance - N_C_dist, min=0.0)
+#     CA_C_clash = torch.clamp(C_C_lit - tolerance - CA_C_dist, min=0.0)
+
+#     total = N_clash + CA_clash + C_clash + N_CA_clash + N_C_clash + CA_C_clash
+
+#     # Apply 2D masks
+#     masks_dim_2 = [m.unsqueeze(1) for m in masks_dim_2]
+#     mask2 = combine_masks(masks_dim_2, total)
+#     total_loss = (total * mask2).sum(dim=-1) / (mask2.sum(dim=-1) + 1e-9)
+#     violation = (total_loss > 0.0).float()
+
+#     clash_loss = average_data(total_loss, masks=masks_dim_1)
+#     clash_violation = average_data(violation, masks=masks_dim_1)
+#     return clash_loss, clash_violation
+
+
+# def get_bb_bond_angle_violation(
+#     N_coords: torch.Tensor,
+#     CA_coords: torch.Tensor,
+#     C_coords: torch.Tensor,
+#     masks: List[torch.Tensor] = None,
+#     num_stds: float = 12,
+# ) -> torch.Tensor:
+#     """
+#     Calculates bond angle violations without in-place operations.
+#     """
+#     # Compute normalized bond vectors
+#     N_CA = F.normalize(N_coords - CA_coords, dim=-1)
+#     C_CA = F.normalize(C_coords - CA_coords, dim=-1)
+#     C_N = F.normalize(C_coords - N_coords.roll(-1, dims=-2), dim=-1)
+
+#     # Cosine angles
+#     cos1 = (N_CA * C_CA).sum(dim=-1)
+#     cos2 = (C_CA * C_N).sum(dim=-1)
+#     cos3 = (C_N * -N_CA.roll(-1, dims=-2)).sum(dim=-1)
+
+#     # Angles
+#     ang1 = torch.acos(cos1)
+#     ang2 = torch.acos(cos2)
+#     ang3 = torch.acos(cos3)
+
+#     # Clone to avoid in-place
+#     ang2 = ang2.clone()
+#     ang3 = ang3.clone()
+
+#     # Replace last valid index per batch
+#     mask = combine_masks(masks, ang1)
+#     # gather last indices
+#     last_idx = mask.float().argmax(dim=-1)
+#     batch_idx = torch.arange(ang1.size(0), device=ang1.device)
+#     ang2[batch_idx, last_idx] = BackboneBondAngles["CA_C_N"].value
+#     ang3[batch_idx, last_idx] = BackboneBondAngles["C_N_CA"].value
+
+#     # Flat-bottom loss
+#     loss1 = torch.clamp_min(torch.abs(ang1 - BackboneBondAngles["N_CA_C"].value)
+#                               - num_stds * BackboneBondAngleStdDevs["N_CA_C"].value, 0.0)
+#     loss2 = torch.clamp_min(torch.abs(ang2 - BackboneBondAngles["CA_C_N"].value)
+#                               - num_stds * BackboneBondAngleStdDevs["CA_C_N"].value, 0.0)
+#     loss3 = torch.clamp_min(torch.abs(ang3 - BackboneBondAngles["C_N_CA"].value)
+#                               - num_stds * BackboneBondAngleStdDevs["C_N_CA"].value, 0.0)
+
+#     total_loss = loss1 + loss2 + loss3
+#     violation = (total_loss > 0.0).float()
+
+#     bond_loss = average_data(total_loss, masks=masks)
+#     bond_violation = average_data(violation, masks=masks)
+#     return bond_loss, bond_violation
+
+
+# def get_bb_bond_length_violation(
+#     N_coords: torch.Tensor,
+#     CA_coords: torch.Tensor,
+#     C_coords: torch.Tensor,
+#     masks: List[torch.Tensor] = None,
+#     num_stds: float = 12,
+# ) -> torch.Tensor:
+#     """
+#     Calculates bond length violations without in-place operations.
+#     """
+#     # Distances
+#     d1 = torch.norm(N_coords - CA_coords, dim=-1)
+#     d2 = torch.norm(CA_coords - C_coords, dim=-1)
+#     d3 = torch.norm(C_coords - N_coords.roll(-1, dims=-2), dim=-1)
+
+#     # Clone before assignment
+#     d3 = d3.clone()
+
+#     # Replace last valid index per batch
+#     mask = combine_masks(masks, d1)
+#     last_idx = mask.float().argmax(dim=-1)
+#     batch_idx = torch.arange(d1.size(0), device=d1.device)
+#     d3[batch_idx, last_idx] = BackboneBondLengths["C_N"].value
+
+#     # Flat-bottom loss
+#     loss1 = torch.clamp_min(torch.abs(d1 - BackboneBondLengths["N_CA"].value)
+#                               - num_stds * BackboneBondLengthStdDevs["N_CA"].value, 0.0)
+#     loss2 = torch.clamp_min(torch.abs(d2 - BackboneBondLengths["CA_C"].value)
+#                               - num_stds * BackboneBondLengthStdDevs["CA_C"].value, 0.0)
+#     loss3 = torch.clamp_min(torch.abs(d3 - BackboneBondLengths["C_N"].value)
+#                               - num_stds * BackboneBondLengthStdDevs["C_N"].value, 0.0)
+
+#     total_loss = loss1 + loss2 + loss3
+#     violation = (total_loss > 0.0).float()
+
+#     length_loss = average_data(total_loss, masks=masks)
+#     length_violation = average_data(violation, masks=masks)
+#     return length_loss, length_violation
 
 def get_total_violation(
     N_coords: torch.Tensor,
@@ -929,6 +1034,7 @@ class AbFlowMetrics(nn.Module):
 
         # Log likelihood
         metrics["likelihood/redesign"] = get_likelihood(
+            # pred_data_dict["res_type_prob"],
             pred_data_dict["res_type_prob"],
             true_data_dict["res_type"],
             masks=[
