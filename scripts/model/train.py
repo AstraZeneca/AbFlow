@@ -24,7 +24,7 @@ from abflow.utils.training import setup_model, set_seed, CustomSWACallback, Cust
 from abflow.utils.arguments import get_arguments, get_config, print_config_summary
 from torch.profiler import ProfilerActivity
 from pytorch_lightning.profilers import PyTorchProfiler
-
+import wandb
 
 
 # Define a short schedule (adjust wait/warmup/active as needed)
@@ -63,7 +63,7 @@ def train(config: dict):
 
     # Instantiate model and datamodule
     model, datamodule = setup_model(
-        config, config["checkpoint"]["path"], config["checkpoint"]["load_optimizer"],
+        config, config["checkpoint"]["path"], config["checkpoint"]["load_optimizer"], ignore_mismatched_state_dict = config["checkpoint"]["ignore_mismatched_state_dict"],
     )
 
     # Learning rate monitor
@@ -96,7 +96,7 @@ def train(config: dict):
     tqdm = TQDMProgressBar(refresh_rate=10)
     callbacks.append(tqdm)
 
-    ema_callback = CustomEMACallback(start_iter=1000, ema_decay=0.99965, save_interval=4000, save_dir=results_dir)
+    ema_callback = CustomEMACallback(start_iter=1000, ema_decay=0.9999, save_interval=4000, save_dir=results_dir, ema_checkpoint_path=config["checkpoint"]["ema_path"])
     callbacks.append(ema_callback)
 
     # Logger
@@ -104,14 +104,15 @@ def train(config: dict):
         project=config["project_name"], name=config["model_name"], log_model=False
     )
 
+
     # Trainer
     trainer = L.Trainer(
-        devices=1,
+        devices=8,
         accelerator="gpu",
         strategy=DDPStrategy(
-            timeout=timedelta(seconds=15400), find_unused_parameters=True,
+            timeout=timedelta(seconds=15400), find_unused_parameters=True, #process_group_backend="gloo",
         ),
-        precision='bf16',
+        precision='bf16-mixed',
         max_epochs=config["trainer"]["max_epochs"],
         accumulate_grad_batches=config["trainer"]["accumulate_grad_batches"],
         logger=logger,
@@ -120,10 +121,12 @@ def train(config: dict):
         val_check_interval=config["trainer"]["val_check_interval"],
         log_every_n_steps=config["trainer"]["log_every_n_steps"],
         gradient_clip_val=config["trainer"]["gradient_clip_val"],
+        num_sanity_val_steps=0,
+        limit_val_batches=0,
         # profiler=profiler,
     )
 
-    trainer.fit(model, datamodule=datamodule) 
+    trainer.fit(model, datamodule=datamodule, ckpt_path="/home/jovyan/abflow-datavol/checkpoints/FinalFixed2_sabdab_SeqBB_sabdab_sequence_backbone/epoch=179.ckpt")
     print("Done with training...")
 
 def main(config: dict):

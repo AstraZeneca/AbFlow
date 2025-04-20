@@ -333,7 +333,7 @@ class ResidueEmbedding(nn.Module):
         self.encode_time = FourierEncoder()
 
         # Input dimension for the MLP layer
-        input_dim = residue_dim + max_aa_types * num_atoms * 3 + self.dihedral_emb.get_dim() + residue_dim + time_dim + 10
+        input_dim = residue_dim + max_aa_types * num_atoms * 3 + self.dihedral_emb.get_dim() + residue_dim + time_dim + 10 + 10
         self.mlp = nn.Sequential(
             nn.Linear(input_dim, 2 * residue_dim), nn.ReLU(), 
             nn.Linear(2 * residue_dim, residue_dim), nn.ReLU(), 
@@ -341,7 +341,7 @@ class ResidueEmbedding(nn.Module):
             nn.Linear(residue_dim, residue_dim)
         )
 
-    def forward(self, aa, res_nb, fragment_type, pos_atoms, residue_mask, structure_mask=None, sequence_mask=None, generation_mask=None, time=None, pocket=None):
+    def forward(self, aa, res_nb, fragment_type, pos_atoms, sidechain_dihedrals, residue_mask, structure_mask=None, sequence_mask=None, generation_mask=None, time=None, pocket=None):
         """
         Forward pass for residue embedding.
 
@@ -433,7 +433,10 @@ class ResidueEmbedding(nn.Module):
         else:
             pocket_emb = torch.zeros((N, L, 10), device=aa_emb.device)
 
+        # Add other features
         features_list.append(pocket_emb)
+        features_list.append(sidechain_dihedrals)
+
         all_features = torch.cat(features_list, dim=-1)
         all_features = all_features * residue_mask[:, :, None].expand_as(all_features)
 
@@ -481,10 +484,10 @@ class PairEmbedding(nn.Module):
         dihedral_feature_dim = self.dihedral_emb.get_dim(num_dim=2)
 
         # MLP for final pair embedding, cb_distogram=40, ca_unit_vector=3
-        all_features_dim = 3 * pair_dim + dihedral_feature_dim + 40 + 3 + time_dim + 10
+        all_features_dim = 3 * pair_dim + dihedral_feature_dim + 40 + 3 + time_dim + 10 + 10
         self.mlp = nn.Sequential(nn.Linear(all_features_dim, pair_dim), nn.ReLU(), nn.Linear(pair_dim, pair_dim), nn.ReLU(), nn.Linear(pair_dim, pair_dim))
 
-    def forward(self, aa, res_nb, fragment_type, pos_atoms, residue_mask, cb_distogram, ca_unit_vectors, structure_mask=None, sequence_mask=None, generation_mask=None, time=None, pocket=None):
+    def forward(self, aa, res_nb, fragment_type, pos_atoms, sidechain_dihedrals, residue_mask, cb_distogram, ca_unit_vectors, structure_mask=None, sequence_mask=None, generation_mask=None, time=None, pocket=None):
         """
         Forward pass for pairwise residue embedding.
 
@@ -555,6 +558,9 @@ class PairEmbedding(nn.Module):
         dihedral_angles = pairwise_dihedrals(pos_atoms)
         dihedral_emb = self.dihedral_emb(dihedral_angles)
 
+        # Sidechains
+        sidechain_dihedrals = F.normalize(sidechain_dihedrals[:,None,:, :] * sidechain_dihedrals[:,:,None,:], p=2, dim=-1)
+
         # Apply structure mask to avoid data leakage
         if structure_mask is not None and structure_mask.dim() == 2:
             structure_mask = structure_mask.unsqueeze(-1)
@@ -578,6 +584,7 @@ class PairEmbedding(nn.Module):
 
         features_list.append(time_emb)
         features_list.append(pocket_emb)
+        features_list.append(sidechain_dihedrals)
 
         all_features = torch.cat(features_list, dim=-1)
         all_features = all_features * mask2d_pair[:, :, :, None].expand_as(all_features)

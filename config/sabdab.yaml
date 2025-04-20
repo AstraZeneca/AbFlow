@@ -2,11 +2,11 @@
 
 # wandb settings
 project_name: flow_matching
-model_name: Test
+model_name: abflow
 
 # shared settings
 shared:
-    design_mode: &design_mode ["sequence"] # Options: ["sequence", "backbone", "sidechain"]
+    design_mode: &design_mode ["sequence", "backbone"] # Options: ["sequence", "backbone", "sidechain"]
     seed: &seed 2030
     confidence: &confidence False
     dataset2use: &dataset2use sabdab
@@ -14,7 +14,7 @@ shared:
 
 # training settings
 trainer:
-    devices: 4
+    devices: 8
     max_epochs: 200
     precision: 32-true
     gradient_clip_val: 1.0
@@ -22,12 +22,14 @@ trainer:
     accumulate_grad_batches: 4
     log_every_n_steps: 100
 checkpoint:
+    ignore_mismatched_state_dict: False
     path: null
-    load_optimizer: False # False if you need only the model
+    ema_path: null 
+    load_optimizer: False
 
 # abflow datamodule settings
 datamodule:
-    num_workers: 16
+    num_workers: 12
     batch_size: 1
     redesign:
         framework: False
@@ -52,18 +54,21 @@ datamodule:
 # abflow model settings
 model:
     loss_weighting:
-        sequence_vf_loss: 2000.0
+        sequence_vf_loss: 100.0
         translation_vf_loss: 1.0
-        rotation_vf_loss: 100.0
+        rotation_vf_loss: 10.0
         dihedral_vf_loss: 10.0
-        distogram_loss: 20.0
+        distogram_loss: 2.0
         binder_loss: 1.0
-        entropy_loss: 10.0
-        confidence_lddt_loss: 1.
-        confidence_de_loss: 1.
-        confidence_ae_loss: 1.
+        entropy_loss: 1.0
+        confidence_lddt_loss: 1
+        confidence_de_loss: 1
+        confidence_ae_loss: 1
+        clash_loss: 0.1
+        bond_angle_loss: 0.1
+        bond_length_loss: 0.1
     learning_rate: 0.0001
-    loss_combination_method: mvdr # all, uncertainty, static, dwa, mvdr, catalyst_learned
+    loss_combination_method: mvdr # static, mvdr
     design_mode: *design_mode
     seed: *seed
     confidence: *confidence
@@ -82,7 +87,7 @@ network:
     n_denoising_module_blocks: 4 # default: 24
     n_confidence_module_blocks: 1 # default: 4
     n_cycle: 4
-    denoising_cycle: 2
+    denoising_cycle: 1
     mini_rollout_steps: 20
     full_rollout_steps: 100
     label_smoothing: 0.0

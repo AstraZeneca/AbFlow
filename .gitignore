@@ -26,6 +26,8 @@ data/rabd/pdb/
 data/absci_her2_zs/
 checkpoints/
 config/
+abflow/model/loss_old.py
+abflow/model/loss_temp.py
 
 scripts/design/
 scripts/test/
@@ -33,7 +35,7 @@ scripts/circe/
 scripts/hpc/
 
 results/
-
+heatmaps/
 notebooks/
 evaluation/
 pymol/
