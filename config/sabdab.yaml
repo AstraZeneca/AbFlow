@@ -94,8 +94,9 @@ network:
     max_time_clamp: 0.99
     network_params:
         Pairformer:
-            dropout_rowwise_probabilty: 0.2
-            dropout_columnwise_probabilty: 0.2
+            dropout_probability: 0.1
+            dropout_rowwise_probability: 0.2
+            dropout_columnwise_probability: 0.2
             TriangleAttentionStartingNode:
                 n_head: 6
             TriangleAttentionEndingNode:
