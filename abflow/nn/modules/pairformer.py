@@ -387,6 +387,7 @@ class PairformerStack(nn.Module):
     ):
         """
         params contains the following keys:
+        - dropout_probabilty: float
         - dropout_rowwise_probabilty: float
         - dropout_columnwise_probabilty: float
         - TriangleAttentionStartingNode: dict
@@ -400,9 +401,10 @@ class PairformerStack(nn.Module):
         super().__init__()
 
         self.n_block = n_block
-        self.dropout_rowwise = DropoutRowwise(p=params["dropout_rowwise_probabilty"])
+        self.dropout = nn.Dropout(p=params["dropout_probability"])
+        self.dropout_rowwise = DropoutRowwise(p=params["dropout_rowwise_probability"])
         self.dropout_columnwise = DropoutColumnwise(
-            p=params["dropout_columnwise_probabilty"]
+            p=params["dropout_columnwise_probability"]
         )
 
         self.trunk = nn.ModuleDict()
@@ -460,11 +462,12 @@ class PairformerStack(nn.Module):
             z_ij = z_ij + self.dropout_columnwise(
                 self.trunk[f"triangle_attention_ending_node_{b}"](z_ij)
             )
-
-            # TODO: Add dropout
-            z_ij = z_ij + self.trunk[f"transition_z_{b}"](z_ij)
-
+            z_ij = z_ij + self.dropout(
+                self.trunk[f"transition_z_{b}"](z_ij)
+            )
             s_i = s_i + self.trunk[f"attention_pair_bias_{b}"](s_i, None, z_ij)
-            s_i = s_i + self.trunk[f"transition_s_{b}"](s_i)
+            s_i = s_i + self.dropout(
+                self.trunk[f"transition_s_{b}"](s_i)
+            )
 
         return s_i, z_ij

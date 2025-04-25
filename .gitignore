@@ -33,9 +33,12 @@ scripts/design/
 scripts/test/
 scripts/circe/
 scripts/hpc/
+scripts/analysis/
 
 results/
 heatmaps/
 notebooks/
 evaluation/
 pymol/
+benchmarks/
+data/
