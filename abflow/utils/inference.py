@@ -9,17 +9,19 @@ from ..data.process_pdb import (
     output_to_pdb,
 )
 from ..model.utils import concat_dicts
-from ..utils.training import setup_model
+from .training import setup_model
 
 
-def load_model(config_path, checkpoint_path, device="cuda:0"):
+def load_model(config_path, checkpoint_path, device="cuda:0", skip_load=False):
     """
     Loads the AbFlow model and DataModule given a config file and checkpoint path.
     """
     import yaml
 
     config = yaml.load(open(config_path, "r"), Loader=yaml.FullLoader)
-    model, datamodule = setup_model(config, checkpoint_path, load_optimizer=False)
+    model, datamodule = setup_model(
+        config, checkpoint_path, load_optimizer=False, skip_load=skip_load
+    )
     model.to(device)
     model.eval()
     print(

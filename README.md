@@ -49,7 +49,6 @@ python run_design.py \
     --antigen_chains A B \
     --scheme chothia \
     --output_dir results \
-    --batch_size 1 \
     --seed 2025 \
     --device cuda:0
 ```

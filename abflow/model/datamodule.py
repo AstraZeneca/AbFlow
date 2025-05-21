@@ -32,7 +32,7 @@ class AntibodyAntigenDataset(Dataset):
         self.map_size = 250 * 1024**3
         self._load_entries()
         self._load_clusters()
-        if self.config['name'] == 'sabdab':
+        if self.config["name"] == "sabdab":
             self._load_split_sabdab()
         else:
             self._load_split()
@@ -40,7 +40,9 @@ class AntibodyAntigenDataset(Dataset):
     @property
     def structure_data_path(self):
         return os.path.join(
-            self.data_path, self.config["name"], f"abflow_processed_structures_{self.config['name']}_v4.lmdb"
+            self.data_path,
+            self.config["name"],
+            f"abflow_processed_structures_{self.config['name']}_v4.lmdb",
         )
 
     def _load_entries(self):
@@ -68,7 +70,7 @@ class AntibodyAntigenDataset(Dataset):
 
         random.seed(self.config["seed"])
 
-        cluster_name = "cluster_result_clustermode1_cluster.tsv" #if self.config["name"]=="sabdab" else "cluster_result_clustermode2_cluster.tsv"
+        cluster_name = "cluster_result_clustermode1_cluster.tsv"  # if self.config["name"]=="sabdab" else "cluster_result_clustermode2_cluster.tsv"
 
         self.cluster_path = os.path.join(
             self.data_path, self.config["name"], cluster_name
@@ -91,8 +93,6 @@ class AntibodyAntigenDataset(Dataset):
         print(f"Number of pdbs in the full dataset: {len(self.id_to_cluster.keys())}")
         print(f"Number of clusters in the full dataset: {len(self.clusters.keys())}")
 
-
-
     def _load_split(self):
 
         random.seed(self.config["seed"])
@@ -113,9 +113,6 @@ class AntibodyAntigenDataset(Dataset):
                 for rabd_id in rabd_ids:
                     if entry_dict["id"][:4] in rabd_id:
                         test_ids.append(entry_dict["id"])
-
-
-
 
         test_clusters = rm_duplicates(
             [self.id_to_cluster[test_id] for test_id in test_ids]
@@ -148,27 +145,26 @@ class AntibodyAntigenDataset(Dataset):
         )
 
         oas_clusters_train_val = [c for c in oas_clusters if c not in test_clusters]
-        sabdab_clusters_train_val = [c for c in sabdab_clusters if c not in test_clusters]
-
+        sabdab_clusters_train_val = [
+            c for c in sabdab_clusters if c not in test_clusters
+        ]
 
         random.shuffle(oas_clusters_train_val)
         random.shuffle(sabdab_clusters_train_val)
 
-        num_val_cluster_half = int(0.5*self.config["num_val_cluster"])
+        num_val_cluster_half = int(0.5 * self.config["num_val_cluster"])
 
-        val_clusters = sabdab_clusters_train_val[:num_val_cluster_half] + oas_clusters_train_val[:num_val_cluster_half]
+        val_clusters = (
+            sabdab_clusters_train_val[:num_val_cluster_half]
+            + oas_clusters_train_val[:num_val_cluster_half]
+        )
 
         oas_train_clusters = oas_clusters_train_val[num_val_cluster_half:]
         sabdab_train_clusters = sabdab_clusters_train_val[num_val_cluster_half:]
 
-
-
-
         test_split_ids = list(
             chain.from_iterable(
-                self.clusters[c_id]
-                for c_id in test_clusters
-                if c_id in self.clusters
+                self.clusters[c_id] for c_id in test_clusters if c_id in self.clusters
             )
         )
 
@@ -176,19 +172,21 @@ class AntibodyAntigenDataset(Dataset):
         test_split_ids = self.unique_by_prefix(test_split_ids)
         test_prefixes = {self.extract_prefix(tid) for tid in test_split_ids}
 
-
         val_split_ids = list(
-                chain.from_iterable(
-                    self.clusters[c_id]
-                    for c_id in val_clusters
-                    if c_id in self.clusters and self.clusters[c_id] not in test_split_ids
-                )
+            chain.from_iterable(
+                self.clusters[c_id]
+                for c_id in val_clusters
+                if c_id in self.clusters and self.clusters[c_id] not in test_split_ids
             )
+        )
 
-
-        val_split_ids = self.unique_by_prefix([vid for vid in val_split_ids if self.extract_prefix(vid) not in test_prefixes])
-
-
+        val_split_ids = self.unique_by_prefix(
+            [
+                vid
+                for vid in val_split_ids
+                if self.extract_prefix(vid) not in test_prefixes
+            ]
+        )
 
         if self.split == "test":
             self.split_ids = test_split_ids
@@ -217,10 +215,20 @@ class AntibodyAntigenDataset(Dataset):
                 )
             )
 
-
-            self.split_ids_oas = self.unique_by_prefix([tid for tid in split_ids_oas if self.extract_prefix(tid) not in test_prefixes])
-            self.split_ids_sabdab = self.unique_by_prefix([tid for tid in split_ids_sabdab if self.extract_prefix(tid) not in test_prefixes])
-
+            self.split_ids_oas = self.unique_by_prefix(
+                [
+                    tid
+                    for tid in split_ids_oas
+                    if self.extract_prefix(tid) not in test_prefixes
+                ]
+            )
+            self.split_ids_sabdab = self.unique_by_prefix(
+                [
+                    tid
+                    for tid in split_ids_sabdab
+                    if self.extract_prefix(tid) not in test_prefixes
+                ]
+            )
 
             random.shuffle(self.split_ids_oas)
             random.shuffle(self.split_ids_sabdab)
@@ -229,15 +237,15 @@ class AntibodyAntigenDataset(Dataset):
             self.split_ids_sabdab_length = len(self.split_ids_sabdab)
             print(f"{100*'*'}")
             print(f"Number of OAS samples in training: {self.split_ids_oas_length}")
-            print(f"Number of SAbDab samples in training: {self.split_ids_sabdab_length}")
-
+            print(
+                f"Number of SAbDab samples in training: {self.split_ids_sabdab_length}"
+            )
 
         print(f"Number of RAbD id: {len(rabd_ids)}")
         print(f"Number of OAS clusters in training: {len(oas_train_clusters)}")
         print(f"Number of SAbDab clusters in training: {len(sabdab_train_clusters)}")
         print(f"Number of clusters in validation: {len(val_clusters)}")
         print(f"Number of clusters in test: {len(test_clusters)}")
-
 
     def _load_split_sabdab(self):
 
@@ -259,9 +267,6 @@ class AntibodyAntigenDataset(Dataset):
                 for rabd_id in rabd_ids:
                     if entry_dict["id"][:4] in rabd_id:
                         test_ids.append(entry_dict["id"])
-
-
-
 
         test_clusters = rm_duplicates(
             [self.id_to_cluster[test_id] for test_id in test_ids]
@@ -287,7 +292,6 @@ class AntibodyAntigenDataset(Dataset):
             [self.id_to_cluster[sid] for sid in sabdab_ids if sid in self.id_to_cluster]
         )
 
-
         # train / val / test split
         train_val_clusters = [
             c_id for c_id in clusters_sabdab if c_id not in test_clusters
@@ -297,13 +301,9 @@ class AntibodyAntigenDataset(Dataset):
         val_clusters = train_val_clusters[:num_val_cluster]
         train_clusters = train_val_clusters[num_val_cluster:]
 
-
-
         test_split_ids = list(
             chain.from_iterable(
-                self.clusters[c_id]
-                for c_id in test_clusters
-                if c_id in self.clusters
+                self.clusters[c_id] for c_id in test_clusters if c_id in self.clusters
             )
         )
 
@@ -311,61 +311,85 @@ class AntibodyAntigenDataset(Dataset):
         test_split_ids = self.unique_by_prefix(test_split_ids)
         test_prefixes = {self.extract_prefix(tid) for tid in test_split_ids}
 
-
         val_split_ids = list(
-                chain.from_iterable(
-                    self.clusters[c_id]
-                    for c_id in val_clusters
-                    if c_id in self.clusters and self.clusters[c_id] not in test_split_ids
-                )
+            chain.from_iterable(
+                self.clusters[c_id]
+                for c_id in val_clusters
+                if c_id in self.clusters and self.clusters[c_id] not in test_split_ids
             )
+        )
 
         train_split_ids = list(
-                chain.from_iterable(
-                    self.clusters[c_id]
-                    for c_id in train_clusters
-                    if c_id in self.clusters  and c_id not in test_split_ids and self.clusters[c_id] not in test_split_ids   and self.clusters[c_id] not in val_split_ids
-                )
+            chain.from_iterable(
+                self.clusters[c_id]
+                for c_id in train_clusters
+                if c_id in self.clusters
+                and c_id not in test_split_ids
+                and self.clusters[c_id] not in test_split_ids
+                and self.clusters[c_id] not in val_split_ids
             )
-        
-        val_split_ids = self.unique_by_prefix([vid for vid in val_split_ids if self.extract_prefix(vid) not in test_prefixes])
-        train_split_ids = self.unique_by_prefix([tid for tid in train_split_ids if self.extract_prefix(tid) not in test_prefixes])
+        )
 
+        val_split_ids = self.unique_by_prefix(
+            [
+                vid
+                for vid in val_split_ids
+                if self.extract_prefix(vid) not in test_prefixes
+            ]
+        )
+        train_split_ids = self.unique_by_prefix(
+            [
+                tid
+                for tid in train_split_ids
+                if self.extract_prefix(tid) not in test_prefixes
+            ]
+        )
 
         if self.split == "test":
-            self.split_ids =  test_split_ids
+            self.split_ids = test_split_ids
         elif self.split == "val":
             self.split_ids = val_split_ids
         else:
             self.split_ids = train_split_ids
 
         print(f"Number of RAbD id: {len(rabd_ids)}")
-        print(f"Number of clusters and samples in training: {len(train_clusters)}, {len(train_split_ids)}")
-        print(f"Number of clusters and samples in validation: {len(val_clusters)}, {len(val_split_ids)}")
-        print(f"Number of clusters and samples in test: {len(test_clusters)}, {len(test_split_ids)}")
+        print(
+            f"Number of clusters and samples in training: {len(train_clusters)}, {len(train_split_ids)}"
+        )
+        print(
+            f"Number of clusters and samples in validation: {len(val_clusters)}, {len(val_split_ids)}"
+        )
+        print(
+            f"Number of clusters and samples in test: {len(test_clusters)}, {len(test_split_ids)}"
+        )
         print(f"Number of structures in the {self.split} split: {len(self.split_ids)}")
 
     def __len__(self):
         """Returns number of samples in the data"""
-        length = len(self.split_ids) if self.split in ["test", "val"] or self.config["name"]=='sabdab' else self.split_ids_oas_length
+        length = (
+            len(self.split_ids)
+            if self.split in ["test", "val"] or self.config["name"] == "sabdab"
+            else self.split_ids_oas_length
+        )
         return length
 
     def __getitem__(self, idx: int):
-        if self.split in ["test", "val"] or self.config["name"] == 'sabdab':
+        if self.split in ["test", "val"] or self.config["name"] == "sabdab":
             structure_id = self.split_ids[idx]
             item = self._get_data_from_id(structure_id)
             return item
         else:
             # Sample one item from each list:
             structure_id_oas = self.split_ids_oas[idx]
-            structure_id_sabdab = self.split_ids_sabdab[idx % self.split_ids_sabdab_length]
-            
+            structure_id_sabdab = self.split_ids_sabdab[
+                idx % self.split_ids_sabdab_length
+            ]
+
             item_oas = self._get_data_from_id(structure_id_oas)
             item_sabdab = self._get_data_from_id(structure_id_sabdab)
-            
+
             # Return both items together
             return item_oas, item_sabdab
-            
 
     # def __getitem__(self, idx: int):
     #     if self.split in ["test", "val"] or self.config["name"]=='sabdab':
@@ -378,9 +402,9 @@ class AntibodyAntigenDataset(Dataset):
     #             structure_id = self.split_ids_oas[idx]
     #         else:
     #             structure_id = self.split_ids_sabdab[idx % self.split_ids_sabdab_length]
-            
+
     #         item = self._get_data_from_id(structure_id)
-            
+
     #     return item
 
     def _get_data_from_id(self, id: str):
@@ -416,10 +440,10 @@ class AntibodyAntigenDataset(Dataset):
         seen_prefixes = set()
         unique_ids = []
         for id_ in ids:
-            tokens = id_.split('_')
+            tokens = id_.split("_")
             # Check if the id is in the oas_paired format
             if tokens[0] == "oas" and len(tokens) >= 3 and tokens[1] == "paired":
-                prefix = '_'.join(tokens[:3])
+                prefix = "_".join(tokens[:3])
             else:
                 prefix = tokens[0]
             if prefix not in seen_prefixes:
@@ -433,10 +457,10 @@ class AntibodyAntigenDataset(Dataset):
         - If the id starts with "oas_paired", join the first three tokens.
         - Otherwise, use the first token as the prefix.
         """
-        tokens = id_str.split('_')
-        
-        if tokens[0] == "oas" and len(tokens) >= 3 and tokens[1] == "paired":            
-            return '_'.join(tokens[:3])
+        tokens = id_str.split("_")
+
+        if tokens[0] == "oas" and len(tokens) >= 3 and tokens[1] == "paired":
+            return "_".join(tokens[:3])
         else:
             return tokens[0]
 
@@ -444,13 +468,21 @@ class AntibodyAntigenDataset(Dataset):
 class AntibodyAntigenDataModule(LightningDataModule):
     """A datamodule for antibody-antigen complexes."""
 
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, skip_load=False):
         super().__init__()
 
         self.config = config
-        self._train_dataset = AntibodyAntigenDataset(config["dataset"], split="train")
-        self._val_dataset = AntibodyAntigenDataset(config["dataset"], split="val")
-        self._test_dataset = AntibodyAntigenDataset(config["dataset"], split="test")
+        self._skip_load = skip_load
+        if not skip_load:
+            self._train_dataset = AntibodyAntigenDataset(
+                config["dataset"], split="train"
+            )
+            self._val_dataset = AntibodyAntigenDataset(config["dataset"], split="val")
+            self._test_dataset = AntibodyAntigenDataset(config["dataset"], split="test")
+        else:
+            self._train_dataset = None
+            self._val_dataset = None
+            self._test_dataset = None
 
         self._num_workers = config["num_workers"]
         self._batch_size = config["batch_size"]
@@ -461,7 +493,12 @@ class AntibodyAntigenDataModule(LightningDataModule):
     def __repr__(self):
         return f"{self.__class__.__name__}(batch_size={self._batch_size})"
 
-    def collate(self, data_list: list[dict[str, torch.Tensor]], custom_redesign_mask: torch.Tensor = None, with_antigen: bool = True) -> dict[str, torch.Tensor]:
+    def collate(
+        self,
+        data_list: list[dict[str, torch.Tensor]],
+        custom_redesign_mask: torch.Tensor = None,
+        with_antigen: bool = True,
+    ) -> dict[str, torch.Tensor]:
         """
         Combines a list of dictionaries into a single dictionary with an additional batch dimension.
         """
@@ -474,12 +511,11 @@ class AntibodyAntigenDataModule(LightningDataModule):
             random.shuffle(data_list)
 
         for i, data in enumerate(data_list):
-            
+
             # Delete string based entries
             for cdr_seq in ["H1_seq", "L1_seq", "H2_seq", "L2_seq", "H3_seq", "L3_seq"]:
                 if cdr_seq in data:
                     del data[cdr_seq]
-
 
             # self._redesign = {'framework': random.choice([True, False]),
             #                     'hcdr1': random.choice([True, False]),
@@ -491,9 +527,11 @@ class AntibodyAntigenDataModule(LightningDataModule):
             #                 }
 
             data.update(get_redesign_mask(data, self._redesign))
-            
+
             if custom_redesign_mask is not None:
-                data['redesign_mask'][:len(custom_redesign_mask)] = copy.deepcopy(custom_redesign_mask)
+                data["redesign_mask"][: len(custom_redesign_mask)] = copy.deepcopy(
+                    custom_redesign_mask
+                )
 
             try:
                 data.update(
@@ -501,15 +539,17 @@ class AntibodyAntigenDataModule(LightningDataModule):
                         data,
                         max_crop_size=self._max_crop_size,
                         antigen_crop_size=self._antigen_crop_size,
-                        random_sample_sizes=self.config['random_sample_sizes'],
-                        with_antigen = with_antigen,
+                        random_sample_sizes=self.config["random_sample_sizes"],
+                        with_antigen=with_antigen,
                     )
                 )
             except Exception as e:
-                print(f"There is a problem with the sample: {data['region_index'], data['redesign_mask']}")
+                print(
+                    f"There is a problem with the sample: {data['region_index'], data['redesign_mask']}"
+                )
                 print(f"Error: {e}")
                 exit()
-                
+
             data.update(
                 center_complex(
                     data["pos_heavyatom"],
@@ -517,7 +557,7 @@ class AntibodyAntigenDataModule(LightningDataModule):
                     data["redesign_mask"],
                 )
             )
-            
+
             data.update(pad_data(data, self._max_crop_size))
 
         batch = default_collate(data_list)
@@ -545,6 +585,8 @@ class AntibodyAntigenDataModule(LightningDataModule):
 
     def train_dataloader(self) -> torch.utils.data.DataLoader:
         """The train dataloader using the train dataset."""
+        if self._skip_load:
+            return None
         return torch.utils.data.DataLoader(
             self._train_dataset,
             shuffle=True,
@@ -560,6 +602,8 @@ class AntibodyAntigenDataModule(LightningDataModule):
         """
         The validation dataloader using the validation dataset.
         """
+        if self._skip_load:
+            return None
         return torch.utils.data.DataLoader(
             self._val_dataset,
             shuffle=False,
@@ -576,6 +620,8 @@ class AntibodyAntigenDataModule(LightningDataModule):
         The test dataloader using the test dataset. This is typically used
         for final model evaluation.
         """
+        if self._skip_load:
+            return None
         return torch.utils.data.DataLoader(
             self._test_dataset,
             shuffle=False,

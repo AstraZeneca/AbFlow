@@ -49,9 +49,6 @@ def main():
         help="Directory to save the designed PDB file.",
     )
     parser.add_argument(
-        "--batch_size", type=int, default=1, help="Batch size for generation."
-    )
-    parser.add_argument(
         "--seed", type=int, default=2025, help="Random seed for generation."
     )
     parser.add_argument(
@@ -60,7 +57,9 @@ def main():
     args = parser.parse_args()
 
     initialize_constants(device=args.device)
-    model, datamodule = load_model(args.config, args.checkpoint, device=args.device)
+    model, datamodule = load_model(
+        args.config, args.checkpoint, device=args.device, skip_load=True
+    )
 
     os.makedirs(args.output_dir, exist_ok=True)
 
@@ -72,7 +71,7 @@ def main():
         light_chain_id=args.light_chain,
         antigen_chain_ids=args.antigen_chains,
         scheme=args.scheme,
-        batch_size=args.batch_size,
+        batch_size=1,
         seed=args.seed,
         device=args.device,
     )

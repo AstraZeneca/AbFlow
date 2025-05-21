@@ -12,12 +12,19 @@ from ..model.datamodule import AntibodyAntigenDataModule
 
 
 def setup_model(
-    config: dict, checkpoint_path: str = None, load_optimizer: bool = False, is_ema: bool = False, ignore_mismatched_state_dict: bool = False,
+    config: dict,
+    checkpoint_path: str = None,
+    load_optimizer: bool = False,
+    is_ema: bool = False,
+    ignore_mismatched_state_dict: bool = False,
+    skip_load: bool = False,
 ):
     """Setup model and datamodule instances."""
 
     network_instance = FlowPrediction(**config["network"])
-    datamodule_instance = AntibodyAntigenDataModule(config["datamodule"])
+    datamodule_instance = AntibodyAntigenDataModule(
+        config["datamodule"], skip_load=skip_load
+    )
 
     if checkpoint_path is not None and load_optimizer and not is_ema:
         # Load full model state including optimizer
@@ -30,7 +37,6 @@ def setup_model(
         # Load only model weights, ignore optimizer state
         checkpoint = torch.load(checkpoint_path)
         model_instance = AbFlow(network=network_instance, **config["model"])
-        
 
         if ignore_mismatched_state_dict:
             # Get the current model state dictionary
@@ -43,7 +49,9 @@ def setup_model(
                     if current_state[key].shape == value.shape:
                         filtered_state[key] = value
                     else:
-                        print(f"Skipping key '{key}' due to shape mismatch: checkpoint {value.shape} vs. model {current_state[key].shape}")
+                        print(
+                            f"Skipping key '{key}' due to shape mismatch: checkpoint {value.shape} vs. model {current_state[key].shape}"
+                        )
                 else:
                     print(f"Key '{key}' not found in the current model.")
             model_instance.load_state_dict(filtered_state, strict=False)
@@ -60,33 +68,30 @@ def setup_model(
     return model_instance, datamodule_instance
 
 
-
 def set_seed(seed: int):
     """
     Sets the seed for reproducibility across various libraries.
-    
+
     Parameters:
         seed (int): The seed value to use.
     """
     # Set seed for Python's random module
     random.seed(seed)
-    
+
     # Set seed for NumPy
     np.random.seed(seed)
-    
+
     # Set seed for PyTorch on CPU
     torch.manual_seed(seed)
-    
+
     # If using GPU, set seeds for all GPUs
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
-    
+
     # Ensure that CUDA's convolution algorithms are deterministic
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
-
-
 
 
 class CustomEMACallback(Callback):
@@ -118,12 +123,18 @@ class CustomEMACallback(Callback):
         # If a checkpoint path is provided, load the EMA state dict.
         if self.ema_checkpoint_path is not None:
             try:
-                self.ema_state_dict = torch.load(self.ema_checkpoint_path, map_location="cpu")
+                self.ema_state_dict = torch.load(
+                    self.ema_checkpoint_path, map_location="cpu"
+                )
                 print(f"Loaded EMA checkpoint from {self.ema_checkpoint_path}")
             except Exception as e:
-                print(f"Failed to load EMA checkpoint from {self.ema_checkpoint_path}: {e}")
+                print(
+                    f"Failed to load EMA checkpoint from {self.ema_checkpoint_path}: {e}"
+                )
 
-    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0):
+    def on_train_batch_end(
+        self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
+    ):
         # Only update EMA on the main process.
         if trainer.global_rank != 0:
             return
@@ -143,7 +154,9 @@ class CustomEMACallback(Callback):
         current_state = {k: v.detach().cpu() for k, v in pl_module.state_dict().items()}
         for key in self.ema_state_dict.keys():
             # ema = ema_decay * ema + (1 - ema_decay) * current
-            self.ema_state_dict[key].mul_(self.ema_decay).add_(current_state[key], alpha=1 - self.ema_decay)
+            self.ema_state_dict[key].mul_(self.ema_decay).add_(
+                current_state[key], alpha=1 - self.ema_decay
+            )
 
         # Save EMA weights at specified intervals.
         if self.iteration > 10 and self.iteration % self.save_interval == 0:
@@ -166,7 +179,7 @@ class CustomSWACallback(Callback):
         swa_frequency: int = 100,
         swa_lr: float = None,
         save_interval: int = 2000,
-        save_dir: str = "./"
+        save_dir: str = "./",
     ):
         """
         :param start_iter: Iteration at which to initialize SWA.
@@ -183,7 +196,9 @@ class CustomSWACallback(Callback):
         self.iteration = 0
         self.save_dir = save_dir
 
-    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0):
+    def on_train_batch_end(
+        self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0
+    ):
         # Only update SWA on the main process.
         if trainer.global_rank != 0:
             return
@@ -202,11 +217,13 @@ class CustomSWACallback(Callback):
             self.swa_model.update_parameters(pl_module)
             if self.swa_lr is not None:
                 for param_group in trainer.optimizers[0].param_groups:
-                    param_group['lr'] = self.swa_lr
+                    param_group["lr"] = self.swa_lr
 
             # Save the SWA model at specified intervals, ensuring the weights are on CPU.
             if self.iteration % self.save_interval == 0:
-                cpu_state_dict = {k: v.cpu() for k, v in self.swa_model.module.state_dict().items()}
+                cpu_state_dict = {
+                    k: v.cpu() for k, v in self.swa_model.module.state_dict().items()
+                }
                 file_name = f"{self.save_dir}/swa_model_{self.iteration}.ckpt"
                 torch.save(cpu_state_dict, file_name)
                 print(f"SWA model saved at iteration {self.iteration} as {file_name}")
@@ -216,15 +233,15 @@ class CustomSWACallback(Callback):
             return
         # Update BatchNorm stats if necessary.
         update_bn(trainer.train_dataloader, self.swa_model, device=pl_module.device)
-        final_state_dict = {k: v.cpu() for k, v in self.swa_model.module.state_dict().items()}
+        final_state_dict = {
+            k: v.cpu() for k, v in self.swa_model.module.state_dict().items()
+        }
         final_file_name = "{self.save_dir}/swa_model_final.ckpt"
         torch.save(final_state_dict, final_file_name)
         print(f"Final SWA model saved as {final_file_name}")
 
 
-
-
-def average_checkpoints(checkpoint_paths, output_path, key='state_dict'):
+def average_checkpoints(checkpoint_paths, output_path, key="state_dict"):
     """
     Averages the parameters from the provided checkpoints and saves the result.
 
@@ -248,11 +265,11 @@ def average_checkpoints(checkpoint_paths, output_path, key='state_dict'):
         else:
             for k in avg_state_dict.keys():
                 avg_state_dict[k].add_(state_dict[k])
-    
+
     # Divide each parameter by the number of checkpoints to compute the average.
     for k in avg_state_dict:
         avg_state_dict[k].div_(num_ckpts)
-    
+
     # Save the averaged state dict wrapped in a dictionary with key 'state_dict'
     torch.save({key: avg_state_dict}, output_path)
     print(f"Averaged checkpoint saved to {output_path}")
