@@ -91,7 +91,7 @@ class ConditionModule(nn.Module):
         if "sequence" in self.design_mode:
             mask_data(res_type, MASK_TOKEN, data_dict["redesign_mask"], in_place=True)
             mask_data(res_type, PAD_TOKEN, ~data_dict["valid_mask"], in_place=True)
-        
+
         # One-hot encoding
         res_type_one_hot = self.res_type_one_hot(res_type)
 
@@ -115,9 +115,7 @@ class ConditionModule(nn.Module):
                 in_place=True,
             )
 
-        mask_data(
-            dihedral_trigometry, 0.0, data_dict["redesign_mask"], in_place=True
-        )
+        mask_data(dihedral_trigometry, 0.0, data_dict["redesign_mask"], in_place=True)
 
         # concatenate the per node features
         s_i = torch.cat(
@@ -145,7 +143,7 @@ class ConditionModule(nn.Module):
     def forward(
         self,
         data_dict: dict[str, torch.Tensor],
-        is_training: bool =True,
+        is_training: bool = True,
     ):
         """
         Forward pass with recycling.
@@ -189,7 +187,7 @@ class ConditionModule(nn.Module):
 
     def _encode_batch(self, batch):
         """
-        Encode the input batch to get residue embeddings, pair embeddings, 
+        Encode the input batch to get residue embeddings, pair embeddings,
         initial AA sequence, and position of atoms.
 
         Parameters
@@ -212,26 +210,26 @@ class ConditionModule(nn.Module):
         """
 
         # Extract sequence, fragment type, and heavy atom positional information
-        s0 = batch['res_type']
-        res_nb = batch['res_index']
-        fragment_type = batch['chain_type']
-        pos_heavyatom = batch['pos_heavyatom'].clone()
+        s0 = batch["res_type"]
+        res_nb = batch["res_index"]
+        fragment_type = batch["chain_type"]
+        pos_heavyatom = batch["pos_heavyatom"].clone()
         cb_distogram = batch["cb_distogram"].clone()
-        ca_unit_vectors =batch["ca_unit_vectors"].clone()
-        residue_mask = batch['valid_mask']
-        generation_mask_bar = ~batch['redesign_mask']
+        ca_unit_vectors = batch["ca_unit_vectors"].clone()
+        residue_mask = batch["valid_mask"]
+        generation_mask_bar = ~batch["redesign_mask"]
         frame_rotations = batch["frame_rotations"]
         frame_translations = batch["frame_translations"]
         pocket = batch["pocket"]
 
         # Side-chain information
         dihedrals = batch["dihedrals"].clone()
-        mask_data(dihedrals, 0.0, batch["redesign_mask"], in_place=True) 
+        mask_data(dihedrals, 0.0, batch["redesign_mask"], in_place=True)
         sidechain_dihedrals = self.dihedral_encode(dihedrals)
 
         # Construct context masks for training structure and sequence
         context_mask = torch.logical_and(
-            residue_mask, 
+            residue_mask,
             generation_mask_bar,
         )
 
@@ -241,34 +239,47 @@ class ConditionModule(nn.Module):
 
         # Compute residue embeddings
         res_emb = self.residue_emb(
-            aa=s0, res_nb=res_nb, fragment_type=fragment_type, 
-            pos_atoms=pos_heavyatom, 
+            aa=s0,
+            res_nb=res_nb,
+            fragment_type=fragment_type,
+            pos_atoms=pos_heavyatom,
             sidechain_dihedrals=sidechain_dihedrals,
             residue_mask=residue_mask,
-            structure_mask=structure_mask, sequence_mask=sequence_mask, 
-            generation_mask=batch['redesign_mask'],
-            pocket = pocket,
+            structure_mask=structure_mask,
+            sequence_mask=sequence_mask,
+            generation_mask=batch["redesign_mask"],
+            pocket=pocket,
         )
 
         # Compute pairwise residue embeddings
         pair_emb = self.pair_emb(
-            aa=s0, res_nb=res_nb, fragment_type=fragment_type, 
-            pos_atoms=pos_heavyatom, 
+            aa=s0,
+            res_nb=res_nb,
+            fragment_type=fragment_type,
+            pos_atoms=pos_heavyatom,
             sidechain_dihedrals=sidechain_dihedrals,
-            residue_mask=residue_mask, 
-            cb_distogram=cb_distogram, ca_unit_vectors=ca_unit_vectors,
-            structure_mask=structure_mask, sequence_mask=sequence_mask,
-            generation_mask=batch['redesign_mask'],
+            residue_mask=residue_mask,
+            cb_distogram=cb_distogram,
+            ca_unit_vectors=ca_unit_vectors,
+            structure_mask=structure_mask,
+            sequence_mask=sequence_mask,
+            generation_mask=batch["redesign_mask"],
             pocket=pocket,
         )
 
         # Extract positions of C-alpha atoms and construct 3D basis
         p0 = pos_heavyatom[:, :, BBHeavyAtom.CA]
         R0 = construct_3d_basis(
-            center=pos_heavyatom[:, :, BBHeavyAtom.CA], 
-            p1=pos_heavyatom[:, :, BBHeavyAtom.C],  
+            center=pos_heavyatom[:, :, BBHeavyAtom.CA],
+            p1=pos_heavyatom[:, :, BBHeavyAtom.C],
             p2=pos_heavyatom[:, :, BBHeavyAtom.N],
         )
         v0_6D = rotmat_to_rot6d(R0)
+
+        # debug: print each of the data to check for proper masking
+        print("res_emb", res_emb.shape)
+        print("pair_emb", pair_emb.shape)
+
+        print("pair_emb_example", pair_emb[0, 0, :, 0])
 
         return res_emb, pair_emb, v0_6D, p0, s0

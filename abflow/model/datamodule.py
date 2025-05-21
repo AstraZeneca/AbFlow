@@ -520,7 +520,7 @@ class AntibodyAntigenDataModule(LightningDataModule):
             #                 }
 
             data.update(get_redesign_mask(data, self._redesign))
-            data.update(mask_out_data(data, mask=data["redesign_mask"]))
+            # data.update(mask_out_data(data, mask=data["redesign_mask"]))
 
             if custom_redesign_mask is not None:
                 data["redesign_mask"][: len(custom_redesign_mask)] = copy.deepcopy(

@@ -158,17 +158,17 @@ def get_rmsd(
 ) -> torch.Tensor:
     """
     Calculate the root mean squared error (RMSD) between predicted and true coordinates.
-    In the redesign case, we want to align the predicted and true tensors using valid positions 
+    In the redesign case, we want to align the predicted and true tensors using valid positions
     outside the redesign region, then compute the RMSD only on the redesign region.
-    
+
     If `alignment_masks` is not provided, it is computed from the provided masks.
     The caller should supply a list of masks where:
       - masks[0] is the redesign mask (True for positions in the redesign region)
       - masks[1] is the valid mask (True for positions that are valid)
-    
+
     The alignment mask is computed as:
         alignment_mask = valid_mask & (~redesign_mask)
-    
+
     :param pred_coords: List of predicted coordinates, each with shape (N_batch, N_res, 3).
     :param true_coords: List of true coordinates, each with shape (N_batch, N_res, 3).
     :param masks: List of masks to apply. Expected to include at least the redesign and valid masks.
@@ -182,21 +182,22 @@ def get_rmsd(
     # Expand masks to match the combined coordinate shape if provided.
     if masks is not None:
         masks = [
-            torch.repeat_interleave(mask, len(pred_coords), dim=-1)
-            for mask in masks
+            torch.repeat_interleave(mask, len(pred_coords), dim=-1) for mask in masks
         ]
 
     # If no alignment masks are provided, compute them using valid positions outside redesign.
     if alignment_masks is None and masks is not None and len(masks) >= 2:
         redesign_mask = masks[0]  # Expected to be the redesign region mask
-        valid_mask = masks[1]     # Expected to be the valid positions mask
+        valid_mask = masks[1]  # Expected to be the valid positions mask
         # Alignment should use only valid positions that are not part of the redesign region.
         alignment_mask = valid_mask & (~redesign_mask)
         alignment_masks = [alignment_mask]
 
     # Perform Kabsch alignment if alignment_masks are provided.
     if alignment_masks is not None:
-        pred_coord, true_coord = kabsch_alignment(pred_coord, true_coord, alignment_masks)
+        pred_coord, true_coord = kabsch_alignment(
+            pred_coord, true_coord, alignment_masks
+        )
 
     # Compute squared distances over all positions.
     sq_distance = torch.sum((pred_coord - true_coord) ** 2, dim=-1)
@@ -205,6 +206,7 @@ def get_rmsd(
     mean_sq_distance = average_data(sq_distance, masks=masks)
     rmsd = torch.sqrt(mean_sq_distance)
     return rmsd
+
 
 def get_tm_score(
     pred_coord: torch.Tensor,
@@ -248,8 +250,6 @@ def get_tm_score(
     return tm_score
 
 
-
-
 def get_bb_clash_violation(
     N_coords: torch.Tensor,
     CA_coords: torch.Tensor,
@@ -267,12 +267,12 @@ def get_bb_clash_violation(
     C_N_lit = AtomVanDerWaalRadii["C"].value + AtomVanDerWaalRadii["N"].value
 
     # Pairwise distances
-    N_dist    = torch.cdist(N_coords,    N_coords,    p=2)
-    CA_dist   = torch.cdist(CA_coords,   CA_coords,   p=2)
-    C_dist    = torch.cdist(C_coords,    C_coords,    p=2)
-    N_CA_dist = torch.cdist(N_coords,    CA_coords,   p=2)
-    N_C_dist  = torch.cdist(N_coords,    C_coords.roll(1, dims=-2), p=2)
-    CA_C_dist = torch.cdist(CA_coords,   C_coords,    p=2)
+    N_dist = torch.cdist(N_coords, N_coords, p=2)
+    CA_dist = torch.cdist(CA_coords, CA_coords, p=2)
+    C_dist = torch.cdist(C_coords, C_coords, p=2)
+    N_CA_dist = torch.cdist(N_coords, CA_coords, p=2)
+    N_C_dist = torch.cdist(N_coords, C_coords.roll(1, dims=-2), p=2)
+    CA_C_dist = torch.cdist(CA_coords, C_coords, p=2)
 
     # Replace first row/col without in-place
     mask_row = torch.zeros_like(N_C_dist, dtype=torch.bool)
@@ -285,33 +285,33 @@ def get_bb_clash_violation(
     # Mask diagonal distances out-of-place
     diag = torch.eye(N_dist.size(1), device=N_dist.device, dtype=torch.bool)
     diag = diag.unsqueeze(0).expand_as(N_dist)
-    N_dist    = mask_data(N_dist,    1e9, diag, in_place=False)
-    CA_dist   = mask_data(CA_dist,   1e9, diag, in_place=False)
-    C_dist    = mask_data(C_dist,    1e9, diag, in_place=False)
+    N_dist = mask_data(N_dist, 1e9, diag, in_place=False)
+    CA_dist = mask_data(CA_dist, 1e9, diag, in_place=False)
+    C_dist = mask_data(C_dist, 1e9, diag, in_place=False)
     N_CA_dist = mask_data(N_CA_dist, 1e9, diag, in_place=False)
-    N_C_dist  = mask_data(N_C_dist,  1e9, diag, in_place=False)
+    N_C_dist = mask_data(N_C_dist, 1e9, diag, in_place=False)
     CA_C_dist = mask_data(CA_C_dist, 1e9, diag, in_place=False)
 
     # Compute clashing losses
-    N_clash    = torch.clamp(N_N_lit - tolerance - N_dist,    min=0.0) / 2
-    CA_clash   = torch.clamp(C_C_lit - tolerance - CA_dist,   min=0.0) / 2
-    C_clash    = torch.clamp(C_C_lit - tolerance - C_dist,    min=0.0) / 2
+    N_clash = torch.clamp(N_N_lit - tolerance - N_dist, min=0.0) / 2
+    CA_clash = torch.clamp(C_C_lit - tolerance - CA_dist, min=0.0) / 2
+    C_clash = torch.clamp(C_C_lit - tolerance - C_dist, min=0.0) / 2
     N_CA_clash = torch.clamp(C_N_lit - tolerance - N_CA_dist, min=0.0)
-    N_C_clash  = torch.clamp(C_N_lit - tolerance - N_C_dist,  min=0.0)
+    N_C_clash = torch.clamp(C_N_lit - tolerance - N_C_dist, min=0.0)
     CA_C_clash = torch.clamp(C_C_lit - tolerance - CA_C_dist, min=0.0)
 
     total = N_clash + CA_clash + C_clash + N_CA_clash + N_C_clash + CA_C_clash
 
     # Apply 2D masks
     masks_dim_2 = [m.unsqueeze(1) for m in masks_dim_2]
-    mask2       = combine_masks(masks_dim_2, total)
-    total_sum   = (total * mask2).sum(dim=-1)
-    denom       = mask2.sum(dim=-1).clamp_min(1e-6)
-    total_loss  = total_sum / denom
-    violation   = (total_loss > 0.0).float()
+    mask2 = combine_masks(masks_dim_2, total)
+    total_sum = (total * mask2).sum(dim=-1)
+    denom = mask2.sum(dim=-1).clamp_min(1e-6)
+    total_loss = total_sum / denom
+    violation = (total_loss > 0.0).float()
 
-    clash_loss      = average_data(total_loss, masks=masks_dim_1)
-    clash_violation = average_data(violation,   masks=masks_dim_1)
+    clash_loss = average_data(total_loss, masks=masks_dim_1)
+    clash_violation = average_data(violation, masks=masks_dim_1)
     return clash_loss, clash_violation
 
 
@@ -329,7 +329,7 @@ def get_bb_bond_angle_violation(
     eps_norm = 1e-6
     N_CA = F.normalize(N_coords - CA_coords, dim=-1, eps=eps_norm)
     C_CA = F.normalize(C_coords - CA_coords, dim=-1, eps=eps_norm)
-    C_N  = F.normalize(C_coords - N_coords.roll(-1, dims=-2), dim=-1, eps=eps_norm)
+    C_N = F.normalize(C_coords - N_coords.roll(-1, dims=-2), dim=-1, eps=eps_norm)
 
     # 2) clamp before acos
     def safe_angle(u, v):
@@ -337,12 +337,12 @@ def get_bb_bond_angle_violation(
         c = torch.clamp(c, -1.0 + 1e-6, 1.0 - 1e-6)
         return torch.acos(c)
 
-    ang1 = safe_angle(N_CA,   C_CA)
-    ang2 = safe_angle(C_CA,   C_N)
-    ang3 = safe_angle(C_N,   -N_CA.roll(-1, dims=-2))
+    ang1 = safe_angle(N_CA, C_CA)
+    ang2 = safe_angle(C_CA, C_N)
+    ang3 = safe_angle(C_N, -N_CA.roll(-1, dims=-2))
 
     # Replace last valid index per batch
-    mask     = combine_masks(masks, ang1)
+    mask = combine_masks(masks, ang1)
     last_idx = mask.float().argmax(dim=-1)
     batch_idx = torch.arange(ang1.size(0), device=ang1.device)
     ang2[batch_idx, last_idx] = BackboneBondAngles["CA_C_N"].value
@@ -352,24 +352,24 @@ def get_bb_bond_angle_violation(
     loss1 = torch.clamp_min(
         torch.abs(ang1 - BackboneBondAngles["N_CA_C"].value)
         - num_stds * BackboneBondAngleStdDevs["N_CA_C"].value,
-        0.0
+        0.0,
     )
     loss2 = torch.clamp_min(
         torch.abs(ang2 - BackboneBondAngles["CA_C_N"].value)
         - num_stds * BackboneBondAngleStdDevs["CA_C_N"].value,
-        0.0
+        0.0,
     )
     loss3 = torch.clamp_min(
         torch.abs(ang3 - BackboneBondAngles["C_N_CA"].value)
         - num_stds * BackboneBondAngleStdDevs["C_N_CA"].value,
-        0.0
+        0.0,
     )
 
-    total     = loss1 + loss2 + loss3
+    total = loss1 + loss2 + loss3
     violation = (total > 0.0).float()
 
-    bond_loss      = average_data(total,     masks=masks)
-    bond_violation = average_data(violation,  masks=masks)
+    bond_loss = average_data(total, masks=masks)
+    bond_violation = average_data(violation, masks=masks)
     return bond_loss, bond_violation
 
 
@@ -389,7 +389,7 @@ def get_bb_bond_length_violation(
     d3 = torch.norm(C_coords - N_coords.roll(-1, dims=-2), dim=-1)
 
     # Replace last valid index per batch
-    mask     = combine_masks(masks, d1)
+    mask = combine_masks(masks, d1)
     last_idx = mask.float().argmax(dim=-1)
     batch_idx = torch.arange(d1.size(0), device=d1.device)
 
@@ -400,25 +400,26 @@ def get_bb_bond_length_violation(
     loss1 = torch.clamp_min(
         torch.abs(d1 - BackboneBondLengths["N_CA"].value)
         - num_stds * BackboneBondLengthStdDevs["N_CA"].value,
-        0.0
+        0.0,
     )
     loss2 = torch.clamp_min(
         torch.abs(d2 - BackboneBondLengths["CA_C"].value)
         - num_stds * BackboneBondLengthStdDevs["CA_C"].value,
-        0.0
+        0.0,
     )
     loss3 = torch.clamp_min(
         torch.abs(d3 - BackboneBondLengths["C_N"].value)
         - num_stds * BackboneBondLengthStdDevs["C_N"].value,
-        0.0
+        0.0,
     )
 
-    total     = loss1 + loss2 + loss3
+    total = loss1 + loss2 + loss3
     violation = (total > 0.0).float()
 
-    length_loss      = average_data(total,     masks=masks)
-    length_violation = average_data(violation,  masks=masks)
+    length_loss = average_data(total, masks=masks)
+    length_violation = average_data(violation, masks=masks)
     return length_loss, length_violation
+
 
 # def get_bb_clash_violation(
 #     N_coords: torch.Tensor,
@@ -575,6 +576,7 @@ def get_bb_bond_length_violation(
 #     length_violation = average_data(violation, masks=masks)
 #     return length_loss, length_violation
 
+
 def get_total_violation(
     N_coords: torch.Tensor,
     CA_coords: torch.Tensor,
@@ -659,10 +661,11 @@ def get_lddt_de(
              torch.Tensor: Distance error for pairs of residues in each complex, shape (N_batch, N_res, N_res).
     """
 
-
     # Compute pairwise distances
     d_dist = torch.cdist(pred_coord, true_coord, p=2)  # Shape: (N_batch, N_res, N_res)
-    d_dist_gt = torch.cdist(true_coord, true_coord, p=2)  # Shape: (N_batch, N_res, N_res)
+    d_dist_gt = torch.cdist(
+        true_coord, true_coord, p=2
+    )  # Shape: (N_batch, N_res, N_res)
 
     # Compute distance error
     d_dist_pred = torch.cdist(pred_coord, pred_coord, p=2)
@@ -685,7 +688,9 @@ def get_lddt_de(
     for batch in range(N_batch):
         for i in range(N_res):
             # Find valid indices within the distance cutoff
-            valid_indices = torch.nonzero(d_dist_gt[batch, i] < distance_cutoff).squeeze(-1)
+            valid_indices = torch.nonzero(
+                d_dist_gt[batch, i] < distance_cutoff
+            ).squeeze(-1)
 
             if valid_indices.numel() == 0:
                 continue  # Skip if no valid indices
@@ -844,11 +849,13 @@ def get_likelihood(
 
 
 class AbFlowMetrics(nn.Module):
-    def __init__(self):
+    def __init__(self, model_pred=True):
         super().__init__()
 
+        self.model_pred = model_pred
+
     def forward(self, pred_data_dict: dict, true_data_dict: dict):
-        
+
         metrics = {}
 
         # Sequence metrics
@@ -1026,16 +1033,17 @@ class AbFlowMetrics(nn.Module):
                 "ptm_interaction_redesign"
             ]
 
-        # Log likelihood
-        metrics["likelihood/redesign"] = get_likelihood(
-            # pred_data_dict["res_type_prob"],
-            pred_data_dict["res_type_prob"],
-            true_data_dict["res_type"],
-            masks=[
-                true_data_dict["redesign_mask"],
-                true_data_dict["valid_mask"],
-            ],
-        )
+        if self.model_pred:
+            # Log likelihood
+            metrics["likelihood/redesign"] = get_likelihood(
+                # pred_data_dict["res_type_prob"],
+                pred_data_dict["res_type_prob"],
+                true_data_dict["res_type"],
+                masks=[
+                    true_data_dict["redesign_mask"],
+                    true_data_dict["valid_mask"],
+                ],
+            )
 
         # Remove nans
         for key in metrics:

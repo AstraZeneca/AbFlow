@@ -47,8 +47,8 @@ datamodule:
         seed: *seed
         num_val_cluster: 10
         paths:
-            data: /home/jovyan/abflow-datavol/data 
-            model: /home/jovyan/abflow-datavol/checkpoints
+            data: /scratch/hz362/datavol/data 
+            model: /scratch/hz362/datavol/model
     binder_loss: *binder_loss
 
 # abflow model settings
