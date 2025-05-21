@@ -1,22 +1,26 @@
-![Maturity-level-0](https://img.shields.io/badge/Maturity%20Level-ML--0-red)
-
 # AbFlow
 
-Redesign antibody CDR loops with all-atom flow matching
+Adaptive Multi-Task Training for Antibody Sequence-Structure Generation via Flow Matching
 
-(paper) (demo)
+![Maturity-level-0](https://img.shields.io/badge/Maturity%20Level-ML--0-red)
+![PyTorch](https://img.shields.io/badge/PyTorch-red?logo=pytorch&logoColor=white)
+![Lightning](https://img.shields.io/badge/Lightning-792ee5?logo=lightning&logoColor=white)
+
+(paper)
+
+AbFlow is a generative model for joint antibody sequence and structure design. AbFlow can sample CDR loop sequences and all-atom conformations, conditioned on structural or sequence context. The model achieves state-of-the-art results on in silico and experimental antibody benchmarks.
 
 ## Installation
 
-Git clone and `cd` into the repository:
+We recommend using `mamba` into the base environment for faster dependency resolution. If you don't have `mamba` installed, install it in your **base environment** using the following command:
+```bash
+conda install conda-forge::mamba
+```
+
+Then git clone and `cd` into the repository:
 ```bash
 git clone https://github.com/AstraZeneca/AbFlow.git
 cd AbFlow
-```
-
-Install `mamba` into the base environment for faster dependency resolution:
-```bash
-conda install conda-forge::mamba
 ```
 
 Create the vitual environment with dependencies using:
@@ -29,10 +33,6 @@ Then `pip install` abflow package after activating the environment:
 mamba activate abflow
 pip install ./
 ```
-
-## Train
-
-## Design
 
 ## Contact
 
