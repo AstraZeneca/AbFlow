@@ -1,7 +1,7 @@
 """
 PDB Processing Pipeline for AbFlow.
 
-This script processes PDB files for use in AbFlow, including filling missing atoms, 
+This script processes PDB files for use in AbFlow, including filling missing atoms,
 extracting chain data, and outputting processed input data dictionary.
 
 ### Example Usage:
@@ -211,13 +211,15 @@ def process_pdb_to_lmdb(
                 data["light_ctype"] = ab_chain.chain_type
 
     for cn in ["heavy", "light", "antigen"]:
-        
+
         if data[cn] is None:
             continue
 
         chain_data = data[cn]
         chain_data["aa"] = torch.tensor(np.array(chain_data["aa"]), dtype=torch.long)
-        chain_data["res_nb"] = torch.tensor(np.array(chain_data["res_nb"]), dtype=torch.long)
+        chain_data["res_nb"] = torch.tensor(
+            np.array(chain_data["res_nb"]), dtype=torch.long
+        )
         chain_data["cdr_locations"] = torch.tensor(
             np.array(chain_data["cdr_locations"]), dtype=torch.long
         )
@@ -262,24 +264,38 @@ def process_lmdb_chain(data: dict) -> dict:
             res_type_list.append(chain_data["aa"])
             if chain_name == "light":
                 if "L3_seq" in chain_data:
-                    L1_seq, L2_seq, L3_seq = chain_data["L1_seq"], chain_data["L2_seq"], chain_data["L3_seq"]
+                    L1_seq, L2_seq, L3_seq = (
+                        chain_data["L1_seq"],
+                        chain_data["L2_seq"],
+                        chain_data["L3_seq"],
+                    )
 
                 if data["light_ctype"] == "K":
                     chain_type_list.append(
-                        torch.full_like(chain_data["aa"], chain_id_to_index["light_kappa"])
+                        torch.full_like(
+                            chain_data["aa"], chain_id_to_index["light_kappa"]
+                        )
                     )
                 elif data["light_ctype"] == "L":
                     chain_type_list.append(
-                        torch.full_like(chain_data["aa"], chain_id_to_index["light_lambda"])
+                        torch.full_like(
+                            chain_data["aa"], chain_id_to_index["light_lambda"]
+                        )
                     )
                 else:
                     # Kappa is more common than lambda in humans (approximately 2:1), so make it a default option when not sure.
                     chain_type_list.append(
-                        torch.full_like(chain_data["aa"], chain_id_to_index["light_kappa"])
+                        torch.full_like(
+                            chain_data["aa"], chain_id_to_index["light_kappa"]
+                        )
                     )
             else:
                 if chain_name == "heavy" and "H3_seq" in chain_data:
-                    H1_seq, H2_seq, H3_seq = chain_data["H1_seq"], chain_data["H2_seq"], chain_data["H3_seq"]
+                    H1_seq, H2_seq, H3_seq = (
+                        chain_data["H1_seq"],
+                        chain_data["H2_seq"],
+                        chain_data["H3_seq"],
+                    )
 
                 chain_type_list.append(
                     torch.full_like(chain_data["aa"], chain_id_to_index[chain_name])
@@ -357,7 +373,9 @@ def add_features(data: Dict[str, torch.Tensor]):
         data["pos_heavyatom"][:, 4, :],  # Retain original CB coordinates for others
     )
     cb_distogram = cb_distogram_enc(modified_pos_heavyatom[:, 4, :])
-    ca_unit_vectors = ca_unit_vector_enc(data["pos_heavyatom"][:, 1, :], frame_rotations)
+    ca_unit_vectors = ca_unit_vector_enc(
+        data["pos_heavyatom"][:, 1, :], frame_rotations
+    )
     rel_positions = rel_pos_enc(data["res_index"], data["chain_id"])
 
     feature_dict["res_type_one_hot"] = res_type_one_hot

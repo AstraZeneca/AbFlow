@@ -6,7 +6,6 @@ import torch
 from typing import List
 
 from ..rigid import Rigid, Rotation
-import torch
 
 
 def expand_mask(mask: torch.Tensor, data: torch.Tensor) -> torch.Tensor:
