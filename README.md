@@ -34,6 +34,26 @@ mamba activate abflow
 pip install ./
 ```
 
+## Design
+
+Use the `python scripts/design/design_pdb.py` script to redesign CDR loops and generate a new PDB structure for your antibody complex. 
+Here’s a typical command:
+
+```bash
+python run_design.py \
+    --config /path/to/config.yaml \
+    --checkpoint /path/to/checkpoint.ckpt \
+    --input_pdb /path/to/antibody_complex.pdb \
+    --heavy_chain H \
+    --light_chain L \
+    --antigen_chains A B \
+    --scheme chothia \
+    --output_dir results \
+    --batch_size 1 \
+    --seed 2025 \
+    --device cuda:0
+```
+
 ## Contact
 
 Please contact hz362@cam.ac.uk or ucabtuc@gmail.com to report any issues.
