@@ -6,41 +6,66 @@ Adaptive Multi-Task Training for Antibody Sequence-Structure Generation via Flow
 ![PyTorch](https://img.shields.io/badge/PyTorch-red?logo=pytorch&logoColor=white)
 ![Lightning](https://img.shields.io/badge/Lightning-792ee5?logo=lightning&logoColor=white)
 
-(paper)
+AbFlow is a generative model for joint antibody sequence and structure design. It can sample CDR loop sequences and all-atom conformations, conditioned on structural or sequence context and achieves state-of-the-art results on in silico and experimental benchmarks.
 
-AbFlow is a generative model for joint antibody sequence and structure design. AbFlow can sample CDR loop sequences and all-atom conformations, conditioned on structural or sequence context. The model achieves state-of-the-art results on in silico and experimental antibody benchmarks.
+---
 
 ## Installation
 
-We recommend using `mamba` into the base environment for faster dependency resolution. If you don't have `mamba` installed, install it in your **base environment** using the following command:
-```bash
-conda install conda-forge::mamba
-```
+### 1. Clone the repository
 
-Then git clone and `cd` into the repository:
 ```bash
 git clone https://github.com/AstraZeneca/AbFlow.git
 cd AbFlow
 ```
 
-Create the vitual environment with dependencies using:
+### 2. Create the conda environment
+
+To create the environment:
+
 ```bash
-mamba env create -f environment.yml
+conda env create -f environment.yml
 ```
 
-Then `pip install` abflow package after activating the environment:
+### 3. Activate the environment
+
 ```bash
-mamba activate abflow
+conda activate abflow
+```
+
+### 4. Install the `abflow` package
+
+```bash
 pip install ./
 ```
 
-## Design
+Now, you are ready to run AbFlow.
 
-Use the `python scripts/design/design_pdb.py` script to redesign CDR loops and generate a new PDB structure for your antibody complex. 
-Here’s a typical command:
+---
+
+## Main Dependencies
+
+AbFlow is built primarily on:
+- **PyTorch (>=2.4)**
+- **Lightning (==2.2.1)**
+- **BioPython (==1.84)**
+- **pandas (==2.2.2)**
+- **numpy (==1.26.4)**
+
+See the [environment.yml](environment.yml) file for a complete list of packages and pinned versions.
+
+---
+
+## Usage
+
+Below we show an example for redesigning CDR loops and generating a new PDB structure. Whether you redesign individual loops, all six loops or the entire antibody depends on your model checkpoint and its configuration.
+
+For more details, use the `--help` option with any script.
+
+### Example: Redesigning CDR Loops
 
 ```bash
-python run_design.py \
+python scripts/design/design_pdb.py \
     --config /path/to/config.yaml \
     --checkpoint /path/to/checkpoint.ckpt \
     --input_pdb /path/to/antibody_complex.pdb \
@@ -53,8 +78,38 @@ python run_design.py \
     --device cuda:0
 ```
 
+- `--config`: Path to the configuration file associated with the model checkpoint.
+- `--checkpoint`: Path to your trained model checkpoint.
+- `--input_pdb`: Path to the input PDB file of the antibody complex.
+- `--heavy_chain` and `--light_chain`: Chain identifiers for the antibody.
+- `--antigen_chains`: Chain identifiers for any antigens present (optional).
+- `--scheme`: Numbering scheme (commonly "chothia").
+- `--output_dir`: Directory to store results.
+- `--seed`: Random seed for reproducibility.
+- `--device`: Device to run the computations on (e.g., `cuda:0` or `cpu`).
+
+The output directory will include the redesigned PDB file.
+
+---
+
 ## Contact
 
-Please contact hz362@cam.ac.uk or ucabtuc@gmail.com to report any issues.
+For any issues, suggestions, or questions, please reach out to:
+- [hz362@cam.ac.uk](mailto:hz362@cam.ac.uk)
+- [ucabtuc@gmail.com](mailto:ucabtuc@gmail.com)
+
+---
 
 ## Reference
+
+If you find this code useful, please cite:
+
+```bibtex
+@misc{our_paper,
+  title={AbFlow: Adaptive Multi-Task Training for Antibody Sequence-Structure Generation},
+  author={...},
+  year={...},
+  archivePrefix={...},
+  primaryClass={...}
+}
+```
