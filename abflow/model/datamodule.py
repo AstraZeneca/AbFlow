@@ -71,7 +71,7 @@ class AntibodyAntigenDataset(Dataset):
 
         random.seed(self.config["seed"])
 
-        cluster_name = "cluster_result_cluster.tsv"  # if self.config["name"]=="sabdab" else "cluster_result_clustermode2_cluster.tsv"
+        cluster_name = "cluster_result_clustermode1_cluster.tsv"  # if self.config["name"]=="sabdab" else "cluster_result_clustermode2_cluster.tsv"
 
         self.cluster_path = os.path.join(
             self.data_path, self.config["name"], cluster_name
