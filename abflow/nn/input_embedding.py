@@ -13,14 +13,21 @@ from .modules.features import apply_label_smoothing
 from ..structure import full_atom_reconstruction, get_frames_and_dihedrals
 from ..utils.utils import apply_mask, mask_data
 from .modules.features import OneHotEmbedding
-from ..geometry import get_3d_basis, global2local, get_dihedrals, get_bb_dihedral_angles, pairwise_dihedrals, BBHeavyAtom
+from ..geometry import (
+    get_3d_basis,
+    global2local,
+    get_dihedrals,
+    get_bb_dihedral_angles,
+    pairwise_dihedrals,
+    BBHeavyAtom,
+)
 
 from ..flow.manifold_flow import (
     OptimalTransportEuclideanFlow,
     LinearSO3Flow,
     LinearSimplexFlow,
     LinearToricFlow,
-    )
+)
 
 # Conversion scales between nanometers and angstroms
 NM_TO_ANG_SCALE = 10.0
@@ -48,7 +55,6 @@ class EmbedInput(nn.Module):
         num_rel_pos: int = 32,
     ):
         super().__init__()
-
 
         self.design_mode = design_mode
         self.label_smoothing = label_smoothing
@@ -85,7 +91,6 @@ class EmbedInput(nn.Module):
             schedule_params={},
         )
 
-
     def forward(
         self,
         true_data_dict,
@@ -96,13 +101,12 @@ class EmbedInput(nn.Module):
         """
 
         true_feature_dict = self._add_features(true_data_dict)
-        
+
         num_batch = true_data_dict["pos_heavyatom"].shape[0]
         num_res = true_data_dict["pos_heavyatom"].shape[1]
         device = true_data_dict["pos_heavyatom"].device
         dtype = true_data_dict["pos_heavyatom"].dtype
-        
-        
+
         # Start from t=0 in inference mode
         if t_step is not None:
             time = t_step * torch.ones((num_batch, num_res, 1), device=device)
@@ -110,9 +114,11 @@ class EmbedInput(nn.Module):
             time = self._sample_time(num_batch=num_batch, device=device, dtype=dtype)[
                 :, None, None
             ].expand(num_batch, num_res, 1)
-                            
-        noised_feature_dict, s_i, z_ij, time = self._noise_features(true_data_dict, true_feature_dict, time)
-        
+
+        noised_feature_dict, s_i, z_ij, time = self._noise_features(
+            true_data_dict, true_feature_dict, time
+        )
+
         return true_feature_dict, noised_feature_dict, s_i, z_ij, time
 
     def _add_features(self, data_dict: dict[str, torch.Tensor]):
@@ -122,7 +128,9 @@ class EmbedInput(nn.Module):
 
         # Convert 3x3 rotations to 6D with correct dimensions
         frame_rotations = data_dict["frame_rotations"]  # Shape [B, L, 3, 3]
-        frame_rotations_6d = frame_rotations[..., :2, :]  # Keep first two rows [B, L, 2, 3]
+        frame_rotations_6d = frame_rotations[
+            ..., :2, :
+        ]  # Keep first two rows [B, L, 2, 3]
         frame_rotations_6d = frame_rotations_6d.flatten(start_dim=-2)  # [B, L, 6]
 
         return {
@@ -139,18 +147,20 @@ class EmbedInput(nn.Module):
         then clamp the values to be between 0 and 0.99.
         """
         time_steps = torch.rand(num_batch, device=device, dtype=dtype)
-        return torch.clamp(time_steps, min=0., max=self.max_time_clamp)
+        return torch.clamp(time_steps, min=0.0, max=self.max_time_clamp)
 
     def _noise_features(
-        self, data_dict: dict[str, torch.Tensor], true_feature_dict: dict[str, torch.Tensor], time: torch.Tensor
+        self,
+        data_dict: dict[str, torch.Tensor],
+        true_feature_dict: dict[str, torch.Tensor],
+        time: torch.Tensor,
     ):
-
 
         num_batch = data_dict["pos_heavyatom"].shape[0]
         num_res = data_dict["pos_heavyatom"].shape[1]
 
         # From original dictionary
-        pocket = data_dict['pocket'].clone().long()
+        pocket = data_dict["pocket"].clone().long()
         res_type = data_dict["res_type"].clone()
         chain_type_one_hot = data_dict["chain_type_one_hot"].clone()
         dihedral_trigometry = data_dict["dihedral_trigometry"].clone()
@@ -212,7 +222,6 @@ class EmbedInput(nn.Module):
                 in_place=True,
             )
 
-
         if "sidechain" in self.design_mode:
             noised_dihedrals = self._dihedral_flow.interpolate_path(dihedrals, time)
             dihedrals = apply_mask(dihedrals, noised_dihedrals, redesign_mask)
@@ -221,22 +230,26 @@ class EmbedInput(nn.Module):
                 dihedral_trigometry, 0.0, data_dict["redesign_mask"], in_place=True
             )
 
-
-        times_1D = time * torch.ones((num_batch, num_res, 1), device=res_type_prob.device)
-        times_2D = time.unsqueeze(-1) * torch.ones((num_batch, num_res, num_res, 1), device=res_type_prob.device)
-
+        times_1D = time * torch.ones(
+            (num_batch, num_res, 1), device=res_type_prob.device
+        )
+        times_2D = time.unsqueeze(-1) * torch.ones(
+            (num_batch, num_res, num_res, 1), device=res_type_prob.device
+        )
 
         # concatenate the per node features
         s_i = torch.cat(
-            [   pocket.view(num_batch, num_res, -1), #1
+            [
+                pocket.view(num_batch, num_res, -1),  # 1
                 res_type_one_hot,
-                res_type_prob, #20
+                res_type_prob,  # 20
                 chain_type_one_hot,
-                dihedrals, # 5
+                dihedrals,  # 5
                 dihedral_trigometry,
-                frame_rotations.view(num_batch, num_res, -1), #6
-                frame_translations.view(num_batch, num_res, -1) * ANG_TO_NM_SCALE, #3 -- Divide it by ten to convert to nm
-                times_1D, #1
+                frame_rotations.view(num_batch, num_res, -1),  # 6
+                frame_translations.view(num_batch, num_res, -1)
+                * ANG_TO_NM_SCALE,  # 3 -- Divide it by ten to convert to nm
+                times_1D,  # 1
             ],
             dim=-1,
         )
@@ -253,15 +266,14 @@ class EmbedInput(nn.Module):
         )
         z_ij = self.linear_no_bias_z(z_ij)
 
-
         noised_feature_dict = {
-                                "res_type_prob": res_type_prob,
-                                "frame_rotations": frame_rotations,
-                                "frame_translations": frame_translations,
-                                "dihedrals": dihedrals,
-                                "time": time,
-                                "redesign_mask": redesign_mask,
-                                }
+            "res_type_prob": res_type_prob,
+            "frame_rotations": frame_rotations,
+            "frame_translations": frame_translations,
+            "dihedrals": dihedrals,
+            "time": time,
+            "redesign_mask": redesign_mask,
+        }
 
         return noised_feature_dict, s_i, z_ij, time
 
@@ -280,15 +292,16 @@ class FourierEncoder(nn.Module):
         # Register frequency bands as a buffer.
         # This creates a tensor: [1, 2, ..., num_freq_bands, 1, 1/2, ..., 1/num_freq_bands]
         freq_bands = torch.FloatTensor(
-            [i + 1 for i in range(num_freq_bands)] + [1. / (i + 1) for i in range(num_freq_bands)]
+            [i + 1 for i in range(num_freq_bands)]
+            + [1.0 / (i + 1) for i in range(num_freq_bands)]
         )
-        self.register_buffer('freq_bands', freq_bands)
+        self.register_buffer("freq_bands", freq_bands)
 
     def forward(self, x):
         """
         Args:
             x (torch.Tensor): Tensor of shape [batch_size, 1] with values typically in [0, 1].
-        
+
         Returns:
             torch.Tensor: Encoded tensor that includes the original input (if include_input is True)
             and the sine and cosine responses for each frequency band.
@@ -318,14 +331,17 @@ class ResidueEmbedding(nn.Module):
     max_chain_types : int, optional
         Maximum number of chain types (default is 10).
     """
-    def __init__(self, residue_dim, num_atoms, max_aa_types=22, max_chain_types=10, time_dim=17):
+
+    def __init__(
+        self, residue_dim, num_atoms, max_aa_types=22, max_chain_types=10, time_dim=17
+    ):
         super(ResidueEmbedding, self).__init__()
-        
+
         self.time_dim = time_dim
         self.residue_dim = residue_dim
         self.num_atoms = num_atoms
         self.max_aa_types = max_aa_types
-        
+
         # Embeddings for amino acids, chain types, and dihedral angles
         self.aa_emb = nn.Embedding(max_aa_types, residue_dim)
         self.chain_emb = nn.Embedding(max_chain_types, residue_dim, padding_idx=0)
@@ -333,15 +349,39 @@ class ResidueEmbedding(nn.Module):
         self.encode_time = FourierEncoder()
 
         # Input dimension for the MLP layer
-        input_dim = residue_dim + max_aa_types * num_atoms * 3 + self.dihedral_emb.get_dim() + residue_dim + time_dim + 10 + 10
+        input_dim = (
+            residue_dim
+            + max_aa_types * num_atoms * 3
+            + self.dihedral_emb.get_dim()
+            + residue_dim
+            + time_dim
+            + 10
+            + 10
+        )
         self.mlp = nn.Sequential(
-            nn.Linear(input_dim, 2 * residue_dim), nn.ReLU(), 
-            nn.Linear(2 * residue_dim, residue_dim), nn.ReLU(), 
-            nn.Linear(residue_dim, residue_dim), nn.ReLU(), 
-            nn.Linear(residue_dim, residue_dim)
+            nn.Linear(input_dim, 2 * residue_dim),
+            nn.ReLU(),
+            nn.Linear(2 * residue_dim, residue_dim),
+            nn.ReLU(),
+            nn.Linear(residue_dim, residue_dim),
+            nn.ReLU(),
+            nn.Linear(residue_dim, residue_dim),
         )
 
-    def forward(self, aa, res_nb, fragment_type, pos_atoms, sidechain_dihedrals, residue_mask, structure_mask=None, sequence_mask=None, generation_mask=None, time=None, pocket=None):
+    def forward(
+        self,
+        aa,
+        res_nb,
+        fragment_type,
+        pos_atoms,
+        sidechain_dihedrals,
+        residue_mask,
+        structure_mask=None,
+        sequence_mask=None,
+        generation_mask=None,
+        time=None,
+        pocket=None,
+    ):
         """
         Forward pass for residue embedding.
 
@@ -372,7 +412,7 @@ class ResidueEmbedding(nn.Module):
         N, L = aa.size()
 
         # Mask for valid residues based on atoms
-        pos_atoms = pos_atoms[:, :, :self.num_atoms]
+        pos_atoms = pos_atoms[:, :, : self.num_atoms]
         mask_atoms = pos_atoms != 0
 
         # 1. Chain embedding (N, L, residue_dim)
@@ -380,31 +420,55 @@ class ResidueEmbedding(nn.Module):
 
         # 2. Amino acid embedding (N, L, residue_dim)
         if sequence_mask is not None:
-            aa = torch.where(residue_mask, aa, torch.full_like(aa, fill_value=PAD_TOKEN))
-            aa = torch.where(generation_mask, torch.full_like(aa, fill_value=MASK_TOKEN), aa)
+            aa = torch.where(
+                residue_mask, aa, torch.full_like(aa, fill_value=PAD_TOKEN)
+            )
+            aa = torch.where(
+                generation_mask, torch.full_like(aa, fill_value=MASK_TOKEN), aa
+            )
 
         aa_emb = self.aa_emb(aa)
 
         # 3. Coordinate embedding (N, L, max_aa_types * num_atoms * 3)
         bb_center = pos_atoms[:, :, BBHeavyAtom.CA]
-        R = get_3d_basis(center=bb_center, p1=pos_atoms[:, :, BBHeavyAtom.C], p2=pos_atoms[:, :, BBHeavyAtom.N])
+        R = get_3d_basis(
+            center=bb_center,
+            p1=pos_atoms[:, :, BBHeavyAtom.C],
+            p2=pos_atoms[:, :, BBHeavyAtom.N],
+        )
         local_coords = global2local(R, bb_center, pos_atoms)
-        local_coords = torch.where(mask_atoms, local_coords, torch.zeros_like(local_coords))
+        local_coords = torch.where(
+            mask_atoms, local_coords, torch.zeros_like(local_coords)
+        )
 
         # Expand amino acid embedding and apply mask
-        aa_expand = aa[:, :, None, None, None].expand(N, L, self.max_aa_types, self.num_atoms, 3)
-        aa_range = torch.arange(0, self.max_aa_types)[None, None, :, None, None].expand(N, L, self.max_aa_types, self.num_atoms, 3).to(aa_expand)
-        aa_expand_mask = (aa_expand == aa_range)
-        local_coords_expand = local_coords[:, :, None, :, :].expand(N, L, self.max_aa_types, self.num_atoms, 3)
-        local_coords = torch.where(aa_expand_mask, local_coords_expand, torch.zeros_like(local_coords_expand))
-        local_coords = local_coords.reshape(N, L, self.max_aa_types * self.num_atoms * 3)
+        aa_expand = aa[:, :, None, None, None].expand(
+            N, L, self.max_aa_types, self.num_atoms, 3
+        )
+        aa_range = (
+            torch.arange(0, self.max_aa_types)[None, None, :, None, None]
+            .expand(N, L, self.max_aa_types, self.num_atoms, 3)
+            .to(aa_expand)
+        )
+        aa_expand_mask = aa_expand == aa_range
+        local_coords_expand = local_coords[:, :, None, :, :].expand(
+            N, L, self.max_aa_types, self.num_atoms, 3
+        )
+        local_coords = torch.where(
+            aa_expand_mask, local_coords_expand, torch.zeros_like(local_coords_expand)
+        )
+        local_coords = local_coords.reshape(
+            N, L, self.max_aa_types * self.num_atoms * 3
+        )
 
         if structure_mask is not None and structure_mask.dim() == 2:
             structure_mask = structure_mask.unsqueeze(-1)  # Expand to (N, L, 1)
             local_coords = local_coords * structure_mask
 
         # 4. Dihedral angle embedding (N, L, 39)
-        bb_dihedral, mask_bb_dihedral = get_bb_dihedral_angles(pos_atoms, fragment_type, res_nb=res_nb, mask_residue=residue_mask)
+        bb_dihedral, mask_bb_dihedral = get_bb_dihedral_angles(
+            pos_atoms, fragment_type, res_nb=res_nb, mask_residue=residue_mask
+        )
         dihedral_emb = self.dihedral_emb(bb_dihedral[:, :, :, None])
         dihedral_emb = dihedral_emb * mask_bb_dihedral[:, :, :, None]
         dihedral_emb = dihedral_emb.reshape(N, L, -1)
@@ -413,9 +477,9 @@ class ResidueEmbedding(nn.Module):
             dihedral_mask = torch.logical_and(
                 structure_mask.squeeze(-1),
                 torch.logical_and(
-                    torch.roll(structure_mask.squeeze(-1), shifts=+1, dims=1), 
-                    torch.roll(structure_mask.squeeze(-1), shifts=-1, dims=1)
-                )
+                    torch.roll(structure_mask.squeeze(-1), shifts=+1, dims=1),
+                    torch.roll(structure_mask.squeeze(-1), shifts=-1, dims=1),
+                ),
             )
             dihedral_emb = dihedral_emb * dihedral_mask[:, :, None]
 
@@ -429,7 +493,7 @@ class ResidueEmbedding(nn.Module):
         features_list.append(time_emb)
 
         if pocket is not None:
-            pocket_emb = pocket.view(N,L,1).expand(-1, -1, 10)
+            pocket_emb = pocket.view(N, L, 1).expand(-1, -1, 10)
         else:
             pocket_emb = torch.zeros((N, L, 10), device=aa_emb.device)
 
@@ -439,6 +503,10 @@ class ResidueEmbedding(nn.Module):
 
         all_features = torch.cat(features_list, dim=-1)
         all_features = all_features * residue_mask[:, :, None].expand_as(all_features)
+
+        # debug
+        print("residue all_features", all_features.shape)
+        print("residue all_features dim 1", all_features[0, :, 0])
 
         # 6. Apply MLP to generate final embeddings
         out_features = self.mlp(all_features)
@@ -462,7 +530,10 @@ class PairEmbedding(nn.Module):
     max_relpos : int, optional
         Maximum relative position (default is 32).
     """
-    def __init__(self, pair_dim, num_atoms, max_aa_types=22, max_relpos=32, time_dim=17):
+
+    def __init__(
+        self, pair_dim, num_atoms, max_aa_types=22, max_relpos=32, time_dim=17
+    ):
         super(PairEmbedding, self).__init__()
 
         self.time_dim = time_dim
@@ -479,15 +550,43 @@ class PairEmbedding(nn.Module):
         nn.init.zeros_(self.aapair_to_dist_coeff.weight)
 
         # Distance embedding and dihedral embedding
-        self.dist_emb = nn.Sequential(nn.Linear(num_atoms**2, pair_dim), nn.ReLU(), nn.Linear(pair_dim, pair_dim), nn.ReLU())
+        self.dist_emb = nn.Sequential(
+            nn.Linear(num_atoms**2, pair_dim),
+            nn.ReLU(),
+            nn.Linear(pair_dim, pair_dim),
+            nn.ReLU(),
+        )
         self.dihedral_emb = DihedralEncoding()
         dihedral_feature_dim = self.dihedral_emb.get_dim(num_dim=2)
 
         # MLP for final pair embedding, cb_distogram=40, ca_unit_vector=3
-        all_features_dim = 3 * pair_dim + dihedral_feature_dim + 40 + 3 + time_dim + 10 + 10
-        self.mlp = nn.Sequential(nn.Linear(all_features_dim, pair_dim), nn.ReLU(), nn.Linear(pair_dim, pair_dim), nn.ReLU(), nn.Linear(pair_dim, pair_dim))
+        all_features_dim = (
+            3 * pair_dim + dihedral_feature_dim + 40 + 3 + time_dim + 10 + 10
+        )
+        self.mlp = nn.Sequential(
+            nn.Linear(all_features_dim, pair_dim),
+            nn.ReLU(),
+            nn.Linear(pair_dim, pair_dim),
+            nn.ReLU(),
+            nn.Linear(pair_dim, pair_dim),
+        )
 
-    def forward(self, aa, res_nb, fragment_type, pos_atoms, sidechain_dihedrals, residue_mask, cb_distogram, ca_unit_vectors, structure_mask=None, sequence_mask=None, generation_mask=None, time=None, pocket=None):
+    def forward(
+        self,
+        aa,
+        res_nb,
+        fragment_type,
+        pos_atoms,
+        sidechain_dihedrals,
+        residue_mask,
+        cb_distogram,
+        ca_unit_vectors,
+        structure_mask=None,
+        sequence_mask=None,
+        generation_mask=None,
+        time=None,
+        pocket=None,
+    ):
         """
         Forward pass for pairwise residue embedding.
 
@@ -516,41 +615,53 @@ class PairEmbedding(nn.Module):
         N, L = aa.size()
 
         # Mask for valid residues
-        pos_atoms = pos_atoms[:, :, :self.num_atoms]
+        pos_atoms = pos_atoms[:, :, : self.num_atoms]
         mask_atoms = pos_atoms != 0
         mask2d_pair = residue_mask[:, :, None] * residue_mask[:, None, :]
 
         # 1. Pairwise amino acid embedding
         if sequence_mask is not None:
-            aa = torch.where(residue_mask, aa, torch.full_like(aa, fill_value=PAD_TOKEN))
-            aa = torch.where(generation_mask, torch.full_like(aa, fill_value=MASK_TOKEN), aa)
-                        
+            aa = torch.where(
+                residue_mask, aa, torch.full_like(aa, fill_value=PAD_TOKEN)
+            )
+            aa = torch.where(
+                generation_mask, torch.full_like(aa, fill_value=MASK_TOKEN), aa
+            )
+
         aa_pair = self.max_aa_types * aa[:, :, None] + aa[:, None, :]
         aa_pair_emb = self.aa_pair_emb(aa_pair)
 
         if pocket is not None:
-            pocket_emb = (pocket[:,:,None]*pocket[:,None,:]).view(N, L, L,1).expand(-1, -1, -1, 10)
+            pocket_emb = (
+                (pocket[:, :, None] * pocket[:, None, :])
+                .view(N, L, L, 1)
+                .expand(-1, -1, -1, 10)
+            )
         else:
             pocket_emb = torch.zeros((N, L, L, 10), device=aa_pair.device)
 
-
         # 2. Relative position embedding
         relative_pos = res_nb[:, :, None] - res_nb[:, None, :]
-        relative_pos = torch.clamp(relative_pos, min=-self.max_relpos, max=self.max_relpos) + self.max_relpos
+        relative_pos = (
+            torch.clamp(relative_pos, min=-self.max_relpos, max=self.max_relpos)
+            + self.max_relpos
+        )
         relative_pos_emb = self.relpos_emb(relative_pos)
-        mask2d_chain = (fragment_type[:, :, None] == fragment_type[:, None, :])
+        mask2d_chain = fragment_type[:, :, None] == fragment_type[:, None, :]
         relative_pos_emb = relative_pos_emb * mask2d_chain[:, :, :, None]
 
         # 3. Atom-atom distance embedding
         a2a_coords = pos_atoms[:, :, None, :, None] - pos_atoms[:, None, :, None, :]
         a2a_dist = torch.linalg.norm(a2a_coords, dim=-1)
-        a2a_dist_nm = a2a_dist / 10.
+        a2a_dist_nm = a2a_dist / 10.0
         a2a_dist_nm = a2a_dist_nm.reshape(N, L, L, -1)
         coeff = F.softplus(self.aapair_to_dist_coeff(aa_pair))
         dist_rbf = torch.exp(-1.0 * coeff * a2a_dist_nm**2)
         # mask_atoms: (B, L, A, 3)
-        mask_atom_3d = mask_atoms[:,:,:,0]
-        mask2d_aa_pair = mask_atom_3d[:, :, None, :, None] * mask_atom_3d[:, None, :, None, :]
+        mask_atom_3d = mask_atoms[:, :, :, 0]
+        mask2d_aa_pair = (
+            mask_atom_3d[:, :, None, :, None] * mask_atom_3d[:, None, :, None, :]
+        )
         mask2d_aa_pair = mask2d_aa_pair.reshape(N, L, L, -1)
         dist_emb = self.dist_emb(dist_rbf * mask2d_aa_pair)
 
@@ -559,7 +670,11 @@ class PairEmbedding(nn.Module):
         dihedral_emb = self.dihedral_emb(dihedral_angles)
 
         # Sidechains
-        sidechain_dihedrals = F.normalize(sidechain_dihedrals[:,None,:, :] * sidechain_dihedrals[:,:,None,:], p=2, dim=-1)
+        sidechain_dihedrals = F.normalize(
+            sidechain_dihedrals[:, None, :, :] * sidechain_dihedrals[:, :, None, :],
+            p=2,
+            dim=-1,
+        )
 
         # Apply structure mask to avoid data leakage
         if structure_mask is not None and structure_mask.dim() == 2:
@@ -571,11 +686,17 @@ class PairEmbedding(nn.Module):
             mask_data(cb_distogram, 0.0, generation_mask[:, None, :], in_place=True)
             mask_data(cb_distogram, 0.0, generation_mask[:, :, None], in_place=True)
             mask_data(ca_unit_vectors, 0.0, generation_mask[:, None, :], in_place=True)
-            mask_data(ca_unit_vectors,0.0,generation_mask[:, :, None],in_place=True)
-
+            mask_data(ca_unit_vectors, 0.0, generation_mask[:, :, None], in_place=True)
 
         # 5. Combine all features
-        features_list = [aa_pair_emb, relative_pos_emb, dist_emb, dihedral_emb, cb_distogram, ca_unit_vectors]
+        features_list = [
+            aa_pair_emb,
+            relative_pos_emb,
+            dist_emb,
+            dihedral_emb,
+            cb_distogram,
+            ca_unit_vectors,
+        ]
         if time is not None:
             time_emb = self.encode_time(time)
             time_emb = time_emb[:, :, None, :].expand(-1, -1, L, -1)
@@ -588,6 +709,11 @@ class PairEmbedding(nn.Module):
 
         all_features = torch.cat(features_list, dim=-1)
         all_features = all_features * mask2d_pair[:, :, :, None].expand_as(all_features)
+
+        # debug
+        print("pair all_features", all_features.shape)
+        print("pair all_features dim 1", all_features[0, :, 0, 0])
+        print("pair all_features dim 2", all_features[0, 0, :, 0])
 
         # 6. Apply MLP for final pairwise embedding
         out = self.mlp(all_features)
@@ -605,11 +731,18 @@ class DihedralEncoding(nn.Module):
     num_freq_bands : int, optional
         Number of frequency bands for encoding (default is 3).
     """
+
     def __init__(self, num_freq_bands=3):
         super().__init__()
 
         self.num_freq_bands = num_freq_bands
-        self.register_buffer('freq_bands', torch.FloatTensor([i + 1 for i in range(num_freq_bands)] + [1. / (i + 1) for i in range(num_freq_bands)]))
+        self.register_buffer(
+            "freq_bands",
+            torch.FloatTensor(
+                [i + 1 for i in range(num_freq_bands)]
+                + [1.0 / (i + 1) for i in range(num_freq_bands)]
+            ),
+        )
 
     def forward(self, x):
         """
@@ -627,7 +760,9 @@ class DihedralEncoding(nn.Module):
         """
         shape = list(x.shape[:-1]) + [-1]
         x = x.unsqueeze(-1)
-        angle_emb = torch.cat([x, torch.sin(x * self.freq_bands), torch.cos(x * self.freq_bands)], dim=-1)
+        angle_emb = torch.cat(
+            [x, torch.sin(x * self.freq_bands), torch.cos(x * self.freq_bands)], dim=-1
+        )
         return angle_emb.reshape(shape)
 
     def get_dim(self, num_dim=3):

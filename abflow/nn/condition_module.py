@@ -233,6 +233,14 @@ class ConditionModule(nn.Module):
             generation_mask_bar,
         )
 
+        # debug masks
+        print("residue_mask", residue_mask.shape)
+        print("residue_mask_example", residue_mask[0, :])
+        print("generation_mask_bar", generation_mask_bar.shape)
+        print("generation_mask_bar_example", generation_mask_bar[0, :])
+        print("context_mask", context_mask.shape)
+        print("context_mask_example", context_mask[0, :])
+
         # Define the context
         sequence_mask = context_mask if "sequence" in self.design_mode else None
         structure_mask = context_mask if "backbone" in self.design_mode else None
@@ -276,10 +284,7 @@ class ConditionModule(nn.Module):
         )
         v0_6D = rotmat_to_rot6d(R0)
 
-        # debug: print each of the data to check for proper masking
-        print("res_emb", res_emb.shape)
-        print("pair_emb", pair_emb.shape)
-
-        print("pair_emb_example", pair_emb[0, 0, :, 0])
+        # debug
+        quit()
 
         return res_emb, pair_emb, v0_6D, p0, s0
