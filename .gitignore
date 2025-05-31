@@ -15,8 +15,8 @@ __pycache__/
 .nfs*
 
 # Ignore all unuseful files
-benchmark.py
-benchmark2.py
+#benchmark.py
+#benchmark2.py
 plot_evol.py
 benchmarks/diffab/
 8gpu_cluster.yaml
@@ -33,7 +33,7 @@ scripts/design/
 scripts/test/
 scripts/circe/
 scripts/hpc/
-scripts/analysis/
+#scripts/analysis/
 
 results/
 heatmaps/

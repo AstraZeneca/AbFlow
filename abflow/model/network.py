@@ -6,11 +6,11 @@ import torch
 from torch import nn
 from typing import List
 
+from ..nn.encoding_module import EncodingModule
 from ..nn.condition_module import ConditionModule
 from ..nn.distogram_head import DistogramHead
 from ..nn.denoising_module import DenoisingModule
 from ..nn.confidence_module import ConfidenceModule
-from ..nn.input_embedding import ResidueEmbedding, PairEmbedding
 
 
 class FlowPrediction(nn.Module):
@@ -69,14 +69,20 @@ class FlowPrediction(nn.Module):
         self.mini_rollout_steps = mini_rollout_steps
         self.full_rollout_steps = full_rollout_steps
         self.binder_loss = binder_loss
+        self.design_mode = design_mode
 
         # Residue and pair embeddings
-        self.residue_emb = ResidueEmbedding(c_s, num_atoms, max_aa_types=max_aa_types, max_chain_types=10)
-        self.pair_emb = PairEmbedding(c_z, num_atoms, max_aa_types=max_aa_types, max_relpos=32)
+        num_atoms = 15 if "sidechain" in self.design_mode else 5 
+
+        self.encoding_module = EncodingModule(
+            c_s=c_s,
+            c_z=c_z,
+            design_mode=design_mode,
+            num_atoms=num_atoms,
+            max_aa_types=max_aa_types, 
+        )
 
         self.condition_module = ConditionModule(
-            residue_emb_nn=self.residue_emb,
-            pair_emb_nn=self.pair_emb,
             c_s=c_s,
             c_z=c_z,
             n_block=n_condition_module_blocks,
@@ -84,10 +90,9 @@ class FlowPrediction(nn.Module):
             design_mode=design_mode,
             network_params=network_params,
         )
+
         self.distogram_head = DistogramHead(c_z=c_z)
         self.denoising_module = DenoisingModule(
-            residue_emb_nn=self.residue_emb,
-            pair_emb_nn=self.pair_emb,
             c_s=c_s,
             c_z=c_z,
             n_block=n_denoising_module_blocks,
@@ -125,8 +130,11 @@ class FlowPrediction(nn.Module):
         if not self.confidence:
             # ── standard training / pretrain path ─────────────────────────────────
 
+            # 0) Encode
+            res_emb, pair_emb = self.encoding_module(true_data_dict)
+            
             # 1) full‐graph condition module
-            s_inputs_i, z_inputs_ij, s_i, z_ij = self.condition_module(true_data_dict)
+            s_i, z_ij = self.condition_module(true_data_dict, res_emb, pair_emb)
 
             # 2) distogram head (with grads)
             pred_d, true_d = self.distogram_head.get_loss_terms(
@@ -139,8 +147,10 @@ class FlowPrediction(nn.Module):
             # 3) full denoising‐module loss
             pred_dn, true_dn = self.denoising_module.get_loss_terms(
                 true_data_dict,
-                s_inputs_i, z_inputs_ij,
-                s_i,        z_ij,
+                res_emb, 
+                pair_emb,
+                s_i,        
+                z_ij,
             )
             pred_loss_dict.update(pred_dn)
             true_loss_dict.update(true_dn)
@@ -190,78 +200,6 @@ class FlowPrediction(nn.Module):
         return pred_loss_dict, true_loss_dict
 
 
-    # def get_loss_terms(
-    #     self,
-    #     true_data_dict: dict[str, torch.Tensor],
-    # ):
-    #     """
-    #     param true_data_dict: A dictionary containing the input data information (cropped, centered, padded):
-    #     - res_type: A tensor of shape (N_res,) containing the amino acid type index for each residue.
-    #     - chain_type: A tensor of shape (N_res,) containing the chain type index for each residue.
-    #     - chain id: A tensor of shape (N_res,) containing the chain id for each residue.
-    #     - res_index: A tensor of shape (N_res,) containing the residue index for each residue.
-    #     - region_index: A tensor of shape (N_res,) containing the antibody CDR/framework or antigen index for each residue.
-    #     - pos_heavyatom: A tensor of shape (N_res, 15, 3) containing the position of the heavy atoms for each residue.
-    #     - redesign_mask: A tensor of shape (N_res,) indicating which residues are to be redesigned (True) and otherwise (False).
-    #     - antibody_mask: A tensor of shape (N_res,) indicating which residues are part of the antibody (True) and otherwise (False).
-    #     - antigen_mask: A tensor of shape (N_res,) indicating which residues are part of the antigen (True) and otherwise (False).
-    #     """
-    #     pred_loss_dict = {}
-    #     true_loss_dict = {}
-
-    #     # condition module with recycling
-    #     s_inputs_i, z_inputs_ij, s_i, z_ij = self.condition_module(true_data_dict)
-
-    #     # distogram head
-    #     pred_loss_update, true_loss_update = self.distogram_head.get_loss_terms(
-    #         z_ij, true_data_dict["pos_heavyatom"][:, :, 4, :]
-    #     )
-    #     pred_loss_dict.update(pred_loss_update)
-    #     true_loss_dict.update(true_loss_update)
-        
-    #     if not self.confidence:
-    #         pred_loss_update, true_loss_update = self.denoising_module.get_loss_terms(
-    #             true_data_dict, s_inputs_i, z_inputs_ij, s_i, z_ij
-    #         )
-    #         pred_loss_dict.update(pred_loss_update)
-    #         true_loss_dict.update(true_loss_update)
-
-    #     if self.confidence:
-
-    #         # denoising module mini rollout
-    #         pred_loss_update, true_loss_update, pred_data_dict = self.denoising_module.rollout_train(
-    #             true_data_dict,
-    #             s_inputs_i.detach(),
-    #             z_inputs_ij.detach(),
-    #             s_i.detach(),
-    #             z_ij.detach(),
-    #             num_steps=self.mini_rollout_steps,
-    #         )
-
-    #         pred_loss_dict.update(pred_loss_update)
-    #         true_loss_dict.update(true_loss_update)
-            
-    #         pred_loss_update, true_loss_update, geometric_losses_dict = self.confidence_module.get_loss_terms(
-    #             s_inputs_i.detach(),
-    #             z_inputs_ij.detach(),
-    #             s_i.detach(),
-    #             z_ij.detach(),
-    #             pred_data_dict["pos_heavyatom"][:, :, :3, :],
-    #             true_data_dict["pos_heavyatom"][:, :, :3, :],
-    #             redesign_mask = true_data_dict["redesign_mask"],
-    #             valid_mask = true_data_dict["valid_mask"],
-                
-    #         )
-    #         pred_loss_dict.update(pred_loss_update)
-    #         true_loss_dict.update(true_loss_update)
-            
-    #         # Add geometric losses
-    #         # pred_loss_dict.update(geometric_losses_dict)
-
-    #     true_loss_dict["redesign_mask"] = true_data_dict["redesign_mask"].clone()
-    #     true_loss_dict["valid_mask"] = true_data_dict["valid_mask"].clone()
-
-    #     return pred_loss_dict, true_loss_dict
 
     @torch.no_grad()
     def inference(
@@ -269,14 +207,17 @@ class FlowPrediction(nn.Module):
         true_data_dict: dict[str, torch.Tensor],
         is_training: bool = True,
     ):
-        # condition module with recycling
-        s_inputs_i, z_inputs_ij, s_i, z_ij = self.condition_module(true_data_dict, is_training=is_training)
+        # Encode
+        res_emb, pair_emb = self.encoding_module(true_data_dict)
+        
+        # Condition module with recycling
+        s_i, z_ij = self.condition_module(true_data_dict, res_emb, pair_emb)
 
         # denoising module full rollout
         pred_data_dict = self.denoising_module.rollout(
             true_data_dict,
-            s_inputs_i,
-            z_inputs_ij,
+            res_emb,
+            pair_emb,
             s_i,
             z_ij,
             num_steps=self.full_rollout_steps,
@@ -286,8 +227,8 @@ class FlowPrediction(nn.Module):
         if self.confidence:
             pred_data_update = self.confidence_module.predict(
                 pred_data_dict,
-                s_inputs_i,
-                z_inputs_ij,
+                res_emb,
+                pair_emb,
                 s_i,
                 z_ij,
                 pred_data_dict["pos_heavyatom"][:, :, :3, :],

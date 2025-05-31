@@ -25,13 +25,13 @@ antibody_index = [chain_id_to_index[chain] for chain in antibody_chain_names]
 antigen_index = [chain_id_to_index[chain] for chain in antigen_chain_name]
 
 region_to_index = {
-    "framework": 1,
-    "hcdr1": 2,
-    "hcdr2": 3,
-    "hcdr3": 4,
-    "lcdr1": 5,
-    "lcdr2": 6,
-    "lcdr3": 7,
+    "framework": 0,
+    "hcdr1": 1,
+    "hcdr2": 2,
+    "hcdr3": 3,
+    "lcdr1": 4,
+    "lcdr2": 5,
+    "lcdr3": 6,
     "antigen": 8,
 }
 

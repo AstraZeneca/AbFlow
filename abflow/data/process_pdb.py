@@ -306,7 +306,6 @@ def process_lmdb_chain(data: dict) -> dict:
 
     antibody_mask = torch.isin(chain_type, torch.tensor(antibody_index))
     antigen_mask = torch.isin(chain_type, torch.tensor(antigen_index))
-
     return {
         "res_type": res_type,
         "chain_type": chain_type,

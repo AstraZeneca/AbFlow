@@ -80,7 +80,6 @@ def crop_complex(
     """
     # TODO: If we are re-designing only one loop, and if it does not exist in a sample, cropping might fail. 
     # When we can not find the region of interest (redesign_mask is all False), we should randomly select an existing region in the sample to redesign.
-
     redesign_mask_c = copy.deepcopy(redesign_mask)
     antibody_non_cdr_max = max_crop_size - antigen_crop_max
     

@@ -122,10 +122,59 @@ class AbFlow(LightningModule):
         cumulative_loss, loss_dict = self._loss(pred_loss_dict, true_loss_dict, self.global_step)
 
 
+
+        # ################ Custom Updates #####################
+        # seq_original_weight = self.loss_weighting_copy['sequence_vf_loss']
+        # rot_original_weight = self.loss_weighting_copy['rotation_vf_loss']
+        # dist_original_weight = self.loss_weighting_copy['distogram_loss']
+        # dihed_original_weight = self.loss_weighting_copy['dihedral_vf_loss']
+        # binder_loss_weight = self.loss_weighting_copy['binder_loss']
+        # entropy_loss_weight = self.loss_weighting_copy['entropy_loss']
+        # bond_loss_weight = self.loss_weighting_copy['bond_loss']
+        # angle_loss_weight = self.loss_weighting_copy['angle_loss']
+        # rep_loss_weight = self.loss_weighting_copy['rep_loss']
+        # tran_frame_loss_weight = self.loss_weighting_copy['translation_frame_loss']
+        # rot_frame_loss_weight = self.loss_weighting_copy['rotation_frame_loss']
+
+        # # Determine task loss weights
+        # if (self.dataset_name == 'sabdab' and self.current_epoch < 100) or (self.dataset_name != 'sabdab' and self.current_epoch == 0):
+        #     progress = (
+        #         self.current_epoch / max(100 - 1, 1)
+        #         if self.dataset_name == 'sabdab'
+        #         else batch_idx / max(self.trainer.num_training_batches - 1, 1)
+        #     )
+        #     step = self.current_epoch if self.dataset_name == 'sabdab' else batch_idx
+        #     total_step = 10 if self.dataset_name == 'sabdab' else 1
+
+        #     weight = seq_original_weight - ((seq_original_weight - 100) * progress)
+        #     weight_rot = rot_original_weight - ((rot_original_weight - 10) * progress)
+        #     weight_dist = dist_original_weight - ((dist_original_weight - 20) * progress)
+        #     weight_dihed = dihed_original_weight - ((dihed_original_weight - 10) * progress)
+        #     weight_binder = binder_loss_weight - ((binder_loss_weight - 1) * progress)
+        #     weight_entropy = entropy_loss_weight - ((entropy_loss_weight - 1) * progress)
+        #     # weight_bond_loss = min(1.0, (step+1) / 1) 
+        #     # weight_angle_loss = min(1.0, (step+1) / 1) 
+        #     # weight_rep_loss = min(1.0, (step+1) / 1) 
+        #     # weight_tran_frame_loss = min(1.0, (step+1) / 1) 
+        #     # weight_rot_frame_loss = min(1.0, (step+1) / 1) 
+
+        # else:
+        #     weight, weight_rot, weight_dist, weight_dihed,  weight_binder, weight_entropy = 100, 10, 20, 10, 1, 1
+        #     # weight_bond_loss, weight_angle_loss, weight_rep_loss, weight_tran_frame_loss, weight_rot_frame_loss= 1, 1.0, 1, 1.0, 1.0
+
+        # self._loss.loss_weights['sequence_vf_loss'] = max(weight, 100)
+        # self._loss.loss_weights['rotation_vf_loss'] = max(weight_rot, 10)
+        # self._loss.loss_weights['distogram_loss'] = max(weight_dist, 20)
+        # self._loss.loss_weights['dihedral_vf_loss'] = max(weight_dihed, 10)
+        # self._loss.loss_weights['binder_loss'] = max(weight_binder, 1)
+        # self._loss.loss_weights['entropy_loss'] = max(weight_entropy, 1)
+        # self._loss.loss_weights['geom_vf_loss'] = 1.0
+
+
         if self.loss_dict_means is None:
-            self.loss_dict_means = {f"train/{k}": [v.float().cpu().numpy()] for k, v in loss_dict.items()}
+            self.loss_dict_means = {f"train/{k}": [v.float().cpu().item()] for k, v in loss_dict.items()}
         else:
-            self.loss_dict_means = {f"train/{k}": self.loss_dict_means[f"train/{k}"] + [v.float().cpu().numpy()] for k, v in loss_dict.items()}
+            self.loss_dict_means = {f"train/{k}": self.loss_dict_means[f"train/{k}"] + [v.float().cpu().item()] for k, v in loss_dict.items()}
 
         ave_loss_dict_means = {k: sum(v[-1:])/1 for k, v in self.loss_dict_means.items()}
 

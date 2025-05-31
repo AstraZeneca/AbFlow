@@ -29,6 +29,14 @@ class AntibodyAntigenDataset(Dataset):
         self.split = split
         self.db_connection = None
         self.data_path = config["paths"]["data"]
+        self.exclude_dist_csvs = [os.path.join(f"{config['paths']['data']}/rabd/", csv_name) for csv_name in config['paths']['exclude_dist_csvs']]
+        self._exclude_train_ids = set()
+        if self.exclude_dist_csvs != []:
+            for csv_path in self.exclude_dist_csvs:
+                df_ex = pd.read_csv(csv_path)
+                self._exclude_train_ids.update(df_ex["train_pdb"].tolist())
+        self._exclude_train_ids = list(self._exclude_train_ids)
+
         self.map_size = 250 * 1024**3
         self._load_entries()
         self._load_clusters()
@@ -172,7 +180,7 @@ class AntibodyAntigenDataset(Dataset):
             )
         )
 
-        test_split_ids = rm_duplicates(test_split_ids + test_ids)
+        test_split_ids = rm_duplicates(test_split_ids + test_ids + self._exclude_train_ids)
         test_split_ids = self.unique_by_prefix(test_split_ids)
         test_prefixes = {self.extract_prefix(tid) for tid in test_split_ids}
 
@@ -260,9 +268,6 @@ class AntibodyAntigenDataset(Dataset):
                     if entry_dict["id"][:4] in rabd_id:
                         test_ids.append(entry_dict["id"])
 
-
-
-
         test_clusters = rm_duplicates(
             [self.id_to_cluster[test_id] for test_id in test_ids]
         )
@@ -307,7 +312,7 @@ class AntibodyAntigenDataset(Dataset):
             )
         )
 
-        test_split_ids = rm_duplicates(test_split_ids + test_ids)
+        test_split_ids = rm_duplicates(test_split_ids + test_ids + self._exclude_train_ids)
         test_split_ids = self.unique_by_prefix(test_split_ids)
         test_prefixes = {self.extract_prefix(tid) for tid in test_split_ids}
 
@@ -350,38 +355,38 @@ class AntibodyAntigenDataset(Dataset):
         length = len(self.split_ids) if self.split in ["test", "val"] or self.config["name"]=='sabdab' else self.split_ids_oas_length
         return length
 
-    def __getitem__(self, idx: int):
-        if self.split in ["test", "val"] or self.config["name"] == 'sabdab':
-            structure_id = self.split_ids[idx]
-            item = self._get_data_from_id(structure_id)
-            return item
-        else:
-            # Sample one item from each list:
-            structure_id_oas = self.split_ids_oas[idx]
-            structure_id_sabdab = self.split_ids_sabdab[idx % self.split_ids_sabdab_length]
-            
-            item_oas = self._get_data_from_id(structure_id_oas)
-            item_sabdab = self._get_data_from_id(structure_id_sabdab)
-            
-            # Return both items together
-            return item_oas, item_sabdab
-            
-
     # def __getitem__(self, idx: int):
-    #     if self.split in ["test", "val"] or self.config["name"]=='sabdab':
+    #     if self.split in ["test", "val"] or self.config["name"] == 'sabdab':
     #         structure_id = self.split_ids[idx]
     #         item = self._get_data_from_id(structure_id)
+    #         return item
     #     else:
-    #         coin_flip = random.randint(0, 1)
+    #         # Sample one item from each list:
+    #         structure_id_oas = self.split_ids_oas[idx]
+    #         structure_id_sabdab = self.split_ids_sabdab[idx % self.split_ids_sabdab_length]
+            
+    #         item_oas = self._get_data_from_id(structure_id_oas)
+    #         item_sabdab = self._get_data_from_id(structure_id_sabdab)
+            
+    #         # Return both items together
+    #         return item_oas, item_sabdab
+            
 
-    #         if coin_flip==0:
-    #             structure_id = self.split_ids_oas[idx]
-    #         else:
-    #             structure_id = self.split_ids_sabdab[idx % self.split_ids_sabdab_length]
+    def __getitem__(self, idx: int):
+        if self.split in ["test", "val"] or self.config["name"]=='sabdab':
+            structure_id = self.split_ids[idx]
+            item = self._get_data_from_id(structure_id)
+        else:
+            coin_flip = random.randint(0, 5)
+
+            if coin_flip in [0, 1, 2, 3]:
+                structure_id = self.split_ids_oas[idx]
+            else:
+                structure_id = self.split_ids_sabdab[idx % self.split_ids_sabdab_length]
             
-    #         item = self._get_data_from_id(structure_id)
+            item = self._get_data_from_id(structure_id)
             
-    #     return item
+        return item
 
     def _get_data_from_id(self, id: str):
         data = self._get_structure(id)

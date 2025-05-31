@@ -318,13 +318,14 @@ class ResidueEmbedding(nn.Module):
     max_chain_types : int, optional
         Maximum number of chain types (default is 10).
     """
-    def __init__(self, residue_dim, num_atoms, max_aa_types=22, max_chain_types=10, time_dim=17):
+    def __init__(self, residue_dim, num_atoms, max_aa_types=22, max_chain_types=10, time_dim=17, design_mode=['sequence']):
         super(ResidueEmbedding, self).__init__()
         
         self.time_dim = time_dim
         self.residue_dim = residue_dim
         self.num_atoms = num_atoms
         self.max_aa_types = max_aa_types
+        self.design_mode = design_mode
         
         # Embeddings for amino acids, chain types, and dihedral angles
         self.aa_emb = nn.Embedding(max_aa_types, residue_dim)
@@ -333,7 +334,7 @@ class ResidueEmbedding(nn.Module):
         self.encode_time = FourierEncoder()
 
         # Input dimension for the MLP layer
-        input_dim = residue_dim + max_aa_types * num_atoms * 3 + self.dihedral_emb.get_dim() + residue_dim + time_dim + 10 + 10
+        input_dim = residue_dim + max_aa_types * num_atoms * 3 + self.dihedral_emb.get_dim() + residue_dim + time_dim + 10 + 10 * int("sidechain" in self.design_mode)
         self.mlp = nn.Sequential(
             nn.Linear(input_dim, 2 * residue_dim), nn.ReLU(), 
             nn.Linear(2 * residue_dim, residue_dim), nn.ReLU(), 
@@ -341,7 +342,7 @@ class ResidueEmbedding(nn.Module):
             nn.Linear(residue_dim, residue_dim)
         )
 
-    def forward(self, aa, res_nb, fragment_type, pos_atoms, sidechain_dihedrals, residue_mask, structure_mask=None, sequence_mask=None, generation_mask=None, time=None, pocket=None):
+    def forward(self, aa, res_nb, fragment_type, pos_atoms, sidechain_dihedrals, residue_mask, structure_mask=None, sequence_mask=None, generation_mask=None, time=None, pocket=None, is_conditioner=False):
         """
         Forward pass for residue embedding.
 
@@ -435,7 +436,9 @@ class ResidueEmbedding(nn.Module):
 
         # Add other features
         features_list.append(pocket_emb)
-        features_list.append(sidechain_dihedrals)
+
+        if "sidechain" in self.design_mode:
+            features_list.append(sidechain_dihedrals)
 
         all_features = torch.cat(features_list, dim=-1)
         all_features = all_features * residue_mask[:, :, None].expand_as(all_features)
@@ -462,7 +465,7 @@ class PairEmbedding(nn.Module):
     max_relpos : int, optional
         Maximum relative position (default is 32).
     """
-    def __init__(self, pair_dim, num_atoms, max_aa_types=22, max_relpos=32, time_dim=17):
+    def __init__(self, pair_dim, num_atoms, max_aa_types=22, max_relpos=32, time_dim=17, design_mode=['sequence'], is_conditioner=False):
         super(PairEmbedding, self).__init__()
 
         self.time_dim = time_dim
@@ -470,6 +473,8 @@ class PairEmbedding(nn.Module):
         self.num_atoms = num_atoms
         self.max_aa_types = max_aa_types
         self.max_relpos = max_relpos
+        self.design_mode = design_mode
+        is_conditioner = is_conditioner
 
         # Pair embedding, relative position embedding, and distance embedding
         self.encode_time = FourierEncoder()
@@ -484,10 +489,10 @@ class PairEmbedding(nn.Module):
         dihedral_feature_dim = self.dihedral_emb.get_dim(num_dim=2)
 
         # MLP for final pair embedding, cb_distogram=40, ca_unit_vector=3
-        all_features_dim = 3 * pair_dim + dihedral_feature_dim + 40 + 3 + time_dim + 10 + 10
+        all_features_dim = 3 * pair_dim + dihedral_feature_dim + 40 + 3 + time_dim + 10 + 10*int("sidechain" in self.design_mode)
         self.mlp = nn.Sequential(nn.Linear(all_features_dim, pair_dim), nn.ReLU(), nn.Linear(pair_dim, pair_dim), nn.ReLU(), nn.Linear(pair_dim, pair_dim))
 
-    def forward(self, aa, res_nb, fragment_type, pos_atoms, sidechain_dihedrals, residue_mask, cb_distogram, ca_unit_vectors, structure_mask=None, sequence_mask=None, generation_mask=None, time=None, pocket=None):
+    def forward(self, aa, res_nb, fragment_type, pos_atoms, sidechain_dihedrals, residue_mask, cb_distogram, ca_unit_vectors, structure_mask=None, sequence_mask=None, generation_mask=None, time=None, pocket=None, is_conditioner=False):
         """
         Forward pass for pairwise residue embedding.
 
@@ -519,6 +524,7 @@ class PairEmbedding(nn.Module):
         pos_atoms = pos_atoms[:, :, :self.num_atoms]
         mask_atoms = pos_atoms != 0
         mask2d_pair = residue_mask[:, :, None] * residue_mask[:, None, :]
+        mask2d_valid = structure_mask[:, :, None] & structure_mask[:, None, :]
 
         # 1. Pairwise amino acid embedding
         if sequence_mask is not None:
@@ -563,9 +569,8 @@ class PairEmbedding(nn.Module):
 
         # Apply structure mask to avoid data leakage
         if structure_mask is not None and structure_mask.dim() == 2:
-            structure_mask = structure_mask.unsqueeze(-1)
-            dist_emb = dist_emb * structure_mask[:, :, :, None]
-            dihedral_emb = dihedral_emb * structure_mask[:, :, :, None]
+            dist_emb = dist_emb * mask2d_valid[:, :, :, None]
+            dihedral_emb = dihedral_emb * mask2d_valid[:, :, :, None]
 
             # Mask out other pair tensors
             mask_data(cb_distogram, 0.0, generation_mask[:, None, :], in_place=True)
@@ -584,7 +589,9 @@ class PairEmbedding(nn.Module):
 
         features_list.append(time_emb)
         features_list.append(pocket_emb)
-        features_list.append(sidechain_dihedrals)
+
+        if "sidechain" in self.design_mode:
+            features_list.append(sidechain_dihedrals)
 
         all_features = torch.cat(features_list, dim=-1)
         all_features = all_features * mask2d_pair[:, :, :, None].expand_as(all_features)

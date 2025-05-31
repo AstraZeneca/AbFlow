@@ -2,7 +2,7 @@
 
 # wandb settings
 project_name: flow_matching
-model_name: abflow
+model_name: abflow_may17_2dmask_CDR3ONLY_Fixed_numAtomAndMasking_diffab
 
 # shared settings
 shared:
@@ -33,11 +33,11 @@ datamodule:
     batch_size: 1
     redesign:
         framework: False
-        hcdr1: True
-        hcdr2: True
+        hcdr1: False
+        hcdr2: False
         hcdr3: True
-        lcdr1: True
-        lcdr2: True
+        lcdr1: False
+        lcdr2: False
         lcdr3: True
     max_crop_size: 356
     antigen_crop_size: 100
@@ -49,6 +49,7 @@ datamodule:
         paths:
             data: /home/jovyan/abflow-datavol/data 
             model: /home/jovyan/abflow-datavol/checkpoints
+            exclude_dist_csvs: [] #["rabd_cdr3_dist1.csv", "rabd_cdr3_dist2.csv", "rabd_cdr3_dist3.csv"] #, "rabd_cdr3_dist4.csv"]
     binder_loss: *binder_loss
 
 # abflow model settings
@@ -58,7 +59,7 @@ model:
         translation_vf_loss: 1.0
         rotation_vf_loss: 10.0
         dihedral_vf_loss: 10.0
-        distogram_loss: 2.0
+        distogram_loss: 10.0
         binder_loss: 1.0
         entropy_loss: 1.0
         confidence_lddt_loss: 1

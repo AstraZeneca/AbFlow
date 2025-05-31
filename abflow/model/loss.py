@@ -87,13 +87,13 @@ class MVDRLossCombiner(nn.Module):
         R_inv = torch.linalg.inv(R)
         ones = torch.ones((self.num_tasks, 1), device=R.device, dtype=R.dtype)
         denom = (ones.t() @ R_inv @ ones).squeeze() + 1e-6
-        weights = 10*(R_inv @ ones) / denom
+        weights = 20*(R_inv @ ones) / denom
 
 
         for i, name in enumerate(self.task_names):
             task_loss = loss_dict[name].mean()
             static_weight = static_weights.get(name, 1.0)
-            dynamic_weight = torch.clamp(weights[i, 0], 1, 10.0)
+            dynamic_weight = torch.clamp(weights[i, 0], 1, 20.0)
             weighted_loss = static_weight * task_loss
             weighted_loss = dynamic_weight * weighted_loss
             combined_loss =  combined_loss + weighted_loss

@@ -110,7 +110,7 @@ def train(config: dict):
         devices=8,
         accelerator="gpu",
         strategy=DDPStrategy(
-            timeout=timedelta(seconds=15400), find_unused_parameters=True, #process_group_backend="gloo",
+            timeout=timedelta(seconds=15400), find_unused_parameters=True, process_group_backend="gloo",
         ),
         precision='bf16-mixed',
         max_epochs=config["trainer"]["max_epochs"],
@@ -126,7 +126,7 @@ def train(config: dict):
         # profiler=profiler,
     )
 
-    trainer.fit(model, datamodule=datamodule, ckpt_path="/home/jovyan/abflow-datavol/checkpoints/FinalFixed2_sabdab_SeqBB_sabdab_sequence_backbone/epoch=179.ckpt")
+    trainer.fit(model, datamodule=datamodule) #, ckpt_path="/home/jovyan/abflow-datavol/checkpoints/FinalFixed2_sabdab_SeqBB_sabdab_sequence_backbone/epoch=179.ckpt")
     print("Done with training...")
 
 def main(config: dict):
