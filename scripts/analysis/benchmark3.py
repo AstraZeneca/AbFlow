@@ -150,7 +150,7 @@ epoch_num = 'epoch=69' #'epoch=199'
 # experiment_name = 'Pocket10_finetuned_from_seqonly_oas_sabdab_oas_sabdab_sequence'
 # epoch_num = 'ema_model_80000'
 
-BLOSUM_NUM = 45
+BLOSUM_NUM = 90
 file_prefix = "xB" + str(BLOSUM_NUM)
 is_ema=False
 ################
@@ -359,9 +359,9 @@ def plot_correlation_scatter(
 
 
     # Determine the plot label based on the complex name
-    if config["complex_name"] == 'aztg3':
+    if config["complex_name"] == 'tweak':
         plot_label = r'$DDG$'
-    elif config['complex_name'] == 'aztg1':
+    elif config['complex_name'] == 'AZtg1':
         plot_label = r'$-\log(qAC50)$'
     elif config['complex_name'] == 'nature_il7':
         plot_label = r'$-\log(IC50)$'
@@ -573,7 +573,7 @@ def generate_sequences_and_kd(parental_csv, target_csv, aa_seq, heavy_seq, light
             kd_value = row['IC50 (M)']
         elif target_name in ['absci_her2_zs']:
             kd_value = row['-log(KD (M))']
-        elif target_name in ['aztg3']:
+        elif target_name in ['tweak']:
             kd_value = row['DDG']
         else:
             kd_value = row['KD']
@@ -651,7 +651,7 @@ def generate_sequences_and_kd(parental_csv, target_csv, aa_seq, heavy_seq, light
                 kd_log_value = convert_kd_to_log_kd(float(kd_value))
             elif target_name in ['absci_her2_zs']:
                 kd_log_value = float(kd_value)
-            elif target_name in ['aztg3']:
+            elif target_name in ['tweak']:
                 kd_log_value = float(kd_value)
             else:
                 kd_log_value = convert_kd_to_log_kd(float(kd_value))
@@ -947,7 +947,7 @@ def evaluate_mutated_pdb_with_props(*args, **kwargs):
     db, mh, mr = compute_metrics_on_mask(seqs, mask, parent_seq)
 
     methods = {
-        f"blosum{BLOSUM_NUM}":    (db, f"BLOSUM{BLOSUM_NUM} distance"),
+        f"blosum{BLOSUM_NUM}":    (db, f"BLOSUM{BLOSUM_NUM}"),
         'hydrophobicity':   (mh, "Mean hydrophobicity"),
         'rigidity':         (mr, "Mean rigidity"),
     }
@@ -960,7 +960,7 @@ def evaluate_mutated_pdb_with_props(*args, **kwargs):
         sτ, sρ = get_significance(pτ), get_significance(pρ)
 
         # plot as before
-        path = f"{results_dir}/{name}_vs_affinity_{target}_{file_prefix}_{epoch_num}.pdf"
+        path = f"{results_dir}/j{name}_vs_affinity_{target}_{file_prefix}_{epoch_num}.pdf"
         plot_prop_correlation(vals, KD, label, path)
         print(f"[{target}] saved {name} plot → {path}")
 
@@ -1177,12 +1177,12 @@ def evaluate_mutated_pdb_with_blosum(*args, **kwargs):
     for item in leg.legend_handles:
         item.set_visible(False)
 
-    plt.xlabel(f"BLOSUM{BLOSUM_NUM} distance", fontsize=14, fontweight='bold')
+    plt.xlabel(f"BLOSUM{BLOSUM_NUM}", fontsize=14, fontweight='bold')
     plt.ylabel(r"$-\log(K_D)$",      fontsize=14, fontweight='bold')
     plt.grid(linestyle='--', alpha=0.5)
     plt.tight_layout()
 
-    blosum_path = f"{results_dir}/blosum{BLOSUM_NUM}_vs_{target}_{file_prefix}_{epoch_num}.pdf"
+    blosum_path = f"{results_dir}/jblosum{BLOSUM_NUM}_vs_{target}_{file_prefix}_{epoch_num}.pdf"
     plt.savefig(blosum_path, bbox_inches='tight')
     plt.close()
     print(f"[BLOSUM] plot saved to: {blosum_path}")
@@ -1356,10 +1356,10 @@ def get_blosum45():
 ##########################################################################################################
 
 
-dataset1 = ['absci_her2_zs', 'absci_her2_sc', 'nature_hel', 'nature_il7', 'nature_her2', 'aztg1', 'aztg2'] #, 'aztg3'
+dataset1 = ['absci_her2_zs', 'absci_her2_sc', 'nature_hel', 'nature_il7', 'nature_her2', 'AZtg1', 'AZtg2'] #, 'tweak'
 dataset2 = ['c5', 'il17a', 'tslp', 'fxi', 'il36r', 'tnfrsf9', 'acvr2b']
-dataset3 = ['absci_her2_zs', 'absci_her2_sc', 'nature_hel', 'nature_il7', 'nature_her2', 'aztg1', 'aztg2']
-# dataset3 = ['aztg1']
+dataset3 = ['absci_her2_zs', 'absci_her2_sc', 'nature_hel', 'nature_il7', 'nature_her2', 'AZtg1', 'AZtg2']
+# dataset3 = ['AZtg1']
 dataset4 = ['acvr2b']
 dataset5 = ['absci_her2_sc', 'c5', 'il17a', 'tslp', 'fxi', 'il36r', 'tnfrsf9', 'acvr2b']
 
@@ -1426,7 +1426,7 @@ out = summary_df[[
     'kendall','p_kendall'
 ]]
 
-csv_path = os.path.join(results_dir, f"{file_prefix}_{epoch_num}_summary.csv")
+csv_path = os.path.join(results_dir, f"j{file_prefix}_summary.csv")
 out.to_csv(csv_path, index=False)
 print(f"Saved summary CSV → {csv_path}")
 
@@ -1445,8 +1445,8 @@ kendall_table = out.pivot(
 )
 
 # Save each
-spearman_csv = os.path.join(results_dir, f"{file_prefix}_{epoch_num}_spearman_summary.csv")
-kendall_csv  = os.path.join(results_dir, f"{file_prefix}_{epoch_num}_kendall_summary.csv")
+spearman_csv = os.path.join(results_dir, f"j{file_prefix}_{epoch_num}_spearman_summary.csv")
+kendall_csv  = os.path.join(results_dir, f"j{file_prefix}_{epoch_num}_kendall_summary.csv")
 spearman_table.to_csv(spearman_csv)
 kendall_table.to_csv(kendall_csv)
 

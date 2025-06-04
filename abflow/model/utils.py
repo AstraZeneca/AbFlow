@@ -297,7 +297,7 @@ def center_complex(
     :param redesign_mask: A tensor of shape (N_res,) indicating which residues to redesign (True) and which to fix (False).
     :return: A tensor of shape (N_res, 15, 3) containing the position of the heavy atoms for each residue after centering.
     """
-    non_redesign_mask = ~redesign_mask
+    non_redesign_mask = redesign_mask #~redesign_mask
 
     if non_redesign_mask.any():
         pos_non_redesign = pos_heavyatom[non_redesign_mask]

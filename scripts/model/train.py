@@ -107,7 +107,7 @@ def train(config: dict):
 
     # Trainer
     trainer = L.Trainer(
-        devices=8,
+        devices=6,
         accelerator="gpu",
         strategy=DDPStrategy(
             timeout=timedelta(seconds=15400), find_unused_parameters=True, process_group_backend="gloo",
@@ -126,7 +126,7 @@ def train(config: dict):
         # profiler=profiler,
     )
 
-    trainer.fit(model, datamodule=datamodule) #, ckpt_path="/home/jovyan/abflow-datavol/checkpoints/FinalFixed2_sabdab_SeqBB_sabdab_sequence_backbone/epoch=179.ckpt")
+    trainer.fit(model, datamodule=datamodule) #, ckpt_path="/home/jovyan/abflow-datavol/checkpoints/abflow_genmask_center_fixedResProb_SeqManiFoldFix_sabdab_sequence_backbone/epoch=59.ckpt")
     print("Done with training...")
 
 def main(config: dict):

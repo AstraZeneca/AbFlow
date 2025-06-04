@@ -72,7 +72,7 @@ from abflow.constants import initialize_constants
 
 ###############
 
-experiment_name = 'abflow_genmask_center_fixedResProb_SeqManiFoldFix_sabdab_sequence'
+experiment_name = 'abflow_may17_2dmask_CDR3ONLY_Fixed_numAtomAndMasking_diffab_sabdab_sequence_backbone'
 epoch_num = 'epoch=69' #'epoch=199'
 
 
@@ -150,7 +150,8 @@ epoch_num = 'epoch=69' #'epoch=199'
 # experiment_name = 'Pocket10_finetuned_from_seqonly_oas_sabdab_oas_sabdab_sequence'
 # epoch_num = 'ema_model_80000'
 
-file_prefix = experiment_name
+BLOSUM_NUM = 45
+file_prefix = "xB" + str(BLOSUM_NUM)
 is_ema=False
 ################
 
@@ -583,9 +584,9 @@ def generate_sequences_and_kd(parental_csv, target_csv, aa_seq, heavy_seq, light
             if pd.isnull(kd_value):
                 continue  # Skip rows with missing data
 
-            # Check for missing KD values
-            if 'Binder' in row and not row['Binder'] and target_name in ['acvr2b', 'tnfrsf9', 'c5', 'il17a', 'tslp', 'fxi', 'il36r']: #'acvr2b', 'tnfrsf9', 
-                continue  # Skip rows with missing data
+            # # Check for missing KD values
+            # if 'Binder' in row and not row['Binder'] and target_name in ['acvr2b', 'tnfrsf9', 'c5', 'il17a', 'tslp', 'fxi', 'il36r']: #'acvr2b', 'tnfrsf9', 
+            #     continue  # Skip rows with missing data
 
         # Generate the new sequence by replacing CDRs from the target data
         new_aa_seq = copy.deepcopy(aa_seq)
@@ -681,6 +682,540 @@ def generate_sequences_and_kd(parental_csv, target_csv, aa_seq, heavy_seq, light
 
     # Return the results as a dictionary
     return result
+
+
+
+
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Add this to your script after all imports and after you have defined
+# generate_sequences_and_kd, etc., but before you call evaluate_mutated_pdb
+# ──────────────────────────────────────────────────────────────────────────────
+
+from enum import IntEnum
+import numpy as np
+from Bio.Align import substitution_matrices
+
+
+blosum45 = substitution_matrices.load(f"BLOSUM{BLOSUM_NUM}")  # use matrix names to load
+
+
+from scipy.stats import spearmanr, kendalltau
+import matplotlib.pyplot as plt
+import torch
+
+# 1) 3-letter → index mapping
+class AminoAcid3(IntEnum):
+    ALA = 0; CYS = 1; ASP = 2; GLU = 3; PHE = 4
+    GLY = 5; HIS = 6; ILE = 7; LYS = 8; LEU = 9
+    MET = 10; ASN = 11; PRO = 12; GLN = 13; ARG = 14
+    SER = 15; THR = 16; VAL = 17; TRP = 18; TYR = 19
+
+AminoAcid3Index = {name: member.value for name, member in AminoAcid3.__members__.items()}
+
+one_to_three = {
+    'A':'ALA','C':'CYS','D':'ASP','E':'GLU','F':'PHE',
+    'G':'GLY','H':'HIS','I':'ILE','K':'LYS','L':'LEU',
+    'M':'MET','N':'ASN','P':'PRO','Q':'GLN','R':'ARG',
+    'S':'SER','T':'THR','V':'VAL','W':'TRP','Y':'TYR',
+}
+
+# 2) Build BLOSUM45 matrix in our 20-dim index space
+blosum_mat = np.zeros((20,20), dtype=int)
+for aa3_i, idx_i in AminoAcid3Index.items():
+    a1 = aa3_i[0]
+    for aa3_j, idx_j in AminoAcid3Index.items():
+        b1 = aa3_j[0]
+        blosum_mat[idx_i, idx_j] = blosum45.get((a1,b1),
+                                 blosum45.get((b1,a1), 0))
+
+# 3) Function to compute distances
+def compute_blosum45_distances(sequences: list[torch.Tensor],
+                               mask: torch.BoolTensor,
+                               parent_seq: str) -> np.ndarray:
+    parent_idx = np.array([AminoAcid3Index[one_to_three[c]] for c in parent_seq], dtype=int)
+    N, L = mask.shape
+    dists = np.zeros(N, dtype=float)
+    for i, seq_tensor in enumerate(sequences):
+        # revert tokens back to one-letter
+        inv_map = {v:k for k,v in aa1_name_to_index.items()}
+        seq = ''.join(inv_map[int(x)] for x in seq_tensor.tolist())
+        mut_idx = np.array([AminoAcid3Index[one_to_three[c]] for c in seq], dtype=int)
+        m = mask[i].cpu().numpy()
+        dists[i] = blosum_mat[parent_idx[m], mut_idx[m]].sum()
+    return dists
+
+
+# 2) Scales: Kyte-Doolittle hydrophobicity & Karplus-Schulz flexibility
+KD_HYDRO = {
+    'A': 1.8,  'C': 2.5,  'D': -3.5, 'E': -3.5, 'F': 2.8,
+    'G': -0.4, 'H': -3.2, 'I': 4.5,  'K': -3.9, 'L': 3.8,
+    'M': 1.9,  'N': -3.5, 'P': -1.6, 'Q': -3.5, 'R': -4.5,
+    'S': -0.8, 'T': -0.7, 'V': 4.2,  'W': -0.9, 'Y': -1.3
+}
+# Karplus-Schulz flexibility → we use rigidity = inverse
+FLEX = {
+    'A': 0.357,'C': 0.346,'D': 0.511,'E': 0.497,'F': 0.314,
+    'G': 0.544,'H': 0.323,'I': 0.462,'K': 0.466,'L': 0.365,
+    'M': 0.295,'N': 0.463,'P': 0.509,'Q': 0.493,'R': 0.529,
+    'S': 0.507,'T': 0.444,'V': 0.386,'W': 0.305,'Y': 0.420
+}
+# rigidity = 1/flex
+RIGIDITY = {aa: 1.0/f for aa,f in FLEX.items()}
+
+# 3) Helper: invert your aa1_name_to_index
+_inv_aa_map = {v:k for k,v in aa1_name_to_index.items()}
+
+def seq_from_tensor(tensor: torch.Tensor) -> str:
+    return ''.join(_inv_aa_map[int(x)] for x in tensor.tolist())
+
+# 4) Compute metrics over masked region
+def compute_metrics_on_mask(seq_tensors, mask, parent_seq):
+    N, L = mask.shape
+    parent = parent_seq
+
+    # precompute parent string
+    # prepare outputs
+    dist_blosum = np.zeros(N)
+    mean_hydro  = np.zeros(N)
+    mean_rigid  = np.zeros(N)
+
+    for i, seq_t in enumerate(seq_tensors):
+        seq = seq_from_tensor(seq_t)
+        m = mask[i].cpu().numpy()
+
+        # BLOSUM45 distance
+        for j in np.where(m)[0]:
+            dist_blosum[i] += blosum45[parent[j], seq[j]]
+
+        # hydrophobicity & rigidity
+        hydros  = [KD_HYDRO[seq[j]]   for j in np.where(m)[0]]
+        rigids  = [RIGIDITY[seq[j]]   for j in np.where(m)[0]]
+        if hydros:
+            mean_hydro[i] = np.mean(hydros)
+            mean_rigid[i] = np.mean(rigids)
+        else:
+            mean_hydro[i] = np.nan
+            mean_rigid[i] = np.nan
+
+    return dist_blosum, mean_hydro, mean_rigid
+
+
+def plot_prop_correlation(x, y, xlabel, save_path):
+    τ, pτ = kendalltau(x, y)
+    ρ, pρ = spearmanr(x, y)
+    sτ, sρ = get_significance(pτ), get_significance(pρ)
+
+    df = pd.DataFrame({xlabel: x, '-log(KD)': y})
+    g = sns.jointplot(x=xlabel, y='-log(KD)', data=df, kind='scatter', color='purple')
+    g.plot_joint(sns.kdeplot, fill=True, levels=6, alpha=0.4, color='purple')
+    g.ax_marg_x.remove()
+    g.ax_marg_y.remove()
+    g.fig.set_size_inches(6,6)
+    plt.grid(color='gray', linestyle='dashed', zorder=0)
+
+    red_patch  = mpatches.Patch(color='red',  label=fr'Kendall τ: {τ:.2f}{sτ}')
+    blue_patch = mpatches.Patch(color='blue', label=fr'Spearman ρ: {ρ:.2f}{sρ}')
+    leg = plt.legend(handles=[red_patch, blue_patch], loc='upper left',
+                     handlelength=0, handletextpad=0, fancybox=True, fontsize=12)
+    for h in leg.legend_handles: h.set_visible(False)
+
+    ax = g.ax_joint
+    plt.xlabel(xlabel, fontsize=14, fontweight='bold')
+    plt.ylabel(r'$-\log(K_D)$', fontsize=14, fontweight='bold')
+    plt.xticks(fontsize=12, fontweight='bold')
+    plt.yticks(fontsize=12, fontweight='bold')
+
+    class ScalarFormatterForceFormat(mticker.ScalarFormatter):
+        def _set_format(self, vmin=None, vmax=None):
+            self.format = '%.1f'
+    fmt = ScalarFormatterForceFormat(useMathText=False)
+    fmt.set_powerlimits((0,0))
+    ax.xaxis.set_major_formatter(fmt)
+    ax.ticklabel_format(style='sci', axis='x', scilimits=(0,0))
+    ax.xaxis.get_offset_text().set_fontsize(12)
+    ax.xaxis.get_offset_text().set_fontweight('bold')
+
+    plt.tight_layout()
+    plt.subplots_adjust(top=0.9)
+    plt.savefig(save_path, bbox_inches='tight')
+    plt.close()
+
+
+def evaluate_mutated_pdb_with_props(*args, **kwargs):
+    # run the original pipeline
+    evaluate_mutated_pdb(*args, **kwargs)
+
+    parent_info  = kwargs['parent_info']
+    mutated_info = kwargs['mutated_info']
+    target       = kwargs['target']
+
+    p = pd.read_csv(parent_info)
+    heavy = p["Heavy"].iloc[0]
+    light = p["Light"].iloc[0]
+    parent_seq = heavy + light if isinstance(light, str) else heavy
+
+    data = generate_sequences_and_kd(
+        parental_csv=parent_info,
+        target_csv=mutated_info,
+        aa_seq=parent_seq,
+        heavy_seq=heavy, light_seq=light,
+        target_name=target, compute_auc=False
+    )
+    seqs = data['sequences']
+    mask = data['masks']
+    KD   = np.array(data['KD_values'])
+
+    # compute metrics
+    db, mh, mr = compute_metrics_on_mask(seqs, mask, parent_seq)
+
+    methods = {
+        f"blosum{BLOSUM_NUM}":    (db, f"BLOSUM{BLOSUM_NUM}"),
+        'hydrophobicity':   (mh, "Mean hydrophobicity"),
+        'rigidity':         (mr, "Mean rigidity"),
+    }
+
+    # collect stats to return
+    stats = []
+    for name, (vals, label) in methods.items():
+        τ, pτ = kendalltau(vals, KD)
+        ρ, pρ = spearmanr(vals, KD)
+        sτ, sρ = get_significance(pτ), get_significance(pρ)
+
+        # plot as before
+        path = f"{results_dir}/{name}_vs_affinity_{target}_{file_prefix}_{epoch_num}.pdf"
+        plot_prop_correlation(vals, KD, label, path)
+        print(f"[{target}] saved {name} plot → {path}")
+
+        # append to stats
+        stats.append({
+            'target':         target,
+            'metric':         name,
+            'spearman_rho':   ρ,
+            'p_spearman':     pρ,
+            'spearman_sig':   sρ,
+            'kendall_tau':    τ,
+            'p_kendall':      pτ,
+            'kendall_sig':    sτ,
+        })
+    return stats
+
+
+def evaluate_mutated_pdb(config, target, pdb_file, parent_info, mutated_info, scheme, results_dir, num_designs, batch_size, seed, epoch_num=0, compute_auc=False):
+    """
+    Evaluates a PDB file with mutated sequences provided in mutated_info and saves metrics to a CSV file,
+    ensuring only mutations with the same length as the parent sequence are processed.
+
+    :param pdb_file: Path to the PDB file.
+    :param parent_info: Path to the CSV file containing parent sequence information.
+    :param mutated_info: Path to the CSV file containing mutated sequences and metadata.
+    :param heavy_chain_id: Chain ID for the heavy chain.
+    :param light_chain_id: Chain ID for the light chain.
+    :param antigen_chain_ids: List of chain IDs for antigens.
+    :param scheme: Antibody numbering scheme.
+    :param results_dir: Directory to save the results CSV file.
+
+    :return: None
+    """
+    # Load parent sequence information
+    parent_df = pd.read_csv(parent_info)
+    parent_heavy_sequence = parent_df["Heavy"].iloc[0]
+    parent_light_sequence = parent_df["Light"].iloc[0]
+
+
+    new_pdb_path = os.path.splitext(pdb_file)[0] + '_chothia.pdb'
+    heavy_chains, light_chains, antigen_chains, light_type, heavy_seq, light_seq, antigen_seq = renumber(pdb_file, new_pdb_path)
+
+
+    pdb_file = new_pdb_path
+    aa_seq =  parent_heavy_sequence
+    if parent_light_sequence == parent_light_sequence:
+        aa_seq =  aa_seq + parent_light_sequence
+
+    d2_source = '_original' #['_original', '']
+
+    # Load the CSV files
+    experimental_data_path = '/home/jovyan/mlab-de-novo-data-4t/data/experimental_data/'
+
+    target_csv   = f"{experimental_data_path}/{target}/{target}.csv"
+
+    # There is a slight difference in sequences between crystal structure and ImmuneBuilder predicted structure of 'acvr2b'. So, we use slightly different parental sequence to match with the one in the PDB.
+    # if target in ['c5', 'il17a', 'tslp', 'fxi', 'il36r', 'tnfrsf9', 'acvr2b']:
+    #     parental_csv = f"{experimental_data_path}/{target}/{target}_parent.csv"
+    # else:
+    parental_csv = f"{experimental_data_path}/{target}/{target}_parent.csv"
+    data_to_test = generate_sequences_and_kd(parental_csv, target_csv, aa_seq, parent_heavy_sequence, parent_light_sequence, target_name=target, compute_auc=compute_auc)
+
+    # Filter mutations to ensure the same length as the parent HCDR3
+    mutated_seq_list = data_to_test['sequences'] 
+    KD_values = data_to_test['KD_values']
+    binder_labels = np.array(data_to_test['Binder'])
+
+    heavy_chain_id, light_chain_id = heavy_chains[0], light_chains[0] if len(light_chains)>0 else None
+
+    # Process the original PDB to input data dictionary
+    data_dict, fixed_pdb_file = process_pdb_to_data_dict(
+        pdb_file, heavy_chain_id, light_chain_id, antigen_chains, scheme
+    )
+
+    data_dict_c = copy.deepcopy(data_dict)
+
+
+
+    # Generate complexes
+    pred_data_dict, true_data_dict = generate_complexes(data_dict_c, num_designs, batch_size, seed, custom_redesign_mask=data_to_test['masks'][0] if config['use_custom_mask'] else None)
+
+
+    # Add a column for the "likelihood/redesign" metric
+    likelihoods_list = []
+    seq_tokens_list = []
+
+
+    try:
+        # Iterate through mutations in the filtered mutated_info CSV
+        for idx, seq_tokens in enumerate(mutated_seq_list):
+            mutated_data_dict = copy.deepcopy(data_dict)
+
+            # Replace sequences in data_dict
+
+            heavy_indices = (data_dict["chain_type"] == chain_id_to_index["heavy"])
+            light_indices = (data_dict["chain_type"] == chain_id_to_index["light_lambda"]) | (data_dict["chain_type"] == chain_id_to_index["light_kappa"])
+            heavy_light_indices = heavy_indices | light_indices
+
+            mutated_data_dict["res_type"][heavy_light_indices] = seq_tokens
+            mutated_data_dict = copy_data_dict(mutated_data_dict, num_designs, custom_redesign_mask=data_to_test['masks'][0] if config['use_custom_mask'] else None)
+            seq_tokens_list.append(seq_tokens)
+            
+            # Compute metrics
+            metrics = compute_metrics(mutated_data_dict, pred_data_dict)
+
+            # Extract the "likelihood/redesign" metric
+            likelihood = metrics.get("likelihood/redesign", float("nan"))
+
+            # Store the metric in the DataFrame
+            likelihoods_list.append(likelihood)
+
+        # Plot the correlation
+        save_path = f"{results_dir}/z109__{target}_{file_prefix}_{epoch_num}_cnum_{config['network']['n_cycle']}_{config['shared']['design_mode']}_numdesg{num_designs}.pdf"
+        plot_correlation_scatter(np.array(likelihoods_list), np.array(KD_values), save_path=save_path)
+        print(f"Correlation for {target} is saved to {save_path}")
+
+        if compute_auc:
+
+            # NEW: Compute ROC AUC and plot ROC curve
+            try:
+                auc_score = roc_auc_score(binder_labels, np.array(likelihoods_list))
+                fpr, tpr, thresholds = roc_curve(binder_labels, np.array(likelihoods_list))
+                plt.figure(figsize=(6,6))
+                plt.plot(fpr, tpr, label=f'ROC curve (AUC = {auc_score:.2f})')
+                plt.plot([0, 1], [0, 1], 'k--', label='Chance')
+                plt.xlabel('False Positive Rate', fontsize=14, fontweight='bold')
+                plt.ylabel('True Positive Rate', fontsize=14, fontweight='bold')
+                plt.title('Receiver Operating Characteristic', fontsize=16, fontweight='bold')
+                plt.legend(loc='lower right')
+                plt.grid(True)
+                roc_plot_path = save_path.replace('.pdf', '_roc.pdf')
+                plt.savefig(roc_plot_path, bbox_inches='tight')
+                plt.close()
+                print(f"ROC plot saved as {roc_plot_path}")
+            except Exception as e:
+                print(f"Error computing ROC AUC: {e}")
+
+
+
+
+        # # Save the filtered results to a new CSV file
+        # os.makedirs(results_dir, exist_ok=True)
+        # output_csv_path = os.path.join(results_dir, f"{file_prefix}absci_her2_zs_likelihood_{epoch_num}_cycle_num_{config['network']['n_cycle']}_Ver2_{config['shared']['design_mode']}.csv")
+        # mutated_df.to_csv(output_csv_path, index=False)
+        # print(f"Filtered results saved to: {output_csv_path}")
+
+    finally:
+        cleanup_fixed_file(fixed_pdb_file)
+
+
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+from scipy.stats import spearmanr, kendalltau
+
+def evaluate_mutated_pdb_with_blosum(*args, **kwargs):
+    # 1) run the existing pipeline to generate sequences, mask, and KD
+    result = evaluate_mutated_pdb(*args, **kwargs)
+
+    # 2) rebuild sequences, mask, KD_values
+    parent_info  = kwargs['parent_info']
+    mutated_info = kwargs['mutated_info']
+    target       = kwargs['target']
+
+    parent_df    = pd.read_csv(parent_info)
+    heavy_seq    = parent_df["Heavy"].iloc[0]
+    light_seq    = parent_df["Light"].iloc[0]
+    aa_seq       = heavy_seq + light_seq if isinstance(light_seq, str) else heavy_seq
+
+    data         = generate_sequences_and_kd(
+        parental_csv=parent_info,
+        target_csv=mutated_info,
+        aa_seq=aa_seq,
+        heavy_seq=heavy_seq,
+        light_seq=light_seq,
+        target_name=target,
+        compute_auc=False
+    )
+    seq_list = data['sequences']
+    mask     = data['masks']
+    KD_vals  = data['KD_values']
+
+    # 3) compute BLOSUM distances
+    blosum_distances = compute_blosum45_distances(seq_list, mask, aa_seq)
+
+    # 4) save blosum distances + KD into CSV
+    df_blosum = pd.DataFrame({
+        'blosum_sim': blosum_distances,
+        'neglogKD':   KD_vals
+    })
+    blosum_csv = os.path.join(results_dir, f"x{target}_blosum{BLOSUM_NUM}_scores.csv")
+    df_blosum.to_csv(blosum_csv, index=False)
+    print(f"[{target}] saved BLOSUM scores → {blosum_csv}")
+
+    # 5) read precomputed log-likelihood CSV for this dataset
+    ll_path = f"/home/jovyan/abflow-datavol/data/loglikelihood_blosum_csv/h_correlations_{target}_oas_sabdab_allCDRs.csv"
+    ll_df   = pd.read_csv(ll_path)
+    loglik  = ll_df["total_log_likelihood_mean"].to_numpy()
+
+    # 6) compute correlations: log-likelihood vs blosum_distances
+    rho_lb, p_rho_lb = spearmanr(loglik, blosum_distances)
+    tau_lb, p_tau_lb = kendalltau(loglik, blosum_distances)
+    sig_rho_lb       = get_significance(p_rho_lb)
+    sig_tau_lb       = get_significance(p_tau_lb)
+
+    # 7) compute correlations: log-likelihood vs KD_vals
+    rho_lk, p_rho_lk = spearmanr(loglik, KD_vals)
+    tau_lk, p_tau_lk = kendalltau(loglik, KD_vals)
+    sig_rho_lk       = get_significance(p_rho_lk)
+    sig_tau_lk       = get_significance(p_tau_lk)
+
+    # 8) save correlation summary into CSV
+    corr_records = [
+        {
+            'dataset':      target,
+            'comparison':   f"loglikelihood_vs_blosum_{BLOSUM_NUM}",
+            'spearman_rho': rho_lb,
+            'p_spearman':   p_rho_lb,
+            'spearman_sig': sig_rho_lb,
+            'kendall_tau':  tau_lb,
+            'p_kendall':    p_tau_lb,
+            'kendall_sig':  sig_tau_lb
+        },
+        {
+            'dataset':      target,
+            'comparison':   'loglikelihood_vs_KD',
+            'spearman_rho': rho_lk,
+            'p_spearman':   p_rho_lk,
+            'spearman_sig': sig_rho_lk,
+            'kendall_tau':  tau_lk,
+            'p_kendall':    p_tau_lk,
+            'kendall_sig':  sig_tau_lk
+        }
+    ]
+    corr_df = pd.DataFrame(corr_records)
+    corr_csv = os.path.join(results_dir, f"x{target}_loglikelihood_correlations.csv")
+    corr_df.to_csv(corr_csv, index=False)
+    print(f"[{target}] saved loglikelihood correlations → {corr_csv}")
+
+    # 9) helper to plot joint scatter + KDE
+    def plot_joint(x, y, xlabel, ylabel, save_path):
+        τ, pτ = kendalltau(x, y)
+        ρ, pρ = spearmanr(x, y)
+        sτ, sρ = get_significance(pτ), get_significance(pρ)
+
+        df_plot = pd.DataFrame({xlabel: x, ylabel: y})
+        g = sns.jointplot(x=xlabel, y=ylabel, data=df_plot, kind='scatter', color='purple')
+        g.plot_joint(sns.kdeplot, fill=True, levels=6, alpha=0.4, color='purple')
+        g.ax_marg_x.remove()
+        g.ax_marg_y.remove()
+        g.fig.set_size_inches(6, 6)
+        plt.grid(color='gray', linestyle='dashed', zorder=0)
+
+        red_patch  = mpatches.Patch(color='red',  label=fr'Kendall τ: {τ:.2f}{sτ}')
+        blue_patch = mpatches.Patch(color='blue', label=fr'Spearman ρ: {ρ:.2f}{sρ}')
+        leg = plt.legend(handles=[red_patch, blue_patch], loc='upper left',
+                         handlelength=0, handletextpad=0, fancybox=True, fontsize=12)
+        for h in leg.legend_handles:
+            h.set_visible(False)
+
+        ax = g.ax_joint
+        ax.set_xlabel(xlabel, fontsize=14, fontweight='bold')
+        ax.set_ylabel(ylabel, fontsize=14, fontweight='bold')
+        ax.tick_params(labelsize=12)
+        plt.tight_layout()
+        plt.subplots_adjust(top=0.9)
+        plt.savefig(save_path, bbox_inches='tight')
+        plt.close()
+
+    # 10) plot and save: loglikelihood vs blosum_distances
+    plot1_path = os.path.join(results_dir, f"x{target}_loglikelihood_vs_blosum{BLOSUM_NUM}.pdf")
+    plot_joint(
+        loglik,
+        blosum_distances,
+        xlabel  = "Log-likelihood",
+        ylabel  = f"BLOSUM{BLOSUM_NUM}",
+        save_path=plot1_path
+    )
+    print(f"[{target}] saved plot → {plot1_path}")
+
+    # 11) plot and save: loglikelihood vs KD_vals
+    plot2_path = os.path.join(results_dir, f"x{target}_loglikelihood_vs_KD.pdf")
+    plot_joint(
+        loglik,
+        KD_vals,
+        xlabel  = "Log-likelihood",
+        ylabel  = r"$-\log(K_D)$",
+        save_path=plot2_path
+    )
+    print(f"[{target}] saved plot → {plot2_path}")
+
+    # 12) original blosum_vs_KD plot and print
+    rho, p_rho = spearmanr(blosum_distances, KD_vals)
+    tau, p_tau = kendalltau(blosum_distances, KD_vals)
+    sig_rho    = get_significance(p_rho)
+    sig_tau    = get_significance(p_tau)
+
+    print(f"[BLOSUM] Spearman ρ = {rho:.3f}{sig_rho} (p = {p_rho:.2e})")
+    print(f"[BLOSUM] Kendall   τ = {tau:.3f}{sig_tau} (p = {p_tau:.2e})")
+
+    plt.figure(figsize=(6,6))
+    plt.scatter(blosum_distances, KD_vals, alpha=0.7, color='green')
+    green_patch = mpatches.Patch(color='green',
+        label=f"Spearman ρ: {rho:.2f}{sig_rho}")
+    blue_patch = mpatches.Patch(color='blue',
+        label=f"Kendall τ: {tau:.2f}{sig_tau}")
+    leg = plt.legend(
+        handles=[green_patch, blue_patch],
+        loc='upper left',
+        handlelength=0,
+        handletextpad=0,
+        fancybox=True,
+        fontsize=12
+    )
+    for item in leg.legend_handles:
+        item.set_visible(False)
+
+    plt.xlabel(f"BLOSUM{BLOSUM_NUM}", fontsize=14, fontweight='bold')
+    plt.ylabel(r"$-\log(K_D)$",      fontsize=14, fontweight='bold')
+    plt.grid(linestyle='--', alpha=0.5)
+    plt.tight_layout()
+
+    blosum_plot = os.path.join(results_dir, f"xblosum{BLOSUM_NUM}_vs_{target}_{file_prefix}_{epoch_num}.pdf")
+    plt.savefig(blosum_plot, bbox_inches='tight')
+    plt.close()
+    print(f"[BLOSUM] plot saved to: {blosum_plot}")
+
+
+    return corr_records[:1]
+
+
 
 
 def process_pdb_to_data_dict(pdb_file, heavy_chain_id, light_chain_id, antigen_chain_ids, scheme):
@@ -816,7 +1351,7 @@ def evaluate_single_pdb(pdb_file, heavy_chain_id, light_chain_id, antigen_chain_
 
 def get_blosum45():
     import blosum as bl
-    bl = bl.BLOSUM(45)
+    bl = bl.BLOSUM(BLOSUM_NUM)
     vocab_length = len(VOCAB)
     blosum45 = np.zeros((vocab_length, vocab_length))
 
@@ -834,201 +1369,23 @@ def get_blosum45():
     return aa_emb_dict
 
 
-def evaluate_mutated_pdb(config, target, pdb_file, parent_info, mutated_info, scheme, results_dir, num_designs, batch_size, seed, epoch_num=0, compute_auc=False):
-    """
-    Evaluates a PDB file with mutated sequences provided in mutated_info and saves metrics to a CSV file,
-    ensuring only mutations with the same length as the parent sequence are processed.
-
-    :param pdb_file: Path to the PDB file.
-    :param parent_info: Path to the CSV file containing parent sequence information.
-    :param mutated_info: Path to the CSV file containing mutated sequences and metadata.
-    :param heavy_chain_id: Chain ID for the heavy chain.
-    :param light_chain_id: Chain ID for the light chain.
-    :param antigen_chain_ids: List of chain IDs for antigens.
-    :param scheme: Antibody numbering scheme.
-    :param results_dir: Directory to save the results CSV file.
-
-    :return: None
-    """
-    # Load parent sequence information
-    parent_df = pd.read_csv(parent_info)
-    parent_heavy_sequence = parent_df["Heavy"].iloc[0]
-    parent_light_sequence = parent_df["Light"].iloc[0]
-
-
-    new_pdb_path = os.path.splitext(pdb_file)[0] + '_chothia.pdb'
-    heavy_chains, light_chains, antigen_chains, light_type, heavy_seq, light_seq, antigen_seq = renumber(pdb_file, new_pdb_path)
-
-
-    pdb_file = new_pdb_path
-    aa_seq =  parent_heavy_sequence
-    if parent_light_sequence == parent_light_sequence:
-        aa_seq =  aa_seq + parent_light_sequence
-
-    d2_source = '_original' #['_original', '']
-
-    # Load the CSV files
-    experimental_data_path = '/home/jovyan/mlab-de-novo-data-4t/data/experimental_data/'
-
-    target_csv   = f"{experimental_data_path}/{target}/{target}.csv"
-
-    # There is a slight difference in sequences between crystal structure and ImmuneBuilder predicted structure of 'acvr2b'. So, we use slightly different parental sequence to match with the one in the PDB.
-    # if target in ['c5', 'il17a', 'tslp', 'fxi', 'il36r', 'tnfrsf9', 'acvr2b']:
-    #     parental_csv = f"{experimental_data_path}/{target}/{target}_parent.csv"
-    # else:
-    parental_csv = f"{experimental_data_path}/{target}/{target}_parent.csv"
-    data_to_test = generate_sequences_and_kd(parental_csv, target_csv, aa_seq, parent_heavy_sequence, parent_light_sequence, target_name=target, compute_auc=compute_auc)
-
-    # Filter mutations to ensure the same length as the parent HCDR3
-    mutated_seq_list = data_to_test['sequences'] 
-    KD_values = data_to_test['KD_values']
-    binder_labels = np.array(data_to_test['Binder'])
-
-    heavy_chain_id, light_chain_id = heavy_chains[0], light_chains[0] if len(light_chains)>0 else None
-
-    # Process the original PDB to input data dictionary
-    data_dict, fixed_pdb_file = process_pdb_to_data_dict(
-        pdb_file, heavy_chain_id, light_chain_id, antigen_chains, scheme
-    )
-
-    data_dict_c = copy.deepcopy(data_dict)
-
-
-
-    # Generate complexes
-    pred_data_dict, true_data_dict = generate_complexes(data_dict_c, num_designs, batch_size, seed, custom_redesign_mask=data_to_test['masks'][0] if config['use_custom_mask'] else None)
-
-
-    # Add a column for the "likelihood/redesign" metric
-    likelihoods_list = []
-    seq_tokens_list = []
-
-
-    try:
-        # Iterate through mutations in the filtered mutated_info CSV
-        for idx, seq_tokens in enumerate(mutated_seq_list):
-            mutated_data_dict = copy.deepcopy(data_dict)
-
-            # Replace sequences in data_dict
-
-            heavy_indices = (data_dict["chain_type"] == chain_id_to_index["heavy"])
-            light_indices = (data_dict["chain_type"] == chain_id_to_index["light_lambda"]) | (data_dict["chain_type"] == chain_id_to_index["light_kappa"])
-            heavy_light_indices = heavy_indices | light_indices
-
-            mutated_data_dict["res_type"][heavy_light_indices] = seq_tokens
-            mutated_data_dict = copy_data_dict(mutated_data_dict, num_designs, custom_redesign_mask=data_to_test['masks'][0] if config['use_custom_mask'] else None)
-            seq_tokens_list.append(seq_tokens)
-            
-            # Compute metrics
-            metrics = compute_metrics(mutated_data_dict, pred_data_dict)
-
-            # Extract the "likelihood/redesign" metric
-            likelihood = metrics.get("likelihood/redesign", float("nan"))
-
-            # Store the metric in the DataFrame
-            likelihoods_list.append(likelihood)
-
-        # Plot the correlation
-        save_path = f"{results_dir}/z110__{target}_{file_prefix}_{epoch_num}_cnum_{config['network']['n_cycle']}_{config['shared']['design_mode']}_numdesg{num_designs}.png"
-        plot_correlation_scatter(np.array(likelihoods_list), np.array(KD_values), save_path=save_path)
-        print(f"Correlation for {target} is saved to {save_path}")
-
-        if compute_auc:
-
-            # NEW: Compute ROC AUC and plot ROC curve
-            try:
-                auc_score = roc_auc_score(binder_labels, np.array(likelihoods_list))
-                fpr, tpr, thresholds = roc_curve(binder_labels, np.array(likelihoods_list))
-                plt.figure(figsize=(6,6))
-                plt.plot(fpr, tpr, label=f'ROC curve (AUC = {auc_score:.2f})')
-                plt.plot([0, 1], [0, 1], 'k--', label='Chance')
-                plt.xlabel('False Positive Rate', fontsize=14, fontweight='bold')
-                plt.ylabel('True Positive Rate', fontsize=14, fontweight='bold')
-                plt.title('Receiver Operating Characteristic', fontsize=16, fontweight='bold')
-                plt.legend(loc='lower right')
-                plt.grid(True)
-                roc_plot_path = save_path.replace('.png', '_roc.pdf')
-                plt.savefig(roc_plot_path, bbox_inches='tight')
-                plt.close()
-                print(f"ROC plot saved as {roc_plot_path}")
-            except Exception as e:
-                print(f"Error computing ROC AUC: {e}")
-
-
-
-
-        # # Save the filtered results to a new CSV file
-        # os.makedirs(results_dir, exist_ok=True)
-        # output_csv_path = os.path.join(results_dir, f"{file_prefix}absci_her2_zs_likelihood_{epoch_num}_cycle_num_{config['network']['n_cycle']}_Ver2_{config['shared']['design_mode']}.csv")
-        # mutated_df.to_csv(output_csv_path, index=False)
-        # print(f"Filtered results saved to: {output_csv_path}")
-
-    finally:
-        cleanup_fixed_file(fixed_pdb_file)
 
 
 # %%
 # Config
 
-
-pdb_db = pd.read_csv("/home/jovyan/abflow-datavol/github_repos/AbFlow/data/rabd/rabd.csv")
-pdb_names = pdb_db.iloc[:,0].tolist()
-
-# Iterate over PDB files
-all_metrics = []
-for pdb_file in os.listdir(pdb_dir):
-    if pdb_file.endswith(".pdb"):
-        pdb_path = os.path.join(pdb_dir, pdb_file)
-        # Extract chain information from the filename
-        base_name = os.path.basename(pdb_file)
-        pdb_name = base_name.split(".")[0]
-
-        try:
-
-            for pid in pdb_names:
-                if pdb_name in pid:
-                    parts = pid.split("_")
-                    heavy_chain_id, light_chain_id, *antigen_chain_ids = parts[1:]
-                    # try:
-                    metrics = evaluate_single_pdb(pdb_path, heavy_chain_id, light_chain_id, antigen_chain_ids, scheme, num_designs, batch_size, seed)
-                    all_metrics.append(metrics)
-                    print(f"PDB file processed: {pdb_file}")
-                    # except:
-                    #     print(f"Skipping {pdb_file}")
-                    #     continue
-        except:
-            print(f"Skipping {pdb_file}")
-            continue
-
-# Aggregate metrics
-aggregated_metrics = {}
-for key in all_metrics[0]:
-    # Filter out empty tensors
-    valid_values = [d[key] for d in all_metrics]
-    aggregated_metrics[key] = sum(valid_values) / len(valid_values)
-
-# Create a DataFrame for saving results
-metrics_df = pd.DataFrame([aggregated_metrics], index=[datetime.now().strftime("%Y%m%d_%H%M%S")])
-
-# Save results to CSV
-os.makedirs(results_dir, exist_ok=True)
-output_path = os.path.join(results_dir, f"z110__{file_prefix}_rabd_metrics_{epoch_num}_cycle_num_{config['network']['n_cycle']}_Ver2_{config['shared']['design_mode']}_{num_designs}.csv")
-metrics_df.to_csv(output_path)
-print(f"\nResults saved to: {output_path}")
-
-
 # # Absci affinity benchmark
 ##########################################################################################################
 
 
-dataset1 = ['absci_her2_zs', 'absci_her2_sc', 'nature_hel', 'nature_il7', 'nature_her2', 'AZtg1', 'aztg2'] #, 'tweak'
+dataset1 = ['absci_her2_zs', 'absci_her2_sc', 'nature_hel', 'nature_il7', 'nature_her2', 'AZtg1', 'AZtg2'] #, 'tweak'
 dataset2 = ['c5', 'il17a', 'tslp', 'fxi', 'il36r', 'tnfrsf9', 'acvr2b']
-dataset3 = ['absci_her2_zs', 'absci_her2_sc', 'nature_hel', 'nature_il7', 'nature_her2', 'AZtg1', 'aztg2']
+dataset3 = ['absci_her2_zs', 'absci_her2_sc', 'nature_hel', 'nature_il7', 'nature_her2', 'AZtg1', 'AZtg2']
 # dataset3 = ['AZtg1']
 dataset4 = ['acvr2b']
 dataset5 = ['absci_her2_sc', 'c5', 'il17a', 'tslp', 'fxi', 'il36r', 'tnfrsf9', 'acvr2b']
 
-
+summary_records = []
 complex_list = dataset1 + dataset2 #dataset3 #
 dataset2_pdb_source = ['_original'] #['_original', '']
 
@@ -1058,5 +1415,76 @@ for d2_source in dataset2_pdb_source:
 
 
         # Evaluate mutated PDB
-        evaluate_mutated_pdb(config, complex_name, pdb_file, parent_info, mutated_info, scheme, results_dir, num_designs, batch_size, seed, epoch_num=epoch_num, compute_auc=compute_auc)
+        # stats = evaluate_mutated_pdb_with_props(
+        #     config=config,
+        #     target=complex_name,
+        #     pdb_file=pdb_file,
+        #     parent_info=parent_info,
+        #     mutated_info=mutated_info,
+        #     scheme=scheme,
+        #     results_dir=results_dir,
+        #     num_designs=num_designs,
+        #     batch_size=batch_size,
+        #     seed=seed,
+        #     epoch_num=epoch_num,
+        #     compute_auc=compute_auc
+        # )
+        stats = evaluate_mutated_pdb_with_blosum(
+            config=config,
+            target=complex_name,
+            pdb_file=pdb_file,
+            parent_info=parent_info,
+            mutated_info=mutated_info,
+            scheme=scheme,
+            results_dir=results_dir,
+            num_designs=num_designs,
+            batch_size=batch_size,
+            seed=seed,
+            epoch_num=epoch_num,
+            compute_auc=compute_auc
+        )
+        summary_records.extend(stats)
 
+
+# once all targets processed
+summary_df = pd.DataFrame(summary_records)
+
+# create a column with stars directly in the table, e.g. "ρ (sig)"
+summary_df['spearman'] = summary_df.apply(
+    lambda r: f"{r.spearman_rho:.3f}{r.spearman_sig}", axis=1)
+summary_df['kendall'] = summary_df.apply(
+    lambda r: f"{r.kendall_tau:.3f}{r.kendall_sig}", axis=1)
+
+# reorder / select columns
+out = summary_df[[
+    'target','metric',
+    'spearman','p_spearman',
+    'kendall','p_kendall'
+]]
+
+csv_path = os.path.join(results_dir, f"x{file_prefix}_{epoch_num}_summary.csv")
+out.to_csv(csv_path, index=False)
+print(f"Saved summary CSV → {csv_path}")
+
+
+# Pivot Spearman table
+spearman_table = out.pivot(
+    index='metric',
+    columns='target',
+    values='spearman'
+)
+# Pivot Kendall table
+kendall_table = out.pivot(
+    index='metric',
+    columns='target',
+    values='kendall'
+)
+
+# Save each
+spearman_csv = os.path.join(results_dir, f"x{file_prefix}_{epoch_num}_spearman_summary.csv")
+kendall_csv  = os.path.join(results_dir, f"x{file_prefix}_{epoch_num}_kendall_summary.csv")
+spearman_table.to_csv(spearman_csv)
+kendall_table.to_csv(kendall_csv)
+
+print(f"Saved Spearman summary → {spearman_csv}")
+print(f"Saved Kendall summary  → {kendall_csv}")

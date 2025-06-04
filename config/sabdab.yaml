@@ -2,11 +2,11 @@
 
 # wandb settings
 project_name: flow_matching
-model_name: abflow_may17_2dmask_CDR3ONLY_Fixed_numAtomAndMasking_diffab
+model_name: abflow_genmask_center_fixedResProb_SeqManiFoldFix
 
 # shared settings
 shared:
-    design_mode: &design_mode ["sequence", "backbone"] # Options: ["sequence", "backbone", "sidechain"]
+    design_mode: &design_mode ["sequence"] # Options: ["sequence", "backbone", "sidechain"]
     seed: &seed 2030
     confidence: &confidence False
     dataset2use: &dataset2use sabdab
@@ -30,7 +30,7 @@ checkpoint:
 # abflow datamodule settings
 datamodule:
     num_workers: 12
-    batch_size: 1
+    batch_size: 2
     redesign:
         framework: False
         hcdr1: False

@@ -135,6 +135,7 @@ class DenoisingModule(nn.Module):
         self.cb_distogram_enc = CBDistogramEmbedding(num_bins=40, min_dist=3.25, max_dist=50.75)
         self.ca_unit_vector_enc = CAUnitVectorEmbedding()
         self.linear_no_bias_s = nn.Linear(33, c_s, bias=False)
+        self.proj_prob = nn.Linear(20, c_s, bias=False)
         # Sequence embedding for amino acids (25 unique tokens)
         self.seq_emb = nn.Embedding(25, c_s)
         # Residue encoder (MLP for encoding combined residue embeddings)
@@ -213,10 +214,11 @@ class DenoisingModule(nn.Module):
         Forward pass of the denoising module.
         """
 
-        s_i = self.si_layernorm1(s_i) + self.si_layernorm2(s_inputs_i) + self.si_layernorm3(s_trunk_i)
+        # s_i = self.si_layernorm1(s_i) + self.si_layernorm2(s_inputs_i) + self.si_layernorm3(s_trunk_i)
+        s_i2 = self.si_layernorm1(s_i + s_inputs_i + s_trunk_i)
 
-        s_i_ln_scaled1 = self.linear_no_bias_s_prev1(s_i)
-        s_i_ln_scaled2 = self.linear_no_bias_s_prev2(s_i)
+        s_i_ln_scaled1 = self.linear_no_bias_s_prev1(s_i2)
+        s_i_ln_scaled2 = self.linear_no_bias_s_prev2(s_i2)
         z_ij = z_inputs_ij + z_trunk_ij + s_i_ln_scaled1[:, None, :, :] + s_i_ln_scaled2[:, :, None, :]
         z_ij = self.layer_norm_z1(z_ij)
 
@@ -225,9 +227,9 @@ class DenoisingModule(nn.Module):
         # z_ij = (1-g) * z_ij + g * z_delta
         # z_ij = self.layer_norm_z2(z_ij)
 
-        s_i = self.ipa_stack(s_i, z_ij, r_i, time_i)
+        s_i2 = self.ipa_stack(s_i2, z_ij, r_i, time_i)
 
-        return s_i
+        return s_i2
 
 
     def get_pred_network(self, c_s=64, out_dim=20, sequence=False, c_m=None):
@@ -469,7 +471,8 @@ class DenoisingModule(nn.Module):
         time = noised_feature_dict["time"].squeeze(-1)
         t_embed = torch.stack([time, torch.sin(time), torch.cos(time)], dim=-1)
 
-        res_emb_t = self.seq_emb(noised_feature_dict["res_type"])
+        # res_emb_t = self.seq_emb(noised_feature_dict["res_type"])
+        res_emb_t    = self.proj_prob(noised_feature_dict["res_type_prob"]) # (B, L, c_s)
         res_emb = torch.cat([res_emb_t, t_embed], dim=-1)
 
         s_i = self.residue_encoder(res_emb)  
@@ -521,6 +524,10 @@ class DenoisingModule(nn.Module):
 
         return vf_dict
 
+    def clamp_to_simplex(self, updated):
+        updated_clamped = torch.clamp(updated, min=1e-8)  
+        return updated_clamped / updated_clamped.sum(dim=-1, keepdim=True)
+
     def _update_features(
         self,
         noised_feature_dict: dict[str, torch.Tensor],
@@ -547,6 +554,9 @@ class DenoisingModule(nn.Module):
             updated_res_type_prob = self._sequence_flow.update_x(
                 res_type_prob, pred_vf_dict["sequence_vf"], d_t
             )
+            
+            updated_res_type_prob = self.clamp_to_simplex(updated_res_type_prob) #self._sequence_flow.nn_to_manifold(updated_res_type_prob) #
+
             res_type_prob = apply_mask(
                 res_type_prob, updated_res_type_prob, redesign_mask
             )
@@ -620,11 +630,18 @@ class DenoisingModule(nn.Module):
 
         # Predict the vector fields
         if "sequence" in self.design_mode:
-            # Get AA probs
-            res_type_prob_update = self.output_proj_seq(s_i)
-            # project sequence update onto the probability simplex
-            res_type_prob_vf = self._sequence_flow.tangent_project(res_type_prob_update)
-            results["sequence_vf"] = res_type_prob_vf
+            # # Get AA probs
+            # res_type_prob_update = self.output_proj_seq(s_i)
+            # # project sequence update onto the probability simplex
+            # res_type_prob_vf = self._sequence_flow.tangent_project(res_type_prob_update)
+            # results["sequence_vf"] = res_type_prob_vf
+            
+            time_i = noised_feature_dict['time']
+            direction_logits = self.output_proj_seq(s_i)      # (B,L,20)
+            direction = self._sequence_flow.tangent_project(direction_logits)
+            speed = self._sequence_flow._schedule(time_i)[2]  # shape (B,L,1)
+            v_t_hat = direction * speed
+            results["sequence_vf"] = v_t_hat
 
         if "backbone" in self.design_mode:
             # s_i_res = torch.cat([s_i, res_type_prob_update], dim=-1)
@@ -651,7 +668,7 @@ class DenoisingModule(nn.Module):
     ):
 
         # Compute probs
-        pred_res_type_prob = F.softmax(pred_feature_dict["res_type_prob"], dim=-1)
+        pred_res_type_prob = self.clamp_to_simplex(pred_feature_dict["res_type_prob"]) #F.softmax(pred_feature_dict["res_type_prob"], dim=-1) #self._sequence_flow.nn_to_manifold(pred_feature_dict["res_type_prob"])   #
         res_type = torch.argmax(pred_res_type_prob, dim=-1)
 
         # 6D to 3D
@@ -699,8 +716,6 @@ class DenoisingModule(nn.Module):
             output_dict["pos_heavyatom_" + str(step)] = pos_heavyatom
 
         return output_dict
-
-
 
 
     def get_loss_terms(

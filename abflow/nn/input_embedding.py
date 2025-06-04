@@ -524,7 +524,6 @@ class PairEmbedding(nn.Module):
         pos_atoms = pos_atoms[:, :, :self.num_atoms]
         mask_atoms = pos_atoms != 0
         mask2d_pair = residue_mask[:, :, None] * residue_mask[:, None, :]
-        mask2d_valid = structure_mask[:, :, None] & structure_mask[:, None, :]
 
         # 1. Pairwise amino acid embedding
         if sequence_mask is not None:
@@ -569,6 +568,7 @@ class PairEmbedding(nn.Module):
 
         # Apply structure mask to avoid data leakage
         if structure_mask is not None and structure_mask.dim() == 2:
+            mask2d_valid = structure_mask[:, :, None] & structure_mask[:, None, :]
             dist_emb = dist_emb * mask2d_valid[:, :, :, None]
             dihedral_emb = dihedral_emb * mask2d_valid[:, :, :, None]
 
