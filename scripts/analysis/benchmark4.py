@@ -359,7 +359,7 @@ def plot_correlation_scatter(
 
 
     # Determine the plot label based on the complex name
-    if config["complex_name"] == 'tweak':
+    if config["complex_name"] == 'AZtg3':
         plot_label = r'$DDG$'
     elif config['complex_name'] == 'AZtg1':
         plot_label = r'$-\log(qAC50)$'
@@ -573,7 +573,7 @@ def generate_sequences_and_kd(parental_csv, target_csv, aa_seq, heavy_seq, light
             kd_value = row['IC50 (M)']
         elif target_name in ['absci_her2_zs']:
             kd_value = row['-log(KD (M))']
-        elif target_name in ['tweak']:
+        elif target_name in ['AZtg3']:
             kd_value = row['DDG']
         else:
             kd_value = row['KD']
@@ -651,7 +651,7 @@ def generate_sequences_and_kd(parental_csv, target_csv, aa_seq, heavy_seq, light
                 kd_log_value = convert_kd_to_log_kd(float(kd_value))
             elif target_name in ['absci_her2_zs']:
                 kd_log_value = float(kd_value)
-            elif target_name in ['tweak']:
+            elif target_name in ['AZtg3']:
                 kd_log_value = float(kd_value)
             else:
                 kd_log_value = convert_kd_to_log_kd(float(kd_value))
@@ -1378,7 +1378,7 @@ def get_blosum45():
 ##########################################################################################################
 
 
-dataset1 = ['absci_her2_zs', 'absci_her2_sc', 'nature_hel', 'nature_il7', 'nature_her2', 'AZtg1', 'AZtg2'] #, 'tweak'
+dataset1 = ['absci_her2_zs', 'absci_her2_sc', 'nature_hel', 'nature_il7', 'nature_her2', 'AZtg1', 'AZtg2'] #, 'AZtg3'
 dataset2 = ['c5', 'il17a', 'tslp', 'fxi', 'il36r', 'tnfrsf9', 'acvr2b']
 dataset3 = ['absci_her2_zs', 'absci_her2_sc', 'nature_hel', 'nature_il7', 'nature_her2', 'AZtg1', 'AZtg2']
 # dataset3 = ['AZtg1']

@@ -325,7 +325,7 @@ def generate_sequences_and_kd(parental_csv: str, target_csv: str,
             kd_val = row['IC50 (M)']
         elif target_name == 'absci_her2_zs':
             kd_val = row['-log(KD (M))']
-        elif target_name == 'tweak':
+        elif target_name == 'AZtg3':
             kd_val = row['DDG']
         else:
             kd_val = row.get('KD', np.nan)
@@ -439,7 +439,7 @@ def generate_sequences_and_kd(parental_csv: str, target_csv: str,
                 log_kd = convert_kd_to_log_kd(float(kd_val))
             elif target_name == 'absci_her2_zs':
                 log_kd = float(kd_val)
-            elif target_name == 'tweak':
+            elif target_name == 'AZtg3':
                 log_kd = float(kd_val)
             else:
                 log_kd = convert_kd_to_log_kd(float(kd_val))
