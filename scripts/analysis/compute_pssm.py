@@ -38,15 +38,15 @@ rcParams['font.weight'] = 'bold'
 DEBUG = True  # Set to False to disable debug prints
 
 # Correct PSSM file paths
-# GLOBAL_DATA = 'OAS'
-# HEAVY_PSSM_PATH  = "/home/jovyan/abflow-datavol/github_repos/AApull_request/AbFlow/scripts/analysis/OAS-Human_HeavyPWM_frequencypssm.txt"
-# KAPPA_PSSM_PATH  = "/home/jovyan/abflow-datavol/github_repos/AApull_request/AbFlow/scripts/analysis/OAS-Human_KappaPWM_frequencypssm.txt"
-# LAMBDA_PSSM_PATH = "/home/jovyan/abflow-datavol/github_repos/AApull_request/AbFlow/scripts/analysis/OAS-Human_LambdaPWM_frequencypssm.txt"
+GLOBAL_DATA = 'OAS'
+HEAVY_PSSM_PATH  = "/home/jovyan/abflow-datavol/github_repos/AApull_request/AbFlow/scripts/analysis/OAS-Human_HeavyPWM_frequencypssm.txt"
+KAPPA_PSSM_PATH  = "/home/jovyan/abflow-datavol/github_repos/AApull_request/AbFlow/scripts/analysis/OAS-Human_KappaPWM_frequencypssm.txt"
+LAMBDA_PSSM_PATH = "/home/jovyan/abflow-datavol/github_repos/AApull_request/AbFlow/scripts/analysis/OAS-Human_LambdaPWM_frequencypssm.txt"
 
-GLOBAL_DATA = 'SABDAB'
-HEAVY_PSSM_PATH  = "/home/jovyan/abflow-datavol/github_repos/AApull_request/AbFlow/scripts/analysis/sabdab_heavy_pssm.csv"
-KAPPA_PSSM_PATH  = "/home/jovyan/abflow-datavol/github_repos/AApull_request/AbFlow/scripts/analysis/sabdab_kappa_pssm.csv"
-LAMBDA_PSSM_PATH = "/home/jovyan/abflow-datavol/github_repos/AApull_request/AbFlow/scripts/analysis/sabdab_lambda_pssm.csv"
+# GLOBAL_DATA = 'SABDAB'
+# HEAVY_PSSM_PATH  = "/home/jovyan/abflow-datavol/github_repos/AApull_request/AbFlow/scripts/analysis/sabdab_heavy_pssm.csv"
+# KAPPA_PSSM_PATH  = "/home/jovyan/abflow-datavol/github_repos/AApull_request/AbFlow/scripts/analysis/sabdab_kappa_pssm.csv"
+# LAMBDA_PSSM_PATH = "/home/jovyan/abflow-datavol/github_repos/AApull_request/AbFlow/scripts/analysis/sabdab_lambda_pssm.csv"
 
 
 # Paths related to AbFlow (for potential future use)
@@ -128,78 +128,79 @@ from abflow.constants import aa1_name_to_index
 
 def load_pssm(path: str) -> dict:
     """
-    Load a PSSM file (first line “Nseqs=… | …”) into a nested dict:
-      { aho_pos: { 'A': float, 'C': float, …, 'Y': float }, … }.
+    Load a PSSM file (first line “Nseqs=…| …”) into a nested dict:
+        { aho_pos: { 'A': float, 'C': float, …, 'Y': float }, … }.
     Keys (aho_pos) are either int (no insertion) or str (e.g. "25A").
-
-    This version will accept either a whitespace-delimited .txt or a comma-delimited .csv.
+    Works for either:
+      • tab‐delimited “.txt” where the first column is already “AHo numbering”
+      • comma‐delimited “.csv” where the first column is “position” (we rename it to “AHo numbering”)
     """
-    # 1) Decide delimiter based on file extension
+    # 1) Pick separator by extension:
     _, ext = os.path.splitext(path.lower())
     if ext == ".csv":
-        delimiter = ","
+        sep = ","
     else:
-        # assume anything else (e.g. .txt) is whitespace‐delimited
-        delimiter = r"\s+"
-    
-    # 2) Read (and parse) only the first line to get column names
+        # assume “.txt” → tab‐delimited PSSM
+        sep = "\t"
+
+    # 2) Read just the first line of the file to extract headers:
     with open(path, "r") as f:
-        first_line = f.readline().strip()
-    
-    if delimiter == ",":
-        all_cols = first_line.split(",")
+        first_line = f.readline().rstrip("\n")
+
+    # 3) Split on exactly the same sep so multi‐word headers stay intact:
+    all_cols = first_line.split(sep)
+
+    # 4) In a .csv, the first header is “position” → rename it “AHo numbering”
+    if ext == ".csv":
+        if "position" not in all_cols:
+            raise KeyError(f"Expected 'position' in CSV header but got: {all_cols[:5]}…")
+        pos_idx = all_cols.index("position")
+        all_cols[pos_idx] = "AHo numbering"
+        # everything else stays as is
+
+    # 5) In a .txt, we expect one of the columns to be “AHo numbering” already.
     else:
-        # for whitespace, split on any run of spaces/tabs
-        all_cols = first_line.split()
-    
-    # 3) If “AHo” appears as a column header, replace it with “AHo numbering”
-    #    (this mimics the original behavior)
-    if "AHo" in all_cols:
-        idx = all_cols.index("AHo")
-        all_cols[idx] = "AHo numbering"
-        # In the original function they also deleted the next column,
-        # presumably because the PSSM-format sometimes has a “.” or dummy column.
-        del all_cols[idx + 1]
-    
+        if "AHo numbering" not in all_cols:
+            raise KeyError(f"Expected 'AHo numbering' in TXT header but got: {all_cols[:5]}…")
+
     if DEBUG:
-        print(f"[DEBUG] Parsed columns for {path}: {all_cols[:6]} … {all_cols[-5:]}")
-    
-    # 4) Now read the rest of the file with pandas, using the same delimiter,
-    #    skipping the first (header) line.
-    #    Note: header=None because we already manually extracted column names
+        snippet = ", ".join(all_cols[:6]) + " … " + ", ".join(all_cols[-6:])
+        print(f"[DEBUG] Parsed columns for {path}: {snippet}")
+
+    # 6) Now read the rest of the file (skip the first line) using the same sep:
     df = pd.read_csv(
         path,
-        sep=delimiter,
+        sep=sep,
         header=None,
         skiprows=1,
         engine="python"
     )
     df.columns = all_cols
-    
-    # 5) Re‐index by “AHo numbering”
+
+    # 7) Set “AHo numbering” as the index
     df = df.set_index("AHo numbering")
-    
-    # 6) Locate the amino‐acid columns (single‐letter keys among the standard 20)
-    aa_columns = [c for c in df.columns
-                  if len(c) == 1 and c in list("ACDEFGHIKLMNPQRSTVWY")]
-    
+
+    # 8) Pick out only the single‐letter AA columns (the 20 standard AAs):
+    aa_columns = [
+        c for c in df.columns
+        if len(c) == 1 and c in list("ACDEFGHIKLMNPQRSTVWY")
+    ]
+
     if DEBUG:
         print(f"[DEBUG] Recognized AA columns in {path}: {aa_columns}")
         print(f"[DEBUG] {path} dimensions: {df.shape[0]} rows × {len(aa_columns)} AA cols")
-    
-    # 7) Extract only those AA columns, cast to float
+
+    # 9) Cast those columns to float, then convert to a nested dict:
     df_aa = df[aa_columns].astype(float)
-    
-    # 8) Convert to a nested dict { position → { AA: score, … } }
     nested = df_aa.to_dict(orient="index")
-    
+
     if DEBUG:
         sample = list(nested.items())[:3]
         print(f"[DEBUG] Sample entries from {path}:")
         for pos, row in sample:
             snippet = ", ".join(f"{aa}:{row[aa]:.4g}" for aa in aa_columns[:3])
             print(f"   {pos}: {{ {snippet} … }}")
-    
+
     return nested
 
 
@@ -636,7 +637,7 @@ def evaluate_dataset_with_pssm(target: str, results_dir: str, compute_auc: bool=
     else:
         target_name = target
 
-    plot_path = os.path.join(results_dir, f"uPSSM_vs_affinity_{target_name}_{EPOCH_NUM}.pdf")
+    plot_path = os.path.join(results_dir, f"{GLOBAL_DATA}_PSSM_vs_affinity_{target_name}_{EPOCH_NUM}.pdf")
     plot_prop_correlation(pssm_scores, KD_vals, "PSSM", plot_path)
     print(f"[{target}] Saved PSSM vs KD plot → {plot_path}")
 
