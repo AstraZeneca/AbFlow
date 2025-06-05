@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """
-End-to-end script to compute chain-aware PSSM scores for mutated antibody/nanobody sequences
-(using sequences from CSVs), correlate those scores with experimental affinities (−log(KD)),
-and plot the results.
+End-to-end script to compute chain-aware “global‐reference” BLOSUM 90 similarity scores for mutated antibody/nanobody sequences
+(using sequences from CSVs), correlate those scores with experimental affinities (−log(KD)), and plot the results.
 
-Key corrections:
-  - Number parent and each mutant via ANARCI (scheme='aho') before building any mask.
-  - For each mutant, compare its numbering to the parent’s numbering to build a per‐mutant mask in AHo‐space.
-  - Build a single “union” mask in AHo‐space (True wherever any mutant differs from parent).
-  - Compute PSSM scores chain‐aware (heavy vs. κ vs. λ) using those masks and the aligned mutant strings.
-  - Supports optional ROC‐AUC if 'Binder' column exists.
-  - DEBUG prints show mutation positions and PSSM lookups.
+Key differences from the PSSM version:
+  - We supply three raw “global” sequences (heavy, kappa light, lambda light), each AHo‐numbered via ANARCI.
+  - We build a global_map {pos_key: aa} for each chain.  For each mutant, we use the same union‐mask logic as before,
+    but now sum BLOSUM90 scores at masked positions between the mutant’s aligned AA and the corresponding global AA.
+  - The light chain is handled chain‐aware (“K” vs. “L”).
+  - All file paths and dataset lists mirror the original PSSM script.
 
-DEBUG prints are on by default. Set DEBUG=False to silence them.
+Usage:
+  1) Fill in GLOBAL_HEAVY_RAW, GLOBAL_KAPPA_RAW, GLOBAL_LAMBDA_RAW with your ungapped one-letter global reference sequences.
+  2) Run: python3 compute_global_blosum_vs_affinity.py
 """
 
 import os
@@ -25,9 +25,8 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from scipy.stats import spearmanr, kendalltau
 from anarci import number
-from sklearn.metrics import roc_auc_score, roc_curve
+from Bio.Align import substitution_matrices
 from matplotlib import rcParams
-import matplotlib.ticker as mticker
 
 rcParams['font.weight'] = 'bold'
 
@@ -37,163 +36,92 @@ rcParams['font.weight'] = 'bold'
 
 DEBUG = True  # Set to False to disable debug prints
 
-# Correct PSSM file paths
-HEAVY_PSSM_PATH  = "/home/jovyan/abflow-datavol/github_repos/AApull_request/AbFlow/scripts/analysis/OAS-Human_HeavyPWM_frequencypssm.txt"
-KAPPA_PSSM_PATH  = "/home/jovyan/abflow-datavol/github_repos/AApull_request/AbFlow/scripts/analysis/OAS-Human_KappaPWM_frequencypssm.txt"
-LAMBDA_PSSM_PATH = "/home/jovyan/abflow-datavol/github_repos/AApull_request/AbFlow/scripts/analysis/OAS-Human_LambdaPWM_frequencypssm.txt"
+BLOSUM_NUM=62
 
-# Paths related to AbFlow (for potential future use)
+# 1) Fill in your raw global one-letter (ungapped) sequences:
+# GLOBAL_DATA = 'OAS'
+# GLOBAL_HEAVY_RAW   = "QVQLVQS-GPGLVKPGESLSLSCKASGYSFSS------YAWSWVRQAPGKGLEWMGRIYP----SGDTNYAPSLKGRVTISRDTSKNTAYLQLSSLTAEDTAVYYCARDGGG---------------------YYFDYWGQGTLVTVSS"
+# GLOBAL_KAPPA_RAW   = "DIVMTQSPDSLSVSPGERATISCRASQSIS--------SYLAWYQQKPGQAPKLLIY---------ASTRASGVPSRFSGSGSG--TDFTLTISSLEAEDFAVYYCQQYSS-----------------------LPLTFGQGTKVEIK-"
+# GLOBAL_LAMBDA_RAW  = "QSVLTQP-PSVSVSPGQTVTLTCTGSSGSVGS------YYVSWYQQKPGQAPRLLIYE--------DNNRPSGVPDRFSGSKSG--NTASLTISGLQAEDEADYYCQSYDSS----------------------SAWVFGGGTKLTVL-"
+
+GLOBAL_DATA = 'SABDAB'
+GLOBAL_HEAVY_RAW   = "QVQLVES-GGGLVQPGGSLRLSC-AASG-FTFSS-----------YAMHWVRQ-AP-------G-----------KGLEWVGYISP----------GGSTYYADSVKGRFTISRDNS--------KNTAYLQMNSLRSEDTAVYYCARGGGY---------------------YYFDYWGQGT-LVTVSS"
+GLOBAL_KAPPA_RAW   = "DIVMTQSPSSLSASVGDRVTITCRAS--QSIS--------SYLAWYQQKPGQAPKLLIYG--------ASNLASGVPSRFSGSGSG----TDFTLTISSLQPEDFATYYCQQYYS-----------------------YPYTFGQGTKLEIKR"
+GLOBAL_LAMBDA_RAW  = "-SVLTQP-PSVSGSPGQTVTISCTGS--SNIGS-----NYVSWYQQ-K-PGQAPKLLIYD--------NSNRPSGVPDRFSGSKSG---TTASLTISGLQAEDEADYYCQSWDS-----------------------SPWVFGGGTKLTVLG"
+
+
+
+# Paths (same as original scripts):
 ROOT_DIR            = "/home/jovyan/abflow-datavol/"
-EXPERIMENT_NAME     = "abflow_may17_2dmask_CDR3ONLY_Fixed_numAtomAndMasking_diffab_sabdab_sequence_backbone"
-EPOCH_NUM           = "epoch=69"
-DEVICE              = "cuda:0"
 RESULTS_DIR         = os.path.join(ROOT_DIR, "results")
-EXPERIMENT_DIR      = os.path.join(ROOT_DIR, "checkpoints", EXPERIMENT_NAME)
-CONFIG_PATH         = os.path.join(EXPERIMENT_DIR, "config.yaml")
-
-# Experimental data base directory
 EXPERIMENTAL_DATA   = "/home/jovyan/mlab-de-novo-data-4t/data/experimental_data/"
-
-# Other parameters
-COMPUTE_AUC = False  # Set True to compute ROC‐AUC if Binder labels exist
 
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
-if DEBUG:
-    print(f"[DEBUG] DEVICE             = {DEVICE}")
-    print(f"[DEBUG] RESULTS_DIR        = {RESULTS_DIR}")
-    print(f"[DEBUG] HEAVY_PSSM_PATH    = {HEAVY_PSSM_PATH}")
-    print(f"[DEBUG] KAPPA_PSSM_PATH    = {KAPPA_PSSM_PATH}")
-    print(f"[DEBUG] LAMBDA_PSSM_PATH   = {LAMBDA_PSSM_PATH}")
-
 # ─────────────────────────────────────────────────────────────────────────────
-#                                   IMPORT UTILS
+#                            BLOSUM 90 MATRIX LOADING
 # ─────────────────────────────────────────────────────────────────────────────
 
-import sys
-sys.path.append(os.path.join(ROOT_DIR, "github_repos", "AApull_request", "AbFlow"))
+# Load BLOSUM90 from Biopython
+blosum45 = substitution_matrices.load(f"BLOSUM{BLOSUM_NUM}")
+
+def get_blosum_score(aa1: str, aa2: str) -> float:
+    """
+    Return the BLOSUM90 score for aa1 vs. aa2 (both single-letter).
+    If the pair is not in the matrix, return 0.
+    """
+    try:
+        return blosum45[(aa1, aa2)]
+    except KeyError:
+        try:
+            return blosum45[(aa2, aa1)]
+        except KeyError:
+            return 0.0
+
+# ─────────────────────────────────────────────────────────────────────────────
+#                           GLOBAL REFERENCE PROCESSING
+# ─────────────────────────────────────────────────────────────────────────────
+
+def build_global_map(raw_seq: str, expected_chain: str) -> dict:
+    """
+    Given a raw one-letter antibody sequence and the expected chain type ('H','K','L'),
+    run ANARCI (scheme='aho') to get AHo numbering, and build a map { pos_key: aa }.
+    pos_key is int (e.g. 25) if no insertion, or str (e.g. "25A") if insertion.
+    """
+    raw_seq = raw_seq.replace('-', '')
+
+    numbering, chain_type = number(raw_seq, scheme='aho')
+    # if chain_type != expected_chain:
+    #     raise ValueError(f"ANARCI mis-identified global {expected_chain} as '{chain_type}'")
+    global_map = {}
+    for (num, icode), aa in numbering:
+        # Build pos_key
+        if str(icode).strip() == "":
+            pos_key = num
+        else:
+            pos_key = f"{num}{icode}".strip()
+        global_map[pos_key] = aa
+    if DEBUG:
+        sample = list(global_map.items())[:5]
+        print(f"[DEBUG] Built global_map for {expected_chain}, sample: {sample} …")
+    return global_map
+
+# Build the three global maps:
+GLOBAL_HEAVY_MAP  = build_global_map(GLOBAL_HEAVY_RAW, 'H')
+GLOBAL_KAPPA_MAP  = build_global_map(GLOBAL_KAPPA_RAW, 'K')
+GLOBAL_LAMBDA_MAP = build_global_map(GLOBAL_LAMBDA_RAW, 'L')
+
+# ─────────────────────────────────────────────────────────────────────────────
+#                           IMPORT & CONSTANTS
+# ─────────────────────────────────────────────────────────────────────────────
 
 from abflow.constants import aa1_name_to_index
 
-# ─────────────────────────────────────────────────────────────────────────────
-#                             PSSM LOADING FUNCTIONS
-# ─────────────────────────────────────────────────────────────────────────────
-
-def load_pssm(txt_path: str) -> dict:
-    """
-    Load a PSSM file (first line “Nseqs=…| …”) into a nested dict:
-      { aho_pos: { 'A': float, 'C': float, …, 'Y': float }, … }.
-    Keys (aho_pos) are either int (no insertion) or str (e.g. "25A").
-    """
-    with open(txt_path, "r") as f:
-        first_line = f.readline().strip()
-    all_cols = first_line.split()
-    if "AHo" in all_cols:
-        idx = all_cols.index("AHo")
-        all_cols[idx] = "AHo numbering"
-        del all_cols[idx+1]
-    if DEBUG:
-        print(f"[DEBUG] Parsed columns for {txt_path}: {all_cols[:6]} … {all_cols[-5:]}")
-
-    df = pd.read_csv(
-        txt_path,
-        delim_whitespace=True,
-        header=None,
-        skiprows=1,
-        engine="python"
-    )
-    df.columns = all_cols
-    df = df.set_index("AHo numbering")
-    aa_columns = [c for c in df.columns if len(c) == 1 and c in list("ACDEFGHIKLMNPQRSTVWY")]
-    if DEBUG:
-        print(f"[DEBUG] Recognized AA columns in {txt_path}: {aa_columns}")
-        print(f"[DEBUG] {txt_path} dimensions: {df.shape[0]} rows × {len(aa_columns)} AA cols")
-    df_aa = df[aa_columns].astype(float)
-    nested = df_aa.to_dict(orient="index")
-    if DEBUG:
-        sample = list(nested.items())[:3]
-        print(f"[DEBUG] Sample entries from {txt_path}:")
-        for pos, row in sample:
-            print(f"   {pos}: {{ {', '.join(f'{aa}:{row[aa]:.4g}' for aa in aa_columns[:3])} … }}")
-    return nested
-
-heavy_pssm  = load_pssm(HEAVY_PSSM_PATH)
-kappa_pssm  = load_pssm(KAPPA_PSSM_PATH)
-lambda_pssm = load_pssm(LAMBDA_PSSM_PATH)
-
-# ─────────────────────────────────────────────────────────────────────────────
-#                        SEQUENCE ↔ ONE‐LETTER DECODING UTILS
-# ─────────────────────────────────────────────────────────────────────────────
-
-INV_AA_MAP = {v: k for k, v in aa1_name_to_index.items()}
+INV_AA_MAP = {v:k for k,v in aa1_name_to_index.items()}
 VALID_AA_SET = set("ACDEFGHIKLMNPQRSTVWY")
 
-def clean_sequence(seq: str) -> str:
-    """
-    Uppercase and remove any character not in the 20 standard amino acids.
-    """
-    s = str(seq).upper()
-    cleaned = re.sub(r'[^ACDEFGHIKLMNPQRSTVWY]', '', s)
-    if DEBUG and cleaned != s:
-        removed = set(s) - set(cleaned)
-        print(f"[DEBUG] clean_sequence: removed {removed} from '{seq}' → '{cleaned}'")
-    return cleaned
-
 # ─────────────────────────────────────────────────────────────────────────────
-#                           PSSM‐BASED SCORING FUNCTION
-# ─────────────────────────────────────────────────────────────────────────────
-
-def compute_pssm_score_for_seq(numbering: list, seq: str, mask: np.ndarray,
-                               chain_type: str, debug_prefix: str="") -> float:
-    """
-    Given:
-      - numbering: list of ((resnum, icode), aa_char) tuples from ANARCI for this chain
-      - seq: one-letter string of length = len(numbering), including '-' for gaps
-      - mask: boolean numpy array of length len(numbering) (True at positions to score)
-      - chain_type: 'H', 'K', or 'L'
-      - debug_prefix: string to prefix debug prints
-    Returns:
-      - sum of PSSM frequencies over masked positions for this chain.
-    """
-    total = 0.0
-
-    for idx, do_score in enumerate(mask):
-        if not do_score:
-            continue
-        (num, icode), aa_char = numbering[idx]
-
-        
-        # Build pos_key exactly the same type as PSSM keys:
-        if str(icode).strip() == "":
-            pos_key = num        # integer index (no insertion)
-        else:
-            pos_key = f"{num}{icode}".strip()  # string (e.g. "25A")
-        mut_aa = seq[idx]
-
-
-        # Skip gap positions:
-        if mut_aa == '-':
-            continue
-        val = 0.0
-        if chain_type == "H":
-            if pos_key in heavy_pssm and mut_aa in heavy_pssm[pos_key]:
-                print(idx, num, icode, aa_char, mut_aa, pos_key, heavy_pssm[pos_key])
-                val = heavy_pssm[pos_key][mut_aa]
-        elif chain_type == "K":
-            if pos_key in kappa_pssm and mut_aa in kappa_pssm[pos_key]:
-                val = kappa_pssm[pos_key][mut_aa]
-        elif chain_type == "L":
-            if pos_key in lambda_pssm and mut_aa in lambda_pssm[pos_key]:
-                val = lambda_pssm[pos_key][mut_aa]
-
-
-        if DEBUG and debug_prefix:
-            print(f"{debug_prefix} idx={idx}, pos={pos_key}, aa={mut_aa}, val={val}")
-        total += val
-    return total
-
-# ─────────────────────────────────────────────────────────────────────────────
-#                          CORRELATION & PLOTTING UTILITIES
+#                    CORRELATION & PLOTTING UTILITIES
 # ─────────────────────────────────────────────────────────────────────────────
 
 def get_significance(p_value: float) -> str:
@@ -250,13 +178,29 @@ def plot_prop_correlation(x: np.ndarray, y: np.ndarray, xlabel: str, save_path: 
     plt.close()
 
 # ─────────────────────────────────────────────────────────────────────────────
-#                    SEQUENCE + AFFINITY GENERATION FUNCTION
+#                           SEQUENCE CLEANING UTILS
+# ─────────────────────────────────────────────────────────────────────────────
+
+def clean_sequence(seq: str) -> str:
+    """
+    Uppercase and remove any character not in the 20 standard amino acids.
+    """
+    s = str(seq).upper()
+    cleaned = re.sub(r'[^ACDEFGHIKLMNPQRSTVWY]', '', s)
+    if DEBUG and cleaned != s:
+        removed = set(s) - set(cleaned)
+        print(f"[DEBUG] clean_sequence: removed {removed} from '{seq}' → '{cleaned}'")
+    return cleaned
+
+# ─────────────────────────────────────────────────────────────────────────────
+#                    PARENT & MUTANT SEQUENCE PREPARATION
 # ─────────────────────────────────────────────────────────────────────────────
 
 def convert_kd_to_log_kd(kd_M: float) -> float:
     if kd_M <= 0:
         return np.nan
     return -np.log10(kd_M)
+
 def generate_sequences_and_kd(parental_csv: str, target_csv: str,
                               target_name: str = None, compute_auc: bool = False):
     """
@@ -269,6 +213,7 @@ def generate_sequences_and_kd(parental_csv: str, target_csv: str,
         'heavy_chain':     'H',
         'light_chain':     'K' or 'L' (None if no light),
         'seq_tensors':     list of aligned mutant strings (length = M_h+M_l),
+        'mut_numberings':  list of tuples (mut_heavy_numbering, mut_light_numbering),
         'mask':            torch.BoolTensor (N × (M_h+M_l)) union mask in AHo‐space,
         'KD_values':       list of -log10(KD) floats,
         'Binder':          list of binder labels if present (else empty).
@@ -312,6 +257,7 @@ def generate_sequences_and_kd(parental_csv: str, target_csv: str,
     seq_tensors = []
     KD_values   = []
     binder_list = []
+    mut_numberings = []
 
     # Build union masks in AHo-space
     union_heavy_mask = np.zeros(M_h, dtype=bool)
@@ -320,13 +266,13 @@ def generate_sequences_and_kd(parental_csv: str, target_csv: str,
     for idx, row in target_df.iterrows():
         # Determine KD value depending on dataset
         if target_name in ['absci_her2_sc','c5','il17a','tslp','acvr2b','fxi','il36r','tnfrsf9']:
-            kd_val = row['KD (nM)']
+            kd_val = row.get('KD (nM)', np.nan)
         elif target_name in ['nature_il7','lox1','scf']:
-            kd_val = row['IC50 (M)']
+            kd_val = row.get('IC50 (M)', np.nan)
         elif target_name == 'absci_her2_zs':
-            kd_val = row['-log(KD (M))']
-        elif target_name == 'AZtg3':
-            kd_val = row['DDG']
+            kd_val = row.get('-log(KD (M))', np.nan)
+        elif target_name == 'tweak':
+            kd_val = row.get('DDG', np.nan)
         else:
             kd_val = row.get('KD', np.nan)
 
@@ -377,7 +323,6 @@ def generate_sequences_and_kd(parental_csv: str, target_csv: str,
                 print(f"[DEBUG] Skipping mutant with invalid letters: {invalid}")
             continue
 
-
         raw_mut_heavy = mutant_concat[:len(heavy_parent)]
         raw_mut_light = mutant_concat[len(heavy_parent):] if light_parent else ""
 
@@ -395,15 +340,13 @@ def generate_sequences_and_kd(parental_csv: str, target_csv: str,
                     print(f"[DEBUG] Skipping mutant {idx}: light numbering mismatch")
                 continue
         else:
-            mut_light_numbering = []
-            mut_light_chain = None
+            mut_light_numbering, mut_light_chain = [], None
 
         # 4) Build this mutant’s mask in AHo-space
         this_mask_h = np.zeros(M_h, dtype=bool)
         for i in range(M_h):
             parent_aa = heavy_numbering[i][1]
             mut_aa    = mut_heavy_numbering[i][1]
-
             if parent_aa != mut_aa:
                 this_mask_h[i] = True
 
@@ -431,6 +374,9 @@ def generate_sequences_and_kd(parental_csv: str, target_csv: str,
         aligned_full = aligned_heavy + aligned_light  # length = M_h + M_l
         seq_tensors.append(aligned_full)
 
+        # Store numbering lists for scoring later
+        mut_numberings.append((mut_heavy_numbering, mut_light_numbering))
+
         # Compute −log(KD)
         try:
             if target_name in ['absci_her2_sc','c5','il17a','tslp','acvr2b','fxi','il36r','tnfrsf9']:
@@ -439,7 +385,7 @@ def generate_sequences_and_kd(parental_csv: str, target_csv: str,
                 log_kd = convert_kd_to_log_kd(float(kd_val))
             elif target_name == 'absci_her2_zs':
                 log_kd = float(kd_val)
-            elif target_name == 'AZtg3':
+            elif target_name == 'tweak':
                 log_kd = float(kd_val)
             else:
                 log_kd = convert_kd_to_log_kd(float(kd_val))
@@ -464,21 +410,55 @@ def generate_sequences_and_kd(parental_csv: str, target_csv: str,
         'light_numbering': light_numbering,
         'heavy_chain':     heavy_chain,
         'light_chain':     light_chain,
-        'seq_tensors':     seq_tensors,    # list of aligned strings (length M_h+M_l)
-        'mask':            mask_tensor,     # torch.BoolTensor (N × (M_h+M_l))
+        'seq_tensors':     seq_tensors,        # list of aligned strings (length M_h+M_l)
+        'mut_numberings':  mut_numberings,     # list of (mut_heavy_numbering, mut_light_numbering)
+        'mask':            mask_tensor,        # torch.BoolTensor (N × (M_h+M_l))
         'KD_values':       KD_values,
         'Binder':          binder_list
     }
 
 # ─────────────────────────────────────────────────────────────────────────────
-#          MAIN EVALUATION FUNCTION: PSSM‐BASED CORRELATION PIPELINE
+#              COMPUTE GLOBAL BLOSUM 90 SCORE FOR A SINGLE CHAIN
 # ─────────────────────────────────────────────────────────────────────────────
 
-def evaluate_dataset_with_pssm(target: str, results_dir: str, compute_auc: bool=False):
+def compute_blosum_score_for_chain(mut_numbering: list, mask_chain: np.ndarray, global_map: dict) -> float:
+    """
+    Given:
+      - mut_numbering: list of ((resnum, icode), aa_char) from ANARCI for this mutant chain
+      - mask_chain: boolean numpy array of length = len(mut_numbering); True where we score
+      - global_map: { pos_key: aa_char } for the global reference of this chain
+    Returns:
+      - sum of BLOSUM90 scores over masked positions for this chain.
+    """
+    total = 0.0
+    for idx, do_score in enumerate(mask_chain):
+        if not do_score:
+            continue
+        (num, icode), mut_aa = mut_numbering[idx]
+        if mut_aa == '-':
+            continue
+        # Build pos_key
+        if str(icode).strip() == "":
+            pos_key = num
+        else:
+            pos_key = f"{num}{icode}".strip()
+        if pos_key not in global_map:
+            continue
+        glob_aa = global_map[pos_key]
+        if glob_aa == '-':
+            continue
+        total += get_blosum_score(glob_aa, mut_aa)
+    return total
+
+# ─────────────────────────────────────────────────────────────────────────────
+#       MAIN EVALUATION FUNCTION: GLOBAL BLOSUM 90‐BASED CORRELATION PIPELINE
+# ─────────────────────────────────────────────────────────────────────────────
+
+def evaluate_dataset_with_global_blosum(target: str, results_dir: str, compute_auc: bool=False):
     """
     For a given dataset name (e.g. 'absci_her2_sc'), loads parent CSV and mutated CSV,
-    computes PSSM scores for each mutant, computes correlations vs. −log(KD),
-    and writes plots + summary CSV.
+    computes global BLOSUM90 scores for each mutant (heavy + light),
+    computes correlations vs. −log(KD), and writes plots + summary CSV.
     """
     parent_csv  = os.path.join(EXPERIMENTAL_DATA, target, f"{target}_parent.csv")
     mutated_csv = os.path.join(EXPERIMENTAL_DATA, target, f"{target}.csv")
@@ -496,6 +476,7 @@ def evaluate_dataset_with_pssm(target: str, results_dir: str, compute_auc: bool=
     heavy_chain     = data['heavy_chain']    # 'H'
     light_chain     = data['light_chain']    # 'K', 'L', or None
     seq_aligned     = data['seq_tensors']    # list of aligned strings (length M_h+M_l)
+    mut_numberings  = data['mut_numberings'] # list of (mut_heavy_numbering, mut_light_numbering)
     mask_tensor     = data['mask']           # (N × (M_h+M_l))
     KD_vals         = np.array(data['KD_values'])
     binder_labels   = np.array(data['Binder']) if data['Binder'] else None
@@ -503,84 +484,70 @@ def evaluate_dataset_with_pssm(target: str, results_dir: str, compute_auc: bool=
     M_h = len(heavy_numbering)
     M_l = len(light_numbering)
     N = len(seq_aligned)
-    pssm_scores = np.zeros(N, dtype=float)
+    blosum_scores = np.zeros(N, dtype=float)
 
     for i in range(N):
+        # Extract this mutant’s numbering lists and mask
+        mut_heavy_numbering, mut_light_numbering = mut_numberings[i]
         mask_i = mask_tensor[i].numpy()             # union mask in AHo-space
-        aligned_full = seq_aligned[i]               # string length = M_h+M_l
-        heavy_mut = aligned_full[:M_h]
-        light_mut = aligned_full[M_h:] if M_l > 0 else ""
-
         mask_heavy = mask_i[:M_h]
         mask_light = mask_i[M_h:] if M_l > 0 else np.zeros(0, dtype=bool)
 
-        if DEBUG:
-            print(f"[DEBUG] Evaluating mutant {i}: heavy_mut='{heavy_mut}', light_mut='{light_mut}'")
-            print(f"[DEBUG] Union mask heavy: {mask_heavy}, light: {mask_light}")
+        # Compute heavy chain BLOSUM score
+        score_h = compute_blosum_score_for_chain(mut_heavy_numbering, mask_heavy, GLOBAL_HEAVY_MAP)
 
-
-        sc_h = compute_pssm_score_for_seq(heavy_numbering, heavy_mut, mask_heavy,
-                                          chain_type=heavy_chain,
-                                          debug_prefix=f"[DEBUG][Mut{i}][H] ")
-        if light_chain:
-            sc_l = compute_pssm_score_for_seq(light_numbering, light_mut, mask_light,
-                                              chain_type=light_chain,
-                                              debug_prefix=f"[DEBUG][Mut{i}][L] ")
+        # Compute light chain BLOSUM score, chain-aware
+        if light_chain == 'K':
+            score_l = compute_blosum_score_for_chain(mut_light_numbering, mask_light, GLOBAL_KAPPA_MAP)
+        elif light_chain == 'L':
+            score_l = compute_blosum_score_for_chain(mut_light_numbering, mask_light, GLOBAL_LAMBDA_MAP)
         else:
-            sc_l = 0.0
+            score_l = 0.0
 
-        pssm_scores[i] = sc_h + sc_l
+        blosum_scores[i] = score_h + score_l
         if DEBUG:
-            print(f"[DEBUG] Mutant {i}: PSSM_heavy={sc_h:.4g}, PSSM_light={sc_l:.4g}, total={pssm_scores[i]:.4g}")
+            print(f"[DEBUG] Mutant {i}: BLOSUM_heavy={score_h:.4g}, BLOSUM_light={score_l:.4g}, total={blosum_scores[i]:.4g}")
 
-    summary_records = []
+    # Correlations + plotting
+    if target == 'napi2b':
+        target_name = 'AZ-tg1'
+    elif target == 'sonic':
+        target_name = 'AZ-tg2'
+    else:
+        target_name = target
 
-    # PSSM vs. KD
-    τ, pτ = kendalltau(pssm_scores, KD_vals)
-    ρ, pρ = spearmanr(pssm_scores, KD_vals)
+    plot_path = os.path.join(results_dir, f"{GLOBAL_DATA}_globalBLOSUM{BLOSUM_NUM}_vs_affinity_{target_name}.pdf")
+    plot_prop_correlation(blosum_scores, KD_vals, f"BLOSUM{BLOSUM_NUM}", plot_path)
+    print(f"[{target}] Saved BLOSUM{BLOSUM_NUM} vs KD plot → {plot_path}")
+
+    # Summary stats
+    τ, pτ = kendalltau(blosum_scores, KD_vals)
+    ρ, pρ = spearmanr(blosum_scores, KD_vals)
     sτ, sρ = get_significance(pτ), get_significance(pρ)
 
-    if target == 'AZtg1':
-        target_name = 'AZ-tg1'
-    elif target == 'AZtg2':
-        target_name = 'AZ-tg2'
-    else:
-        target_name = target
-
-    plot_path = os.path.join(results_dir, f"uPSSM_vs_affinity_{target_name}_{EPOCH_NUM}.pdf")
-    plot_prop_correlation(pssm_scores, KD_vals, "PSSM", plot_path)
-    print(f"[{target}] Saved PSSM vs KD plot → {plot_path}")
-
-    if target == 'AZtg1':
-        target_name = 'AZ-tg1'
-    elif target == 'AZtg2':
-        target_name = 'AZ-tg2'
-    else:
-        target_name = target
-
-
-    summary_records.append({
+    summary_record = {
         'dataset':      target_name,
-        'metric':       "PSSM",
+        'metric':       f"BLOSUM{BLOSUM_NUM}",
         'spearman_rho': ρ,
         'p_spearman':   pρ,
         'spearman_sig': sρ,
         'kendall_tau':  τ,
         'p_kendall':    pτ,
         'kendall_sig':  sτ
-    })
+    }
 
-    # ROC‐AUC if binder labels provided
+    # ROC‐AUC if requested
     if compute_auc and binder_labels is not None and len(binder_labels) == N:
         try:
-            auc_score = roc_auc_score(binder_labels, pssm_scores)
-            fpr, tpr, _ = roc_curve(binder_labels, pssm_scores)
+            from sklearn.metrics import roc_auc_score, roc_curve
+            auc_score = roc_auc_score(binder_labels, blosum_scores)
+            fpr, tpr, _ = roc_curve(binder_labels, blosum_scores)
             plt.figure(figsize=(6,6))
             plt.plot(fpr, tpr, label=f'AUC = {auc_score:.2f}')
             plt.plot([0,1],[0,1],'k--', label='Chance')
             plt.xlabel('False Positive Rate', fontsize=14, fontweight='bold')
             plt.ylabel('True Positive Rate', fontsize=14, fontweight='bold')
-            plt.title(f'ROC (PSSM) for {target}', fontsize=16, fontweight='bold')
+            plt.title(f'ROC (BLOSUM90) for {target_name}', fontsize=16, fontweight='bold')
             plt.legend(loc='lower right')
             plt.grid(True)
             roc_path = plot_path.replace('.pdf', '_roc_auc.pdf')
@@ -591,46 +558,35 @@ def evaluate_dataset_with_pssm(target: str, results_dir: str, compute_auc: bool=
             print(f"[{target}] Error computing ROC AUC: {e}")
 
     # Save summary CSV for this dataset
-    df_sum = pd.DataFrame(summary_records)
-    csv_path = os.path.join(results_dir, f"u{target_name}_pssm_correlation_{EPOCH_NUM}.csv")
+    df_sum = pd.DataFrame([summary_record])
+    csv_path = os.path.join(results_dir, f"{GLOBAL_DATA}_globalBLOSUM{BLOSUM_NUM}_correlation_{target_name}.csv")
     df_sum.to_csv(csv_path, index=False)
     print(f"[{target}] Saved summary CSV → {csv_path}")
 
-    return summary_records
+    return summary_record
 
 # ─────────────────────────────────────────────────────────────────────────────
 #                                   MAIN
 # ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    # Define your datasets
-    dataset1 = ['absci_her2_zs','absci_her2_sc','nature_hel','nature_il7','nature_her2','AZtg1','AZtg2']
+    # Define your datasets exactly as in the original scripts
+    dataset1 = ['absci_her2_zs','absci_her2_sc','nature_hel','nature_il7','nature_her2','napi2b','sonic']
     dataset2 = ['c5','il17a','tslp','fxi','il36r','tnfrsf9','acvr2b']
     complex_list = dataset1 + dataset2
 
     all_summary = []
 
     for target in complex_list:
-        summary = evaluate_dataset_with_pssm(target, RESULTS_DIR, compute_auc=COMPUTE_AUC)
-        all_summary.extend(summary)
+        summary = evaluate_dataset_with_global_blosum(target, RESULTS_DIR, compute_auc=False)
+        all_summary.append(summary)
 
     # Save combined summary
     combined_df = pd.DataFrame(all_summary)
-    combined_df['spearman'] = combined_df.apply(lambda r: f"{r.spearman_rho:.3f}{r.spearman_sig}", axis=1)
-    combined_df['kendall'] = combined_df.apply(lambda r: f"{r.kendall_tau:.3f}{r.kendall_sig}", axis=1)
+    combined_df['spearman'] = combined_df.apply(lambda r: f"{r['spearman_rho']:.3f}{r['spearman_sig']}", axis=1)
+    combined_df['kendall']  = combined_df.apply(lambda r: f"{r['kendall_tau']:.3f}{r['kendall_sig']}", axis=1)
 
     out = combined_df[['dataset','metric','spearman','p_spearman','kendall','p_kendall']]
-    all_csv = os.path.join(RESULTS_DIR, f"uall_datasets_pssm_summary_{EPOCH_NUM}.csv")
+    all_csv = os.path.join(RESULTS_DIR, f"{GLOBAL_DATA}_all_datasets_globalBLOSUM{BLOSUM_NUM}_summary.csv")
     out.to_csv(all_csv, index=False)
     print(f"Saved combined summary → {all_csv}")
-
-    # Pivot tables
-    spearman_table = out.pivot(index='metric', columns='dataset', values='spearman')
-    kendall_table  = out.pivot(index='metric', columns='dataset', values='kendall')
-    spearman_csv   = os.path.join(RESULTS_DIR, f"uall_datasets_spearman_summary_{EPOCH_NUM}.csv")
-    kendall_csv    = os.path.join(RESULTS_DIR, f"uall_datasets_kendall_summary_{EPOCH_NUM}.csv")
-    spearman_table.to_csv(spearman_csv)
-    kendall_table.to_csv(kendall_csv)
-    print(f"Saved Spearman pivot → {spearman_csv}")
-    print(f"Saved Kendall pivot  → {kendall_csv}")
-

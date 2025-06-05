@@ -360,7 +360,7 @@ def plot_correlation_scatter(
     # Determine the plot label based on the complex name
     if config["complex_name"] == 'AZtg3':
         plot_label = r'$DDG$'
-    elif config['complex_name'] == 'AZtg1':
+    elif config['complex_name'] == 'napi2b':
         plot_label = r'$-\log(qAC50)$'
     elif config['complex_name'] == 'nature_il7':
         plot_label = r'$-\log(IC50)$'
@@ -1021,10 +1021,10 @@ print(f"\nResults saved to: {output_path}")
 ##########################################################################################################
 
 
-dataset1 = ['absci_her2_zs', 'absci_her2_sc', 'nature_hel', 'nature_il7', 'nature_her2', 'AZtg1', 'aztg2'] #, 'AZtg3'
+dataset1 = ['absci_her2_zs', 'absci_her2_sc', 'nature_hel', 'nature_il7', 'nature_her2', 'napi2b', 'sonic'] #, 'AZtg3'
 dataset2 = ['c5', 'il17a', 'tslp', 'fxi', 'il36r', 'tnfrsf9', 'acvr2b']
-dataset3 = ['absci_her2_zs', 'absci_her2_sc', 'nature_hel', 'nature_il7', 'nature_her2', 'AZtg1', 'aztg2']
-# dataset3 = ['AZtg1']
+dataset3 = ['absci_her2_zs', 'absci_her2_sc', 'nature_hel', 'nature_il7', 'nature_her2', 'napi2b', 'sonic']
+# dataset3 = ['napi2b']
 dataset4 = ['acvr2b']
 dataset5 = ['absci_her2_sc', 'c5', 'il17a', 'tslp', 'fxi', 'il36r', 'tnfrsf9', 'acvr2b']
 

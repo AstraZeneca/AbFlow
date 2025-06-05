@@ -361,7 +361,7 @@ def plot_correlation_scatter(
     # Determine the plot label based on the complex name
     if config["complex_name"] == 'AZtg3':
         plot_label = r'$DDG$'
-    elif config['complex_name'] == 'AZtg1':
+    elif config['complex_name'] == 'napi2b':
         plot_label = r'$-\log(qAC50)$'
     elif config['complex_name'] == 'nature_il7':
         plot_label = r'$-\log(IC50)$'
@@ -801,82 +801,6 @@ def compute_metrics_on_mask(seq_tensors, mask, parent_seq):
 
     return dist_blosum, mean_hydro, mean_rigid
 
-# 5) Wrapper to run all three and plot/save each
-
-# def evaluate_mutated_pdb_with_props(*args, **kwargs):
-#     # run your existing pipeline
-#     evaluate_mutated_pdb(*args, **kwargs)
-
-#     parent_info  = kwargs['parent_info']
-#     mutated_info = kwargs['mutated_info']
-#     target       = kwargs['target']
-
-#     # rebuild parent sequence
-#     p_df      = pd.read_csv(parent_info)
-#     heavy     = p_df["Heavy"].iloc[0]
-#     light     = p_df["Light"].iloc[0]
-#     parent_seq = heavy + light if isinstance(light, str) else heavy
-
-#     # regenerate sequences, mask, KD
-#     data = generate_sequences_and_kd(
-#         parental_csv=parent_info,
-#         target_csv=mutated_info,
-#         aa_seq=parent_seq,
-#         heavy_seq=heavy,
-#         light_seq=light,
-#         target_name=target,
-#         compute_auc=False
-#     )
-#     seqs = data['sequences']
-#     mask = data['masks']
-#     KD   = np.array(data['KD_values'])
-
-#     # compute all three
-#     d_blosum, h_mean, r_mean = compute_metrics_on_mask(seqs, mask, parent_seq)
-
-#     # bundle for iteration
-#     methods = {
-#         f"blosum{BLOSUM_NUM}_sim": (d_blosum,  f"BLOSUM{BLOSUM_NUM} sim."),
-#         "hydrophobicity": (h_mean,   "Mean hydrophobicity"),
-#         "rigidity":       (r_mean,   "Mean rigidity")
-#     }
-
-#     for name, (vals, label) in methods.items():
-#         # correlations
-#         rho, p_rho = spearmanr(vals, KD)
-#         tau, p_tau = kendalltau(vals, KD)
-#         sig_rho    = get_significance(p_rho)
-#         sig_tau    = get_significance(p_tau)
-
-#         print(f"[{target}][{name}] Spearman ρ = {rho:.3f}{sig_rho} (p={p_rho:.2e})")
-#         print(f"[{target}][{name}] Kendall   τ = {tau:.3f}{sig_tau} (p={p_tau:.2e})")
-
-#         # plot
-#         plt.figure(figsize=(6,6))
-#         plt.scatter(vals, KD, alpha=0.7)
-#         # legend
-#         red = mpatches.Patch(color='red',
-#             label=f"Kendall τ: {tau:.2f}{sig_tau}")
-#         blue = mpatches.Patch(color='blue',
-#             label=f"Spearman ρ: {rho:.2f}{sig_rho}")
-#         leg = plt.legend(handles=[red, blue],
-#                          loc='upper left',
-#                          handlelength=0,
-#                          handletextpad=0,
-#                          fancybox=True,
-#                          fontsize=12)
-#         for h in leg.legend_handles: h.set_visible(False)
-
-#         plt.xlabel(label,   fontsize=14, fontweight='bold')
-#         plt.ylabel(r"$-\log(K_D)$", fontsize=14, fontweight='bold')
-#         plt.grid(linestyle='--', alpha=0.5)
-#         plt.tight_layout()
-
-#         path = f"{results_dir}/{name}_vs_affinity_{target}_{file_prefix}_{epoch_num}.pdf"
-#         plt.savefig(path, bbox_inches='tight')
-#         plt.close()
-#         print(f"[{target}] {name} plot ➔ {path}")
-
 
 def plot_prop_correlation(x, y, xlabel, save_path):
     τ, pτ = kendalltau(x, y)
@@ -952,6 +876,15 @@ def evaluate_mutated_pdb_with_props(*args, **kwargs):
         'rigidity':         (mr, "Mean rigidity"),
     }
 
+    if target == 'napi2b':
+        target_name = 'AZ-tg1'
+    elif target == 'sonic':
+        target_name = 'AZ-tg2'
+    else:
+        target_name = target
+
+
+
     # collect stats to return
     stats = []
     for name, (vals, label) in methods.items():
@@ -960,13 +893,13 @@ def evaluate_mutated_pdb_with_props(*args, **kwargs):
         sτ, sρ = get_significance(pτ), get_significance(pρ)
 
         # plot as before
-        path = f"{results_dir}/j{name}_vs_affinity_{target}_{file_prefix}_{epoch_num}.pdf"
+        path = f"{results_dir}/j{name}_vs_affinity_{target_name}_{file_prefix}_{epoch_num}.pdf"
         plot_prop_correlation(vals, KD, label, path)
-        print(f"[{target}] saved {name} plot → {path}")
+        print(f"[{target_name}] saved {name} plot → {path}")
 
         # append to stats
         stats.append({
-            'target':         target,
+            'target':         target_name,
             'metric':         name,
             'spearman_rho':   ρ,
             'p_spearman':     pρ,
@@ -1191,11 +1124,6 @@ def evaluate_mutated_pdb_with_blosum(*args, **kwargs):
 
 
 
-
-
-
-
-
 def process_pdb_to_data_dict(pdb_file, heavy_chain_id, light_chain_id, antigen_chain_ids, scheme):
     """Process PDB file into input data dictionary."""
     # Prepare output path for the fixed PDB
@@ -1356,10 +1284,10 @@ def get_blosum45():
 ##########################################################################################################
 
 
-dataset1 = ['absci_her2_zs', 'absci_her2_sc', 'nature_hel', 'nature_il7', 'nature_her2', 'AZtg1', 'AZtg2'] #, 'AZtg3'
+dataset1 = ['absci_her2_zs', 'absci_her2_sc', 'nature_hel', 'nature_il7', 'nature_her2', 'napi2b', 'sonic'] #, 'AZtg3'
 dataset2 = ['c5', 'il17a', 'tslp', 'fxi', 'il36r', 'tnfrsf9', 'acvr2b']
-dataset3 = ['absci_her2_zs', 'absci_her2_sc', 'nature_hel', 'nature_il7', 'nature_her2', 'AZtg1', 'AZtg2']
-# dataset3 = ['AZtg1']
+dataset3 = ['absci_her2_zs', 'absci_her2_sc', 'nature_hel', 'nature_il7', 'nature_her2', 'napi2b', 'sonic']
+# dataset3 = ['napi2b']
 dataset4 = ['acvr2b']
 dataset5 = ['absci_her2_sc', 'c5', 'il17a', 'tslp', 'fxi', 'il36r', 'tnfrsf9', 'acvr2b']
 

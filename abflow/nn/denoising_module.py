@@ -555,7 +555,7 @@ class DenoisingModule(nn.Module):
                 res_type_prob, pred_vf_dict["sequence_vf"], d_t
             )
             
-            updated_res_type_prob = self.clamp_to_simplex(updated_res_type_prob) #self._sequence_flow.nn_to_manifold(updated_res_type_prob) #
+            updated_res_type_prob = self._sequence_flow.nn_to_manifold(updated_res_type_prob) #self.clamp_to_simplex(updated_res_type_prob)
 
             res_type_prob = apply_mask(
                 res_type_prob, updated_res_type_prob, redesign_mask
@@ -668,7 +668,7 @@ class DenoisingModule(nn.Module):
     ):
 
         # Compute probs
-        pred_res_type_prob = self.clamp_to_simplex(pred_feature_dict["res_type_prob"]) #F.softmax(pred_feature_dict["res_type_prob"], dim=-1) #self._sequence_flow.nn_to_manifold(pred_feature_dict["res_type_prob"])   #
+        pred_res_type_prob = self._sequence_flow.nn_to_manifold(pred_feature_dict["res_type_prob"])   #F.softmax(pred_feature_dict["res_type_prob"], dim=-1)
         res_type = torch.argmax(pred_res_type_prob, dim=-1)
 
         # 6D to 3D
