@@ -38,16 +38,15 @@ rcParams['font.weight'] = 'bold'
 DEBUG = True  # Set to False to disable debug prints
 
 # Correct PSSM file paths
-GLOBAL_DATA = 'OAS'
-HEAVY_PSSM_PATH  = "/home/jovyan/abflow-datavol/github_repos/AApull_request/AbFlow/scripts/analysis/OAS-Human_HeavyPWM_frequencypssm.txt"
-KAPPA_PSSM_PATH  = "/home/jovyan/abflow-datavol/github_repos/AApull_request/AbFlow/scripts/analysis/OAS-Human_KappaPWM_frequencypssm.txt"
-LAMBDA_PSSM_PATH = "/home/jovyan/abflow-datavol/github_repos/AApull_request/AbFlow/scripts/analysis/OAS-Human_LambdaPWM_frequencypssm.txt"
+# GLOBAL_DATA = 'OAS'
+# HEAVY_PSSM_PATH  = "/home/jovyan/abflow-datavol/github_repos/AApull_request/AbFlow/scripts/analysis/OAS-Human_HeavyPWM_frequencypssm.txt"
+# KAPPA_PSSM_PATH  = "/home/jovyan/abflow-datavol/github_repos/AApull_request/AbFlow/scripts/analysis/OAS-Human_KappaPWM_frequencypssm.txt"
+# LAMBDA_PSSM_PATH = "/home/jovyan/abflow-datavol/github_repos/AApull_request/AbFlow/scripts/analysis/OAS-Human_LambdaPWM_frequencypssm.txt"
 
-# GLOBAL_DATA = 'SABDAB'
-# HEAVY_PSSM_PATH  = "/home/jovyan/abflow-datavol/github_repos/AApull_request/AbFlow/scripts/analysis/sabdab_heavy_pssm.csv"
-# KAPPA_PSSM_PATH  = "/home/jovyan/abflow-datavol/github_repos/AApull_request/AbFlow/scripts/analysis/sabdab_kappa_pssm.csv"
-# LAMBDA_PSSM_PATH = "/home/jovyan/abflow-datavol/github_repos/AApull_request/AbFlow/scripts/analysis/sabdab_lambda_pssm.csv"
-
+GLOBAL_DATA = 'SABDAB'
+HEAVY_PSSM_PATH  = "/home/jovyan/abflow-datavol/github_repos/AApull_request/AbFlow/scripts/analysis/sabdab_heavy_pssm.csv"
+KAPPA_PSSM_PATH  = "/home/jovyan/abflow-datavol/github_repos/AApull_request/AbFlow/scripts/analysis/sabdab_kappa_pssm.csv"
+LAMBDA_PSSM_PATH = "/home/jovyan/abflow-datavol/github_repos/AApull_request/AbFlow/scripts/analysis/sabdab_lambda_pssm.csv"
 
 # Paths related to AbFlow (for potential future use)
 ROOT_DIR            = "/home/jovyan/abflow-datavol/"
@@ -251,17 +250,21 @@ def compute_pssm_score_for_seq(numbering: list, seq: str, mask: np.ndarray,
 
         
         # Build pos_key exactly the same type as PSSM keys:
-        if str(icode).strip() == "":
-            pos_key = num        # integer index (no insertion)
+        if GLOBAL_DATA == 'OAS':
+            if str(icode).strip() == "":
+                pos_key = num        # integer index (no insertion)
+            else:
+                pos_key = f"{num}{icode}".strip()  # string (e.g. "25A")
         else:
-            pos_key = f"{num}{icode}".strip()  # string (e.g. "25A")
+            pos_key = f"{num}{icode}"
+            
         mut_aa = seq[idx]
-
 
         # Skip gap positions:
         if mut_aa == '-':
             continue
         val = 0.0
+
         if chain_type == "H":
             if pos_key in heavy_pssm and mut_aa in heavy_pssm[pos_key]:
                 print(idx, num, icode, aa_char, mut_aa, pos_key, heavy_pssm[pos_key])
